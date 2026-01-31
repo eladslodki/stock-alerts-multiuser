@@ -27,17 +27,27 @@ login_manager.login_view = 'login_page'
 def load_user(user_id):
     return User.get_by_id(int(user_id))
 
-# Initialize database schema
-try:
-    db.init_schema()
-    logger.info("Database initialized successfully")
-except Exception as e:
-    logger.error(f"Database initialization failed: {e}")
+# Initialize database schema in background
+def init_db_and_scheduler():
+    try:
+        db.init_schema()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+    
+    # Start alert processor
+    alert_processor.start()
+
+# Run after first request, not at startup
+@app.before_request
+def before_first_request():
+    if not hasattr(app, '_initialized'):
+        app._initialized = True
+        from threading import Thread
+        Thread(target=init_db_and_scheduler, daemon=True).start()
 
 # Gunicorn will run the app, this is only for local testing
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
-
-# Start alert processor
-alert_processor.start()
+    
