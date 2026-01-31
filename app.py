@@ -34,5 +34,10 @@ try:
 except Exception as e:
     logger.error(f"Database initialization failed: {e}")
 
+if __name__ == '__main__':
+    port = int(os.getenv('PORT', 8080))
+    logger.info(f"Starting on 0.0.0.0:{port}")
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    
 # Start alert processor
 alert_processor.start()
