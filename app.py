@@ -27,6 +27,55 @@ login_manager.login_view = 'login_page'
 def load_user(user_id):
     return User.get_by_id(int(user_id))
 
+@app.route('/')
+def index():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login_page'))
+
+@app.route('/health')
+def health():
+    return jsonify({'status': 'ok'}), 200
+
+@app.route('/login')
+def login_page():
+    html = """<!DOCTYPE html>
+<html>
+<head><title>Login</title></head>
+<body><h1>Login Page - Add full HTML here</h1></body>
+</html>"""
+    return render_template_string(html)
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    html = """<!DOCTYPE html>
+<html>
+<head><title>Dashboard</title></head>
+<body><h1>Dashboard - Add full HTML here</h1></body>
+</html>"""
+    return render_template_string(html)
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+    
+    user = User.verify_password(email, password)
+    
+    if not user:
+        return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
+    
+    login_user(user)
+    return jsonify({'success': True})
+
+@app.route('/api/alerts', methods=['GET'])
+@login_required
+def get_alerts():
+    alerts = Alert.get_user_alerts(current_user.id)
+    return jsonify({'success': True, 'alerts': alerts})
+
 # Initialize database schema in background
 def init_db_and_scheduler():
     try:
@@ -50,4 +99,3 @@ def before_first_request():
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
-    
