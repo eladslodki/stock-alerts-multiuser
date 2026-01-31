@@ -34,10 +34,10 @@ try:
 except Exception as e:
     logger.error(f"Database initialization failed: {e}")
 
+# Gunicorn will run the app, this is only for local testing
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 8080))
-    logger.info(f"Starting on 0.0.0.0:{port}")
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
-    
+    app.run(host='0.0.0.0', port=port)
+
 # Start alert processor
 alert_processor.start()
