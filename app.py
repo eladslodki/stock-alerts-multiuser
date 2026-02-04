@@ -725,6 +725,10 @@ def bitcoin_scanner_page():
                 await fetch('/api/logout');
                 window.location.href = '/login';
             }
+            // Initialize
+            loadTickers();
+            loadAlerts();
+            setInterval(loadAlerts, 30000); // Refresh every 30 seconds
         </script>
     </body>
     </html>
