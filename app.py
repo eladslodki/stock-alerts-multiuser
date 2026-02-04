@@ -43,16 +43,242 @@ def health():
 
 @app.route('/login')
 def login_page():
-    return """<!DOCTYPE html><html><body><h1>Login - UI Goes Here</h1></body></html>"""
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Login - Stock Alerts</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body { font-family: Arial; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                   min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; }
+            .container { background: white; padding: 40px; border-radius: 10px; max-width: 400px; width: 90%; }
+            h1 { text-align: center; color: #333; }
+            input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
+            button { width: 100%; padding: 12px; background: #667eea; color: white; border: none; 
+                     border-radius: 5px; cursor: pointer; font-size: 16px; }
+            button:hover { background: #5568d3; }
+            .message { padding: 10px; margin: 10px 0; border-radius: 5px; }
+            .error { background: #fee; color: #c33; }
+            .success { background: #efe; color: #3c3; }
+            .link { text-align: center; margin-top: 20px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📊 Stock Alerts</h1>
+            <div id="message"></div>
+            <input type="email" id="email" placeholder="Email" />
+            <input type="password" id="password" placeholder="Password" />
+            <button onclick="login()">Login</button>
+            <div class="link">
+                Don't have an account? <a href="/register">Register</a>
+            </div>
+        </div>
+        <script>
+            async function login() {
+                const email = document.getElementById('email').value;
+                const password = document.getElementById('password').value;
+                const msgEl = document.getElementById('message');
+                
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const data = await res.json();
+                if (data.success) {
+                    window.location.href = '/dashboard';
+                } else {
+                    msgEl.innerHTML = '<div class="message error">' + data.error + '</div>';
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return render_template_string(html)
 
 @app.route('/register')  
 def register_page():
-    return """<!DOCTYPE html><html><body><h1>Register - UI Goes Here</h1></body></html>"""
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Register - Stock Alerts</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body { font-family: Arial; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                   min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; }
+            .container { background: white; padding: 40px; border-radius: 10px; max-width: 400px; width: 90%; }
+            h1 { text-align: center; color: #333; }
+            input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
+            button { width: 100%; padding: 12px; background: #667eea; color: white; border: none; 
+                     border-radius: 5px; cursor: pointer; font-size: 16px; }
+            button:hover { background: #5568d3; }
+            .message { padding: 10px; margin: 10px 0; border-radius: 5px; }
+            .error { background: #fee; color: #c33; }
+            .success { background: #efe; color: #3c3; }
+            .link { text-align: center; margin-top: 20px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Create Account</h1>
+            <div id="message"></div>
+            <input type="email" id="email" placeholder="Email" />
+            <input type="password" id="password" placeholder="Password (min 6 chars)" />
+            <button onclick="register()">Register</button>
+            <div class="link">
+                Already have an account? <a href="/login">Login</a>
+            </div>
+        </div>
+        <script>
+            async function register() {
+                const email = document.getElementById('email').value;
+                const password = document.getElementById('password').value;
+                const msgEl = document.getElementById('message');
+                
+                if (password.length < 6) {
+                    msgEl.innerHTML = '<div class="message error">Password must be at least 6 characters</div>';
+                    return;
+                }
+                
+                const res = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const data = await res.json();
+                if (data.success) {
+                    msgEl.innerHTML = '<div class="message success">Registration successful! Redirecting to login...</div>';
+                    setTimeout(() => window.location.href = '/login', 2000);
+                } else {
+                    msgEl.innerHTML = '<div class="message error">' + data.error + '</div>';
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return render_template_string(html)
 
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    return """<!DOCTYPE html><html><body><h1>Dashboard - UI Goes Here</h1></body></html>"""
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Dashboard - Stock Alerts</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body { font-family: Arial; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                   min-height: 100vh; margin: 0; padding: 20px; }
+            .container { max-width: 800px; margin: 0 auto; }
+            .header { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; 
+                      display: flex; justify-content: space-between; align-items: center; }
+            .card { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+            h1, h2 { margin: 0; color: #333; }
+            input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; 
+                    border-radius: 5px; box-sizing: border-box; }
+            button { padding: 12px 20px; background: #667eea; color: white; border: none; 
+                     border-radius: 5px; cursor: pointer; }
+            button:hover { background: #5568d3; }
+            .logout { background: #e74c3c; }
+            .logout:hover { background: #c0392b; }
+            .alert-item { padding: 15px; background: #f9f9f9; margin: 10px 0; border-radius: 5px; 
+                          display: flex; justify-content: space-between; align-items: center; }
+            .delete-btn { background: #e74c3c; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <div>
+                    <h1>📊 Stock Alerts</h1>
+                    <p id="userEmail"></p>
+                </div>
+                <button class="logout" onclick="logout()">Logout</button>
+            </div>
+            
+            <div class="card">
+                <h2>Create New Alert</h2>
+                <input type="text" id="ticker" placeholder="Ticker (e.g., AAPL)" maxlength="5" />
+                <input type="number" id="target" placeholder="Target Price" step="0.01" />
+                <button onclick="addAlert()">Add Alert</button>
+                <div id="msg"></div>
+            </div>
+            
+            <div class="card">
+                <h2>My Alerts</h2>
+                <div id="alerts">Loading...</div>
+            </div>
+        </div>
+        
+        <script>
+            async function loadAlerts() {
+                const res = await fetch('/api/alerts');
+                const data = await res.json();
+                
+                if (!data.success) return;
+                
+                const active = data.alerts.filter(a => a.active);
+                const alertsEl = document.getElementById('alerts');
+                
+                if (active.length === 0) {
+                    alertsEl.innerHTML = '<p>No active alerts. Create one above!</p>';
+                    return;
+                }
+                
+                alertsEl.innerHTML = active.map(a => `
+                    <div class="alert-item">
+                        <div>
+                            <strong>${a.ticker}</strong> ${a.direction === 'up' ? '↑' : '↓'}<br>
+                            Current: $${(a.current_price || 0).toFixed(2)} → Target: $${a.target_price.toFixed(2)}
+                        </div>
+                        <button class="delete-btn" onclick="deleteAlert(${a.id})">Delete</button>
+                    </div>
+                `).join('');
+            }
+            
+            async function addAlert() {
+                const ticker = document.getElementById('ticker').value.toUpperCase();
+                const target = parseFloat(document.getElementById('target').value);
+                
+                const res = await fetch('/api/alerts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ticker, target_price: target })
+                });
+                
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('ticker').value = '';
+                    document.getElementById('target').value = '';
+                    loadAlerts();
+                }
+            }
+            
+            async function deleteAlert(id) {
+                await fetch(`/api/alerts/${id}`, { method: 'DELETE' });
+                loadAlerts();
+            }
+            
+            async function logout() {
+                await fetch('/api/logout');
+                window.location.href = '/login';
+            }
+            
+            loadAlerts();
+            setInterval(loadAlerts, 30000);
+        </script>
+    </body>
+    </html>
+    """
+    return render_template_string(html)
 
 @app.route('/api/register', methods=['POST'])
 def api_register():
