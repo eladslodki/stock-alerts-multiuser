@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 class BitcoinScanner:
     """
-    Scan Bitcoin blockchain for large transactions
+    Scan Bitcoina blockchain for large transactions
     Uses Blockchain.info API (free, no API key needed)
     """
     
