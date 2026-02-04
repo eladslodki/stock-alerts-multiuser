@@ -796,8 +796,26 @@ def api_logout():
 @app.route('/api/alerts', methods=['GET'])
 @login_required
 def get_alerts():
-    alerts = Alert.get_user_alerts(current_user.id)
-    return jsonify({'success': True, 'alerts': alerts})
+    """Get current user's alerts"""
+    try:
+        alerts = Alert.get_user_alerts(current_user.id)
+        
+        # FIX: Convert database rows to dict if needed
+        alert_list = []
+        for alert in alerts:
+            if isinstance(alert, dict):
+                alert_list.append(alert)
+            else:
+                # Handle case where alert is a database row object
+                alert_list.append(dict(alert))
+        
+        logger.info(f"Returning {len(alert_list)} alerts for user {current_user.id}")
+        return jsonify({'success': True, 'alerts': alert_list})
+    
+    except Exception as e:
+        logger.error(f"Error getting alerts for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': 'Failed to load alerts'}), 500
+
 
 @app.route('/api/alerts', methods=['POST'])
 @login_required
