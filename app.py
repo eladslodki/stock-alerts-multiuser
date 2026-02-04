@@ -300,7 +300,12 @@ def dashboard():
                 color: rgba(255,255,255,0.4);
         }
             
-        .autocomplete-dropdown {
+        .autocomplete-container {
+                position: relative;
+                margin-bottom: 15px;
+        }
+
+       .autocomplete-dropdown {
             position: absolute;
             top: 100%;
             left: 0;
