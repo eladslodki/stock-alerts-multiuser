@@ -746,7 +746,7 @@ def dashboard():
 </body>
 </html>
 """
-return render_template_string(html)
+    return render_template_string(html)
 
 @app.route('/api/register', methods=['POST'])
 def api_register():
