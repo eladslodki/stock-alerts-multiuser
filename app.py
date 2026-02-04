@@ -287,17 +287,241 @@ def dashboard():
             border-radius: 8px;
             color: #fff;
             font-size: 15px;
+            transition: all 0.3s;
+        }
+            
+        input:focus, select:focus {
+                outline: none;
+                border-color: #64ffda;
+                background: rgba(255,255,255,0.15);
+        }
+            
+        input::placeholder {
+                color: rgba(255,255,255,0.4);
+        }
+            
+        .autocomplete-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 300px;
+            overflow-y: auto;
+            background: rgba(30,30,46,0.98);
+            border: 1px solid rgba(100,255,218,0.3);
+            border-radius: 8px;
+            margin-top: 5px;
+            z-index: 1000;
+            display: none;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+        }
+            
+        .autocomplete-item {
+            padding: 12px 15px;
+            cursor: pointer;
+            transition: background 0.2s;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+         }
+            
+        .autocomplete-item:hover {
+            background: rgba(100,255,218,0.1);
+         }
+            
+        .ticker-symbol {
+            font-weight: 600;
+            color: #64ffda;
+         }
+            
+         .ticker-name {
+            font-size: 13px;
+            color: #888;
+            margin-left: 10px;
+         }
+            
+        .ticker-type {
+            float: right;
+            font-size: 11px;
+            padding: 2px 8px;
+            background: rgba(100,255,218,0.2);
+            border-radius: 4px;
+            color: #64ffda;
+        }
+            
+        button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 15px;
+            transition: transform 0.2s;
+            margin-top: 10px;
+        }
+            
+        button:hover {
+            transform: translateY(-2px);
+        }
+            
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+            
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-top:15px;
+            font-size: 14px;
+        }
+        .success {
+            background: rgba(76,175,80,0.2);
+            border: 1px solid rgba(76,175,80,0.4);
+            color: #4caf50;
+        }
+        
+        .error {
+            background: rgba(244,67,54,0.2);
+            border: 1px solid rgba(244,67,54,0.4);
+            color: #f44336;
+        }
+        
+        .alert-item {
+            background: rgba(255,255,255,0.03);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            border-left: 4px solid #64ffda;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s;
+        }
+        
+        .alert-item:hover {
+            background: rgba(255,255,255,0.06);
+            transform: translateX(5px);
+        }
+        
+        .alert-info {
+            flex: 1;
+        }
+        
+        .alert-ticker {
+            font-size: 24px;
+            font-weight: 700;
+            color: #64ffda;
+            margin-bottom: 8px;
+        }
+        
+        .alert-direction {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        
+        .direction-up {
+            background: rgba(76,175,80,0.2);
+            color: #4caf50;
+        }
+        
+        .direction-down {
+            background: rgba(244,67,54,0.2);
+            color: #f44336;
+        }
+        
+        .alert-prices {
+            font-size: 14px;
+            color: #aaa;
+            margin-top: 5px;
+        }
+        
+        .current-price {
+            color: #fff;
+            font-weight: 600;
+        }
+        
+        .target-price {
+            color: #ffc107;
+            font-weight: 600;
+        }
+        
+        .alert-status {
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 15px;
+        }
+        
+        .status-active {
+            background: rgba(33,150,243,0.2);
+            color: #2196f3;
+        }
+        
+        .status-triggered {
+            background: rgba(255,193,7,0.2);
+            color: #ffc107;
+        }
+        
+        .delete-btn {
+            padding: 10px 20px;
+            background: rgba(244,67,54,0.2);
+            border: 1px solid rgba(244,67,54,0.3);
+            color: #f44336;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.3s;
+            width: auto;
+            margin: 0;
+        }
+        
+        .delete-btn:hover {
+            background: rgba(244,67,54,0.3);
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #64ffda;
+            font-size: 16px;
+        }
+        
+        .empty {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .spinner {
+            border: 3px solid rgba(100,255,218,0.1);
+            border-top: 3px solid #64ffda;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
-
 <body>
     <div class="container">
         <div class="nav">
             <a href="/dashboard">📊 Stock Alerts</a>
             <a href="/bitcoin-scanner">₿ Bitcoin Scanner</a>
         </div>
-
+        
         <div class="header">
             <div>
                 <h1>📊 Stock Price Alerts</h1>
@@ -305,39 +529,224 @@ def dashboard():
             </div>
             <button class="logout-btn" onclick="logout()">Logout</button>
         </div>
-
+        
         <div class="grid">
             <div class="card">
                 <h2>Create New Alert</h2>
-
-                <label>Stock / Crypto Ticker</label>
-                <input id="tickerInput" placeholder="AAPL, BTC-USD" />
-
+                
+                <div class="autocomplete-container">
+                    <label>Stock / Crypto Ticker</label>
+                    <input 
+                        type="text" 
+                        id="tickerInput" 
+                        placeholder="Search ticker (e.g., AAPL, BTC-USD)" 
+                        autocomplete="off"
+                    />
+                    <div id="autocompleteDropdown" class="autocomplete-dropdown"></div>
+                </div>
+                
                 <label>Target Price ($)</label>
-                <input id="targetPrice" type="number" step="0.01" />
-
-                <button onclick="createAlert()">Create Alert</button>
+                <input type="number" id="targetPrice" placeholder="Enter target price" step="0.01" />
+                
+                <button onclick="createAlert()" id="createBtn">
+                    Create Alert
+                </button>
+                
                 <div id="message"></div>
             </div>
-
+            
             <div class="card">
                 <h2>Your Active Alerts</h2>
-                <div id="alertsList">Loading...</div>
+                <div id="alertsList">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading alerts...
+                    </div>
+                </div>
             </div>
         </div>
     </div>
-
+    
     <script>
-        async function createAlert() {}
+        let allTickers = [];
+        let selectedTicker = null;
+        
+        // Load tickers on page load
+        async function loadTickers() {
+            try {
+                const res = await fetch('/api/tickers');
+                const data = await res.json();
+                if (data.success) {
+                    allTickers = data.tickers;
+                    console.log(`Loaded ${allTickers.length} tickers`);
+                }
+            } catch (error) {
+                console.error('Error loading tickers:', error);
+            }
+        }
+        
+        // Autocomplete functionality
+        const tickerInput = document.getElementById('tickerInput');
+        const dropdown = document.getElementById('autocompleteDropdown');
+        
+        tickerInput.addEventListener('input', function() {
+            const query = this.value.toUpperCase().trim();
+            
+            if (query.length < 1) {
+                dropdown.style.display = 'none';
+                selectedTicker = null;
+                return;
+            }
+            
+            const matches = allTickers.filter(t => 
+                t.symbol.toUpperCase().includes(query) || 
+                t.name.toUpperCase().includes(query)
+            ).slice(0, 10);
+            
+            if (matches.length === 0) {
+                dropdown.style.display = 'none';
+                return;
+            }
+            
+            dropdown.innerHTML = matches.map(ticker => `
+                <div class="autocomplete-item" onclick="selectTicker('${ticker.symbol}', '${ticker.name}')">
+                    <span class="ticker-symbol">${ticker.symbol}</span>
+                    <span class="ticker-name">${ticker.name}</span>
+                    <span class="ticker-type">${ticker.type}</span>
+                </div>
+            `).join('');
+            
+            dropdown.style.display = 'block';
+        });
+        
+        function selectTicker(symbol, name) {
+            selectedTicker = symbol;
+            tickerInput.value = symbol;
+            dropdown.style.display = 'none';
+        }
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!tickerInput.contains(e.target) && !dropdown.contains(e.target)) {
+                dropdown.style.display = 'none';
+            }
+        });
+        
+        async function createAlert() {
+            const ticker = selectedTicker || tickerInput.value.toUpperCase().trim();
+            const target = parseFloat(document.getElementById('targetPrice').value);
+            const msgEl = document.getElementById('message');
+            const btn = document.getElementById('createBtn');
+            
+            if (!ticker || !target) {
+                msgEl.innerHTML = '<div class="message error">Please select a ticker and enter a target price</div>';
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = 'Creating...';
+            
+            try {
+                const res = await fetch('/api/alerts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ticker, target_price: target })
+                });
+                
+                const data = await res.json();
+                
+                if (data.success) {
+                    msgEl.innerHTML = '<div class="message success">✓ Alert created successfully!</div>';
+                    tickerInput.value = '';
+                    document.getElementById('targetPrice').value = '';
+                    selectedTicker = null;
+                    loadAlerts();
+                } else {
+                    msgEl.innerHTML = `<div class="message error">✗ ${data.error}</div>`;
+                }
+            } catch (error) {
+                msgEl.innerHTML = '<div class="message error">✗ Failed to create alert</div>';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Create Alert';
+            }
+        }
+        
+        async function loadAlerts() {
+            const alertsEl = document.getElementById('alertsList');
+            
+            try {
+                const res = await fetch('/api/alerts');
+                const data = await res.json();
+                
+                if (!data.success) {
+                    alertsEl.innerHTML = '<div class="error">Failed to load alerts</div>';
+                    return;
+                }
+                
+                const active = data.alerts.filter(a => a.active);
+                
+                if (active.length === 0) {
+                    alertsEl.innerHTML = '<div class="empty">No active alerts. Create one to get started!</div>';
+                    return;
+                }
+                
+                alertsEl.innerHTML = active.map(alert => {
+                    const direction = alert.direction === 'up' ? 'UP ↑' : 'DOWN ↓';
+                    const directionClass = alert.direction === 'up' ? 'direction-up' : 'direction-down';
+                    
+                    return `
+                        <div class="alert-item">
+                            <div class="alert-info">
+                                <div class="alert-ticker">
+                                    ${alert.ticker}
+                                    <span class="alert-direction ${directionClass}">${direction}</span>
+                                </div>
+                                <div class="alert-prices">
+                                    Current: <span class="current-price">$${(alert.current_price || 0).toFixed(2)}</span>
+                                    →
+                                    Target: <span class="target-price">$${alert.target_price.toFixed(2)}</span>
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span class="alert-status status-active">ACTIVE</span>
+                                <button class="delete-btn" onclick="deleteAlert(${alert.id})">Delete</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+            } catch (error) {
+                console.error('Error loading alerts:', error);
+                alertsEl.innerHTML = '<div class="error">Failed to load alerts</div>';
+            }
+        }
+        
+        async function deleteAlert(id) {
+            if (!confirm('Delete this alert?')) return;
+            
+            try {
+                await fetch(`/api/alerts/${id}`, { method: 'DELETE' });
+                loadAlerts();
+            } catch (error) {
+                console.error('Error deleting alert:', error);
+            }
+        }
+        
         async function logout() {
             await fetch('/api/logout');
             window.location.href = '/login';
         }
+        
+        // Initialize
+        loadTickers();
+        loadAlerts();
+        setInterval(loadAlerts, 30000); // Refresh every 30 seconds
     </script>
 </body>
 </html>
 """
-    return render_template_string(html)
+return render_template_string(html)
 
 @app.route('/api/register', methods=['POST'])
 def api_register():
