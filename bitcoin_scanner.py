@@ -24,71 +24,67 @@ class BitcoinScanner:
             logger.error(f"Error fetching blocks: {e}")
             return []
     
-    @staticmethod
-    def scan_large_transactions(min_btc_amount, time_range_hours):
-        """
-        Scan for Bitcoin transactions above threshold
+@staticmethod
+def scan_large_transactions(min_btc_amount, time_range_hours):
+    """
+    Scan for Bitcoin transactions above threshold
+    
+    Args:
+        min_btc_amount: Minimum BTC amount (float)
+        time_range_hours: Hours to look back (24, 168, 720, 4320)
+    
+    Returns:
+        List of transactions matching criteria
+    """
+    try:
+        url = f"{BitcoinScanner.BASE_URL}/unconfirmed-transactions?format=json"
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        data = response.json()
         
-        Args:
-            min_btc_amount: Minimum BTC amount (float)
-            time_range_hours: Hours to look back (24, 168, 720, 4320)
+        transactions = []
+        min_satoshis = int(min_btc_amount * 100000000)
         
-        Returns:
-            List of transactions matching criteria
-        """
-        try:
-            # Use Blockchain.info unconfirmed transactions endpoint
-            # Note: Full historical scan requires paid API or running own node
-            # This demo uses latest unconfirmed + recent confirmed txs
-            
-            url = f"{BitcoinScanner.BASE_URL}/unconfirmed-transactions?format=json"
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            
-            transactions = []
-            min_satoshis = int(min_btc_amount * 100000000)  # Convert BTC to satoshis
-            cutoff_time = datetime.now() - timedelta(hours=time_range_hours)
-            
-            for tx in data.get('txs', [])[:100]:  # Limit to latest 100
-                try:
-                    # Get transaction details
-                    tx_time = datetime.fromtimestamp(tx.get('time', 0))
+        # FIX: Calculate cutoff time based on time_range_hours parameter
+        cutoff_timestamp = int(time.time()) - (time_range_hours * 3600)
+        
+        for tx in data.get('txs', [])[:100]:
+            try:
+                # FIX: Check if transaction time is within range
+                tx_timestamp = tx.get('time', 0)
+                
+                if tx_timestamp < cutoff_timestamp:
+                    continue  # Skip transactions older than time range
+                
+                total_out = sum(out.get('value', 0) for out in tx.get('out', []))
+                
+                if total_out >= min_satoshis:
+                    inputs = [inp.get('prev_out', {}).get('addr', 'Unknown') 
+                             for inp in tx.get('inputs', [])]
+                    outputs = [out.get('addr', 'Unknown') 
+                              for out in tx.get('out', [])]
                     
-                    if tx_time < cutoff_time:
-                        continue
-                    
-                    # Calculate total output value
-                    total_out = sum(out.get('value', 0) for out in tx.get('out', []))
-                    
-                    if total_out >= min_satoshis:
-                        # Get addresses
-                        inputs = [inp.get('prev_out', {}).get('addr', 'Unknown') 
-                                 for inp in tx.get('inputs', [])]
-                        outputs = [out.get('addr', 'Unknown') 
-                                  for out in tx.get('out', [])]
-                        
-                        transactions.append({
-                            'hash': tx.get('hash'),
-                            'time': tx_time.isoformat(),
-                            'amount_btc': total_out / 100000000,
-                            'amount_usd': (total_out / 100000000) * get_btc_price(),
-                            'from_addresses': inputs[:3],  # Limit display
-                            'to_addresses': outputs[:3],
-                            'num_inputs': len(inputs),
-                            'num_outputs': len(outputs),
-                            'label': None  # Blockchain.info doesn't provide labels
-                        })
-                except Exception as e:
-                    logger.error(f"Error parsing tx: {e}")
-                    continue
-            
-            logger.info(f"Found {len(transactions)} transactions above {min_btc_amount} BTC")
-            return transactions
-            
-        except Exception as e:
-            logger.error(f"Bitcoin scan error: {e}")
-            return []
+                    transactions.append({
+                        'hash': tx.get('hash'),
+                        'time': datetime.fromtimestamp(tx_timestamp).isoformat(),
+                        'amount_btc': total_out / 100000000,
+                        'amount_usd': (total_out / 100000000) * get_btc_price(),
+                        'from_addresses': inputs[:3],
+                        'to_addresses': outputs[:3],
+                        'num_inputs': len(inputs),
+                        'num_outputs': len(outputs),
+                        'label': None
+                    })
+            except Exception as e:
+                logger.error(f"Error parsing tx: {e}")
+                continue
+        
+        logger.info(f"Found {len(transactions)} transactions above {min_btc_amount} BTC in last {time_range_hours} hours")
+        return transactions
+        
+    except Exception as e:
+        logger.error(f"Bitcoin scan error: {e}")
+        return []
 
 def get_btc_price():
     """Get current BTC/USD price"""
