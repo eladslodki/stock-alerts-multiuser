@@ -678,6 +678,7 @@ def dashboard():
             try {
                 const res = await fetch('/api/alerts');
                 const data = await res.json();
+                console.log('Alerts from API:', data);
                 
                 if (!data.success) {
                     alertsEl.innerHTML = '<div class="error">Failed to load alerts</div>';
