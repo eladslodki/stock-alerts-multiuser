@@ -803,24 +803,29 @@ def api_logout():
 def get_alerts():
     """Get current user's alerts"""
     try:
-        alerts = Alert.get_user_alerts(current_user.id)
+        alerts_raw = Alert.get_user_alerts(current_user.id)
         
-        # FIX: Convert database rows to dict if needed
-        alert_list = []
-        for alert in alerts:
-            if isinstance(alert, dict):
-                alert_list.append(alert)
-            else:
-                # Handle case where alert is a database row object
-                alert_list.append(dict(alert))
+        # Convert to plain dicts
+        alerts = []
+        for alert in alerts_raw:
+            alerts.append({
+                'id': alert['id'],
+                'ticker': alert['ticker'],
+                'target_price': float(alert['target_price']),
+                'current_price': float(alert['current_price']) if alert['current_price'] else None,
+                'direction': alert['direction'],
+                'active': alert['active'],
+                'created_at': alert['created_at'].isoformat() if hasattr(alert['created_at'], 'isoformat') else str(alert['created_at']),
+                'triggered_at': alert['triggered_at'].isoformat() if alert.get('triggered_at') and hasattr(alert['triggered_at'], 'isoformat') else alert.get('triggered_at'),
+                'triggered_price': float(alert['triggered_price']) if alert.get('triggered_price') else None
+            })
         
-        logger.info(f"Returning {len(alert_list)} alerts for user {current_user.id}")
-        return jsonify({'success': True, 'alerts': alert_list})
+        logger.info(f"Returning {len(alerts)} alerts for user {current_user.id}")
+        return jsonify({'success': True, 'alerts': alerts})
     
     except Exception as e:
         logger.error(f"Error getting alerts for user {current_user.id}: {e}")
-        return jsonify({'success': False, 'error': 'Failed to load alerts'}), 500
-
+        return jsonify({'success': False, 'error': str(e), 'alerts': []}), 500
 
 @app.route('/api/alerts', methods=['POST'])
 @login_required
