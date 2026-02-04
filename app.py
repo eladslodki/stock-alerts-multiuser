@@ -579,50 +579,76 @@ def dashboard():
         // Load tickers on page load
         async function loadTickers() {
             try {
-                const res = await fetch('/api/tickers');
-                const data = await res.json();
-                if (data.success) {
-                    allTickers = data.tickers;
-                    console.log(`Loaded ${allTickers.length} tickers`);
-                }
-            } catch (error) {
-                console.error('Error loading tickers:', error);
-            }
+              console.log('Loading tickers...');
+              const res = await fetch('/api/tickers');
+              const data = await res.json();
+        
+        if (data.success) {
+            allTickers = data.tickers;
+            console.log(`✅ Loaded ${allTickers.length} tickers`);
+        } else {
+            console.error('❌ Failed to load tickers:', data);
         }
+    } catch (error) {
+        console.error('❌ Error loading tickers:', error);
+        // Fallback: add some basic tickers so autocomplete still works
+        allTickers = [
+            {symbol: 'AAPL', name: 'Apple Inc.', type: 'Stock'},
+            {symbol: 'TSLA', name: 'Tesla Inc.', type: 'Stock'},
+            {symbol: 'MSFT', name: 'Microsoft Corporation', type: 'Stock'},
+            {symbol: 'BTC-USD', name: 'Bitcoin USD', type: 'Crypto'}
+        ];
+        console.log('Using fallback ticker list');
+    }
+}
+
         
         // Autocomplete functionality
         const tickerInput = document.getElementById('tickerInput');
         const dropdown = document.getElementById('autocompleteDropdown');
         
         tickerInput.addEventListener('input', function() {
-            const query = this.value.toUpperCase().trim();
-            
-            if (query.length < 1) {
-                dropdown.style.display = 'none';
-                selectedTicker = null;
-                return;
-            }
-            
-            const matches = allTickers.filter(t => 
-                t.symbol.toUpperCase().includes(query) || 
-                t.name.toUpperCase().includes(query)
-            ).slice(0, 10);
-            
-            if (matches.length === 0) {
-                dropdown.style.display = 'none';
-                return;
-            }
-            
-            dropdown.innerHTML = matches.map(ticker => `
-                <div class="autocomplete-item" onclick="selectTicker('${ticker.symbol}', '${ticker.name}')">
-                    <span class="ticker-symbol">${ticker.symbol}</span>
-                    <span class="ticker-name">${ticker.name}</span>
-                    <span class="ticker-type">${ticker.type}</span>
-                </div>
-            `).join('');
-            
-            dropdown.style.display = 'block';
-        });
+    const query = this.value.toUpperCase().trim();
+    
+    console.log(`Searching for: "${query}"`);
+    
+    if (query.length < 1) {
+        dropdown.style.display = 'none';
+        selectedTicker = null;
+        return;
+    }
+    
+    if (allTickers.length === 0) {
+        console.error('No tickers loaded yet!');
+        dropdown.innerHTML = '<div class="autocomplete-item">Loading tickers...</div>';
+        dropdown.style.display = 'block';
+        return;
+    }
+    
+    const matches = allTickers.filter(t => 
+        t.symbol.toUpperCase().includes(query) || 
+        t.name.toUpperCase().includes(query)
+    ).slice(0, 10);
+    
+    console.log(`Found ${matches.length} matches`);
+    
+    if (matches.length === 0) {
+        dropdown.style.display = 'none';
+        return;
+    }
+    
+    dropdown.innerHTML = matches.map(ticker => `
+        <div class="autocomplete-item" onclick="selectTicker('${ticker.symbol}', '${ticker.name}')">
+            <span class="ticker-symbol">${ticker.symbol}</span>
+            <span class="ticker-name">${ticker.name}</span>
+            <span class="ticker-type">${ticker.type}</span>
+        </div>
+    `).join('');
+    
+    dropdown.style.display = 'block';
+    console.log('Dropdown shown');
+});
+
         
         function selectTicker(symbol, name) {
             selectedTicker = symbol;
