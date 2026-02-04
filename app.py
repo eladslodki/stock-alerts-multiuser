@@ -673,10 +673,14 @@ def dashboard():
         }
         
         async function loadAlerts() {
+            console.log('starting load alerts');
             const alertsEl = document.getElementById('alertsList');
+            console.log('after 1 row');
             
             try {
+                console.log('inside try');
                 const res = await fetch('/api/alerts');
+                console.log('after first row try');
                 const data = await res.json();
                 console.log('Alerts from API:', data);
                 
