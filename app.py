@@ -744,8 +744,9 @@ def dashboard():
         }
         
         // Initialize
-        loadTickers();
+        console.log('startinh initialize')
         loadAlerts();
+        loadTickers();
         setInterval(loadAlerts, 30000); // Refresh every 30 seconds
     </script>
 </body>
