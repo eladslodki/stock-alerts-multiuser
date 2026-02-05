@@ -33,25 +33,31 @@ class AlertProcessor:
         This runs on the SERVER, not on user devices
         """
         if not self.is_market_hours():
-            logger.debug("Market closed - skipping alert check")
+            logger.debug("⏰ Market closed - skipping alert check")
             return
         
         # Get all active alerts from ALL users
         active_alerts = Alert.get_all_active()
         
         if not active_alerts:
-            logger.debug("No active alerts to process")
+            logger.debug("📭 No active alerts to process")
             return
         
-        logger.info(f"Processing {len(active_alerts)} active alerts")
+        logger.info(f"🔍 Processing {len(active_alerts)} active alerts")
         
         # Group by ticker to minimize API calls
         tickers = list(set(alert['ticker'] for alert in active_alerts))
         prices = {}
         
-        # Fetch all prices
+        # Fetch all prices FIRST
+        logger.info(f"📊 Fetching prices for {len(tickers)} unique tickers: {', '.join(tickers)}")
         for ticker in tickers:
-            prices[ticker] = price_checker.get_price(ticker)
+            price = price_checker.get_price(ticker)
+            prices[ticker] = price
+            if price:
+                logger.info(f"💰 {ticker}: ${price:.2f}")
+            else:
+                logger.warning(f"⚠️ Could not fetch price for {ticker}")
         
         # Process each alert
         for alert in active_alerts:
@@ -59,44 +65,67 @@ class AlertProcessor:
             current_price = prices.get(ticker)
             
             if current_price is None:
-                logger.warning(f"Could not fetch price for {ticker}")
+                logger.warning(f"⚠️ Skipping {ticker} alert (user: {alert['user_email']}) - no price data")
                 continue
             
             # Update current price in database
-            Alert.update_price(alert['id'], current_price)
+            try:
+                Alert.update_price(alert['id'], current_price)
+            except Exception as e:
+                logger.error(f"❌ Failed to update price for alert {alert['id']}: {e}")
+            
+            # Log the comparison
+            target_price = float(alert['target_price'])
+            direction = alert['direction']
             
             logger.info(
-                f"{ticker}: ${current_price:.2f} "
-                f"(target: ${alert['target_price']:.2f}, "
-                f"direction: {alert['direction']}, "
-                f"user: {alert['user_email']})"
+                f"🎯 Alert #{alert['id']} - {ticker} | "
+                f"Current: ${current_price:.2f} | "
+                f"Target: ${target_price:.2f} | "
+                f"Direction: {direction.upper()} | "
+                f"User: {alert['user_email']}"
             )
             
             # Check if alert should trigger
             triggered = False
-            if alert['direction'] == 'up' and current_price >= alert['target_price']:
+            if direction == 'up' and current_price >= target_price:
                 triggered = True
-            elif alert['direction'] == 'down' and current_price <= alert['target_price']:
+                logger.info(f"✅ CONDITION MET: ${current_price:.2f} >= ${target_price:.2f} (UP)")
+            elif direction == 'down' and current_price <= target_price:
                 triggered = True
+                logger.info(f"✅ CONDITION MET: ${current_price:.2f} <= ${target_price:.2f} (DOWN)")
+            else:
+                diff = abs(current_price - target_price)
+                pct = (diff / target_price) * 100
+                logger.debug(f"⏳ Not triggered yet - {diff:.2f} away ({pct:.1f}%)")
             
             if triggered:
                 logger.info(
-                    f"🎯 ALERT TRIGGERED: {ticker} reached ${current_price:.2f} "
-                    f"(target: ${alert['target_price']:.2f}) for user {alert['user_email']}"
+                    f"🔔 ALERT TRIGGERED! {ticker} for user {alert['user_email']} | "
+                    f"Target: ${target_price:.2f} | Triggered at: ${current_price:.2f}"
                 )
                 
-                # Send email to THIS USER ONLY
-                email_sender.send_alert_email(
-                    to_email=alert['user_email'],
-                    ticker=ticker,
-                    target_price=alert['target_price'],
-                    triggered_price=current_price,
-                    direction=alert['direction']
-                )
-                
-                # Delete alert as per requirement
-                Alert.delete_by_id(alert['id'])
-                logger.info(f"Alert {alert['id']} deleted after notification sent")
+                try:
+                    # Send email notification
+                    email_sent = email_sender.send_alert_email(
+                        to_email=alert['user_email'],
+                        ticker=ticker,
+                        target_price=target_price,
+                        triggered_price=current_price,
+                        direction=direction
+                    )
+                    
+                    if email_sent:
+                        logger.info(f"📧 Email sent successfully to {alert['user_email']}")
+                    else:
+                        logger.error(f"📧 Email failed to send to {alert['user_email']}")
+                    
+                    # Delete alert as per requirement (auto-delete after trigger)
+                    Alert.delete_by_id(alert['id'])
+                    logger.info(f"🗑️ Alert #{alert['id']} deleted after trigger")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error processing triggered alert {alert['id']}: {e}")
     
     def start(self):
         """Start the background scheduler"""
@@ -112,6 +141,6 @@ class AlertProcessor:
     def shutdown(self):
         """Stop the scheduler"""
         self.scheduler.shutdown()
-        logger.info("Alert processor stopped")
+        logger.info("🛑 Alert processor stopped")
 
 alert_processor = AlertProcessor()
