@@ -19,28 +19,50 @@ class AlertProcessor:
         
         # Weekend check
         if now.weekday() > 4:  # Saturday=5, Sunday=6
+            logger.info(f"📅 Market closed - Weekend (day {now.weekday()})")
             return False
         
         # Market hours: 9:30 AM - 4:00 PM ET
         market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
         market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
         
-        return market_open <= now < market_close
+        is_open = market_open <= now < market_close
+        
+        # ALWAYS LOG THIS
+        current_time_str = now.strftime('%Y-%m-%d %H:%M:%S %Z')
+        logger.info(f"⏰ Market hours check: {current_time_str} | Open: {is_open}")
+        
+        if not is_open:
+            logger.info(f"📅 Market closed - Current: {now.strftime('%H:%M')} ET | Open: 09:30-16:00 ET")
+        
+        return is_open
     
     def process_alerts(self):
         """
         Main processing function - runs every 60 seconds
-        This runs on the SERVER, not on user devices
         """
+        # FORCE LOG AT START
+        logger.info("=" * 60)
+        logger.info("🚀 ALERT PROCESSOR RUNNING")
+        logger.info("=" * 60)
+        
+        # Check market hours
         if not self.is_market_hours():
-            logger.debug("⏰ Market closed - skipping alert check")
+            logger.info("⏸️ Skipping - market is closed")
             return
         
+        logger.info("✅ Market is OPEN - processing alerts")
+        
         # Get all active alerts from ALL users
-        active_alerts = Alert.get_all_active()
+        try:
+            active_alerts = Alert.get_all_active()
+            logger.info(f"📊 Found {len(active_alerts) if active_alerts else 0} active alerts in database")
+        except Exception as e:
+            logger.error(f"❌ Error fetching alerts: {e}")
+            return
         
         if not active_alerts:
-            logger.debug("📭 No active alerts to process")
+            logger.info("📭 No active alerts to process")
             return
         
         logger.info(f"🔍 Processing {len(active_alerts)} active alerts")
@@ -52,12 +74,16 @@ class AlertProcessor:
         # Fetch all prices FIRST
         logger.info(f"📊 Fetching prices for {len(tickers)} unique tickers: {', '.join(tickers)}")
         for ticker in tickers:
-            price = price_checker.get_price(ticker)
-            prices[ticker] = price
-            if price:
-                logger.info(f"💰 {ticker}: ${price:.2f}")
-            else:
-                logger.warning(f"⚠️ Could not fetch price for {ticker}")
+            try:
+                price = price_checker.get_price(ticker)
+                prices[ticker] = price
+                if price:
+                    logger.info(f"💰 {ticker}: ${price:.2f}")
+                else:
+                    logger.warning(f"⚠️ Could not fetch price for {ticker}")
+            except Exception as e:
+                logger.error(f"❌ Error fetching price for {ticker}: {e}")
+                prices[ticker] = None
         
         # Process each alert
         for alert in active_alerts:
@@ -71,6 +97,7 @@ class AlertProcessor:
             # Update current price in database
             try:
                 Alert.update_price(alert['id'], current_price)
+                logger.info(f"✅ Updated price in DB for alert #{alert['id']}")
             except Exception as e:
                 logger.error(f"❌ Failed to update price for alert {alert['id']}: {e}")
             
@@ -97,7 +124,7 @@ class AlertProcessor:
             else:
                 diff = abs(current_price - target_price)
                 pct = (diff / target_price) * 100
-                logger.debug(f"⏳ Not triggered yet - {diff:.2f} away ({pct:.1f}%)")
+                logger.info(f"⏳ Not triggered - ${diff:.2f} away ({pct:.1f}%)")
             
             if triggered:
                 logger.info(
@@ -120,12 +147,14 @@ class AlertProcessor:
                     else:
                         logger.error(f"📧 Email failed to send to {alert['user_email']}")
                     
-                    # Delete alert as per requirement (auto-delete after trigger)
+                    # Delete alert as per requirement
                     Alert.delete_by_id(alert['id'])
                     logger.info(f"🗑️ Alert #{alert['id']} deleted after trigger")
                     
                 except Exception as e:
                     logger.error(f"❌ Error processing triggered alert {alert['id']}: {e}")
+        
+        logger.info("✅ Alert processing complete")
     
     def start(self):
         """Start the background scheduler"""
