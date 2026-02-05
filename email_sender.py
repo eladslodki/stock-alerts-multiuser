@@ -8,9 +8,17 @@ class EmailSender:
         self.api_key = os.getenv('BREVO_API_KEY')
         
         if not self.api_key:
-            logger.error("❌ BREVO_API_KEY not set - emails will NOT be sent!")
+            logger.error("=" * 60)
+            logger.error("❌ CRITICAL: BREVO_API_KEY environment variable NOT SET")
+            logger.error("Emails will NOT be sent!")
+            logger.error("Set BREVO_API_KEY in Railway environment variables")
+            logger.error("=" * 60)
             self.enabled = False
             return
+        
+        # Mask API key for security (show first 10 chars only)
+        masked_key = self.api_key[:10] + "..." if len(self.api_key) > 10 else "***"
+        logger.info(f"🔑 Brevo API key found: {masked_key}")
         
         try:
             import sib_api_v3_sdk
@@ -22,10 +30,13 @@ class EmailSender:
                 sib_api_v3_sdk.ApiClient(configuration)
             )
             self.enabled = True
-            logger.info("✅ Email sender initialized with Brevo API")
+            logger.info("✅ Email sender initialized successfully")
             
         except ImportError:
-            logger.error("❌ sib-api-v3-sdk not installed - emails will NOT be sent!")
+            logger.error("=" * 60)
+            logger.error("❌ CRITICAL: sib-api-v3-sdk library not installed")
+            logger.error("Run: pip install sib-api-v3-sdk")
+            logger.error("=" * 60)
             self.enabled = False
         except Exception as e:
             logger.error(f"❌ Email sender initialization failed: {e}")
@@ -34,8 +45,21 @@ class EmailSender:
     def send_alert_email(self, to_email, ticker, target_price, triggered_price, direction):
         """Send stock alert notification email"""
         if not self.enabled:
-            logger.warning(f"❌ Email service disabled - would send to {to_email} for {ticker}")
+            logger.error("=" * 60)
+            logger.error(f"❌ EMAIL NOT SENT - Service disabled")
+            logger.error(f"Would send to: {to_email}")
+            logger.error(f"Alert: {ticker} @ ${triggered_price:.2f}")
+            logger.error("Check BREVO_API_KEY configuration")
+            logger.error("=" * 60)
             return False
+        
+        logger.info("=" * 60)
+        logger.info(f"📧 Attempting to send email")
+        logger.info(f"To: {to_email}")
+        logger.info(f"Ticker: {ticker}")
+        logger.info(f"Target: ${target_price:.2f}")
+        logger.info(f"Triggered: ${triggered_price:.2f}")
+        logger.info("=" * 60)
         
         try:
             import sib_api_v3_sdk
@@ -55,7 +79,6 @@ class EmailSender:
                     .alert-box {{ background: white; padding: 20px; border-left: 4px solid #667eea; 
                                   margin: 20px 0; border-radius: 5px; }}
                     .price {{ font-size: 24px; font-weight: bold; color: #667eea; }}
-                    .footer {{ text-align: center; margin-top: 20px; color: #666; font-size: 12px; }}
                 </style>
             </head>
             <body>
@@ -71,11 +94,7 @@ class EmailSender:
                             <p><strong>Triggered At:</strong> <span class="price">${triggered_price:.2f}</span></p>
                             <p><strong>Direction:</strong> {direction.upper()}</p>
                         </div>
-                        <p>Your alert has been automatically deleted as requested.</p>
-                        <p>You can create new alerts anytime by logging into your account.</p>
-                    </div>
-                    <div class="footer">
-                        <p>This is an automated email from Stock Alerts</p>
+                        <p>Your alert has been automatically deleted.</p>
                     </div>
                 </div>
             </body>
@@ -89,16 +108,37 @@ class EmailSender:
                 html_content=html_content
             )
             
+            logger.info("🔄 Calling Brevo API...")
             response = self.api_instance.send_transac_email(send_smtp_email)
-            logger.info(f"✅ Email ACTUALLY sent to {to_email} for {ticker} alert (Message ID: {response.message_id})")
+            
+            logger.info("=" * 60)
+            logger.info("✅ EMAIL SENT SUCCESSFULLY!")
+            logger.info(f"Message ID: {response.message_id}")
+            logger.info(f"Recipient: {to_email}")
+            logger.info("Check spam folder if not in inbox")
+            logger.info("=" * 60)
             return True
             
         except ApiException as e:
-            logger.error(f"❌ Brevo API error sending to {to_email}: {e}")
-            logger.error(f"Status code: {e.status}, Reason: {e.reason}")
+            logger.error("=" * 60)
+            logger.error(f"❌ BREVO API ERROR")
+            logger.error(f"Status code: {e.status}")
+            logger.error(f"Reason: {e.reason}")
+            logger.error(f"Body: {e.body}")
+            logger.error(f"Recipient: {to_email}")
+            logger.error("Possible issues:")
+            logger.error("1. Invalid API key")
+            logger.error("2. API key permissions")
+            logger.error("3. Sender email not verified")
+            logger.error("4. Daily limit exceeded")
+            logger.error("=" * 60)
             return False
         except Exception as e:
-            logger.error(f"❌ Email send failed to {to_email}: {e}")
+            logger.error("=" * 60)
+            logger.error(f"❌ UNEXPECTED EMAIL ERROR")
+            logger.error(f"Error: {e}")
+            logger.error(f"Type: {type(e).__name__}")
+            logger.error("=" * 60)
             return False
 
 email_sender = EmailSender()
