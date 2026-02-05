@@ -707,10 +707,12 @@ def dashboard():
     const alertsEl = document.getElementById('alertsList');
     
     try {
-        const res = await fetch('/api/alerts');
+        // Add timestamp to prevent caching
+        const timestamp = new Date().getTime();
+        const res = await fetch(`/api/alerts?t=${timestamp}`);
         const data = await res.json();
         
-        console.log('📊 Alerts loaded:', data);
+        console.log(`📊 [${new Date().toLocaleTimeString()}] Alerts loaded:`, data);
         
         if (!data.success) {
             alertsEl.innerHTML = '<div class="error">Failed to load alerts</div>';
@@ -724,32 +726,44 @@ def dashboard():
             return;
         }
         
+        // Generate unique key for each render to force update
+        const renderKey = Math.random().toString(36).substring(7);
+        
         alertsEl.innerHTML = active.map(alert => {
             const direction = alert.direction === 'up' ? 'UP ↑' : 'DOWN ↓';
             const directionClass = alert.direction === 'up' ? 'direction-up' : 'direction-down';
             
-            // Calculate progress toward target
             const current = alert.current_price || 0;
             const target = alert.target_price;
             const progress = alert.direction === 'up' 
                 ? (current / target * 100).toFixed(1)
                 : (target / current * 100).toFixed(1);
             
-            // Log to console for debugging
-            console.log(`${alert.ticker}: $${current.toFixed(2)} → $${target.toFixed(2)} (${progress}%)`);
+            const diff = Math.abs(current - target);
+            const pct = ((diff / target) * 100).toFixed(1);
+            
+            // Visual indicator if price just updated
+            const priceClass = 'current-price';
+            
+            console.log(`  ${alert.ticker}: $${current.toFixed(2)} → $${target.toFixed(2)} (${pct}% away)`);
             
             return `
-                <div class="alert-item">
+                <div class="alert-item" data-key="${renderKey}">
                     <div class="alert-info">
                         <div class="alert-ticker">
                             ${alert.ticker}
                             <span class="alert-direction ${directionClass}">${direction}</span>
                         </div>
                         <div class="alert-prices">
-                            Current: <span class="current-price">$${current.toFixed(2)}</span>
+                            Current: <span class="${priceClass}" id="price-${alert.id}">$${current.toFixed(2)}</span>
                             →
                             Target: <span class="target-price">$${target.toFixed(2)}</span>
-                            <span style="color: #888; margin-left: 10px;">(${progress}%)</span>
+                            <span style="color: #888; margin-left: 10px; font-size: 12px;">
+                                ${pct}% away
+                            </span>
+                        </div>
+                        <div style="font-size: 11px; color: #666; margin-top: 4px;">
+                            Last updated: ${new Date().toLocaleTimeString()}
                         </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
@@ -765,6 +779,7 @@ def dashboard():
         alertsEl.innerHTML = '<div class="error">Failed to load alerts</div>';
     }
 }
+
 
         async function deleteAlert(id) {
             if (!confirm('Delete this alert?')) return;
@@ -786,7 +801,7 @@ def dashboard():
         console.log('starting initialize')
         loadAlerts();
         loadTickers();
-        setInterval(loadAlerts, 30000); // Refresh every 30 seconds
+        setInterval(loadAlerts, 10000); // Refresh every 30 seconds
     </script>
 </body>
 </html>
@@ -903,8 +918,14 @@ def delete_alert(alert_id):
 @app.route('/api/tickers', methods=['GET'])
 def get_tickers():
     """Get list of all available tickers"""
-    tickers = ticker_fetcher.get_all_tickers()
-    return jsonify({'success': True, 'tickers': tickers})
+    try:
+        logger.info("📊 /api/tickers called")
+        tickers = ticker_fetcher.get_all_tickers()
+        logger.info(f"✅ Returning {len(tickers)} tickers")
+        return jsonify({'success': True, 'tickers': tickers})
+    except Exception as e:
+        logger.error(f"❌ Error in /api/tickers: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/bitcoin-scanner')
 @login_required
