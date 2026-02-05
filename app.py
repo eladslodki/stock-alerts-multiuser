@@ -704,60 +704,68 @@ def dashboard():
         }
         
         async function loadAlerts() {
-            console.log('starting load alerts');
-            const alertsEl = document.getElementById('alertsList');
-            console.log('after 1 row');
-            
-            try {
-                console.log('inside try');
-                const res = await fetch('/api/alerts');
-                console.log('after first row try');
-                const data = await res.json();
-                console.log('Alerts from API:', data);
-                
-                if (!data.success) {
-                    alertsEl.innerHTML = '<div class="error">Failed to load alerts</div>';
-                    return;
-                }
-                
-                const active = data.alerts.filter(a => a.active);
-                
-                if (active.length === 0) {
-                    alertsEl.innerHTML = '<div class="empty">No active alerts. Create one to get started!</div>';
-                    return;
-                }
-                
-                alertsEl.innerHTML = active.map(alert => {
-                    const direction = alert.direction === 'up' ? 'UP ↑' : 'DOWN ↓';
-                    const directionClass = alert.direction === 'up' ? 'direction-up' : 'direction-down';
-                    
-                    return `
-                        <div class="alert-item">
-                            <div class="alert-info">
-                                <div class="alert-ticker">
-                                    ${alert.ticker}
-                                    <span class="alert-direction ${directionClass}">${direction}</span>
-                                </div>
-                                <div class="alert-prices">
-                                    Current: <span class="current-price">$${(alert.current_price || 0).toFixed(2)}</span>
-                                    →
-                                    Target: <span class="target-price">$${alert.target_price.toFixed(2)}</span>
-                                </div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 10px;">
-                                <span class="alert-status status-active">ACTIVE</span>
-                                <button class="delete-btn" onclick="deleteAlert(${alert.id})">Delete</button>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-                
-            } catch (error) {
-                console.error('Error loading alerts:', error);
-                alertsEl.innerHTML = '<div class="error">Failed to load alerts</div>';
-            }
+    const alertsEl = document.getElementById('alertsList');
+    
+    try {
+        const res = await fetch('/api/alerts');
+        const data = await res.json();
+        
+        console.log('📊 Alerts loaded:', data);
+        
+        if (!data.success) {
+            alertsEl.innerHTML = '<div class="error">Failed to load alerts</div>';
+            return;
         }
         
+        const active = data.alerts.filter(a => a.active);
+        
+        if (active.length === 0) {
+            alertsEl.innerHTML = '<div class="empty">No active alerts. Create one to get started!</div>';
+            return;
+        }
+        
+        alertsEl.innerHTML = active.map(alert => {
+            const direction = alert.direction === 'up' ? 'UP ↑' : 'DOWN ↓';
+            const directionClass = alert.direction === 'up' ? 'direction-up' : 'direction-down';
+            
+            // Calculate progress toward target
+            const current = alert.current_price || 0;
+            const target = alert.target_price;
+            const progress = alert.direction === 'up' 
+                ? (current / target * 100).toFixed(1)
+                : (target / current * 100).toFixed(1);
+            
+            // Log to console for debugging
+            console.log(`${alert.ticker}: $${current.toFixed(2)} → $${target.toFixed(2)} (${progress}%)`);
+            
+            return `
+                <div class="alert-item">
+                    <div class="alert-info">
+                        <div class="alert-ticker">
+                            ${alert.ticker}
+                            <span class="alert-direction ${directionClass}">${direction}</span>
+                        </div>
+                        <div class="alert-prices">
+                            Current: <span class="current-price">$${current.toFixed(2)}</span>
+                            →
+                            Target: <span class="target-price">$${target.toFixed(2)}</span>
+                            <span style="color: #888; margin-left: 10px;">(${progress}%)</span>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="alert-status status-active">ACTIVE</span>
+                        <button class="delete-btn" onclick="deleteAlert(${alert.id})">Delete</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+    } catch (error) {
+        console.error('❌ Error loading alerts:', error);
+        alertsEl.innerHTML = '<div class="error">Failed to load alerts</div>';
+    }
+}
+
         async function deleteAlert(id) {
             if (!confirm('Delete this alert?')) return;
             
@@ -831,7 +839,7 @@ def get_alerts():
     try:
         alerts_raw = Alert.get_user_alerts(current_user.id)
         
-        # Convert to plain dicts
+        # Convert to plain dicts with explicit price conversion
         alerts = []
         for alert in alerts_raw:
             alerts.append({
@@ -846,11 +854,16 @@ def get_alerts():
                 'triggered_price': float(alert['triggered_price']) if alert.get('triggered_price') else None
             })
         
-        logger.info(f"Returning {len(alerts)} alerts for user {current_user.id}")
+        logger.info(f"📤 Returning {len(alerts)} alerts for user {current_user.id}")
+        
+        # Log each alert's current state
+        for alert in alerts:
+            logger.debug(f"Alert: {alert['ticker']} - Current: ${alert['current_price'] or 0:.2f}, Target: ${alert['target_price']:.2f}")
+        
         return jsonify({'success': True, 'alerts': alerts})
     
     except Exception as e:
-        logger.error(f"Error getting alerts for user {current_user.id}: {e}")
+        logger.error(f"❌ Error getting alerts for user {current_user.id}: {e}")
         return jsonify({'success': False, 'error': str(e), 'alerts': []}), 500
 
 @app.route('/api/alerts', methods=['POST'])
