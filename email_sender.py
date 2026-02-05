@@ -103,7 +103,7 @@ class EmailSender:
             
             send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
                 to=[{"email": to_email}],
-                sender={"email": "YOUR_EMAIL@gmail.com", "name": "Stock Alerts"},
+                sender={"email": "eladslodki@gmail.com", "name": "Stock Alerts"},
                 subject=subject,
                 html_content=html_content
             )
