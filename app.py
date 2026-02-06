@@ -1254,88 +1254,601 @@ def scan_bitcoin():
         'count': len(transactions)
     })
 # ============================================================================
-# Portfolio Models
+# PORTFOLIO MANAGEMENT ROUTES
 # ============================================================================
 
-class Portfolio:
-    @staticmethod
-    def get_user_portfolio(user_id):
-        """Get user's portfolio cash value"""
-        result = db.execute(
-            "SELECT cash FROM portfolios WHERE user_id = %s",
-            (user_id,),
-            fetchone=True
-        )
-        return result['cash'] if result else 0.0
-    
-    @staticmethod
-    def set_user_portfolio(user_id, cash):
-        """Set or update user's portfolio cash"""
-        existing = db.execute(
-            "SELECT id FROM portfolios WHERE user_id = %s",
-            (user_id,),
-            fetchone=True
-        )
-        
-        if existing:
-            db.execute(
-                "UPDATE portfolios SET cash = %s, updated_at = NOW() WHERE user_id = %s",
-                (cash, user_id)
-            )
-        else:
-            db.execute(
-                "INSERT INTO portfolios (user_id, cash) VALUES (%s, %s)",
-                (user_id, cash)
-            )
-        
-        logger.info(f"Portfolio updated for user {user_id}: ${cash}")
+from models import Portfolio, Trade
 
-class Trade:
-    @staticmethod
-    def get_user_trades(user_id):
-        """Get all trades for a user"""
-        return db.execute("""
-            SELECT id, ticker, buy_price, quantity, position_size, risk_amount,
-                   timeframe, trade_date, created_at
-            FROM trades
-            WHERE user_id = %s
-            ORDER BY trade_date DESC, created_at DESC
-        """, (user_id,), fetchall=True)
-    
-    @staticmethod
-    def create_trade(user_id, ticker, buy_price, quantity, position_size, risk_amount, timeframe, trade_date):
-        """Create a new trade"""
-        result = db.execute("""
-            INSERT INTO trades (user_id, ticker, buy_price, quantity, position_size, 
-                                risk_amount, timeframe, trade_date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-        """, (user_id, ticker, buy_price, quantity, position_size, risk_amount, timeframe, trade_date),
-        fetchone=True)
+@app.route('/portfolio')
+@login_required
+def portfolio_page():
+    """Portfolio management page"""
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Portfolio - Stock Alerts</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                min-height: 100vh;
+                color: #fff;
+                padding: 20px;
+            }
+            .nav {
+                display: flex;
+                gap: 20px;
+                margin-bottom: 30px;
+                padding: 15px;
+                background: rgba(255,255,255,0.05);
+                border-radius: 10px;
+                flex-wrap: wrap;
+            }
+            .nav a {
+                color: #64ffda;
+                text-decoration: none;
+                font-weight: 500;
+            }
+            .container { max-width: 1400px; margin: 0 auto; }
+            .header {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                padding: 30px;
+                border-radius: 15px;
+                margin-bottom: 30px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            }
+            .card {
+                background: rgba(255,255,255,0.05);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255,255,255,0.1);
+                border-radius: 15px;
+                padding: 25px;
+                margin-bottom: 25px;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            }
+            .form-group {
+                margin-bottom: 15px;
+            }
+            label {
+                display: block;
+                margin-bottom: 8px;
+                font-weight: 500;
+                color: #64ffda;
+                font-size: 14px;
+            }
+            input, select {
+                width: 100%;
+                padding: 12px 15px;
+                background: rgba(255,255,255,0.1);
+                border: 1px solid rgba(255,255,255,0.2);
+                border-radius: 8px;
+                color: #fff;
+                font-size: 15px;
+            }
+            input:focus, select:focus {
+                outline: none;
+                border-color: #64ffda;
+            }
+            button {
+                padding: 12px 24px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: 600;
+                cursor: pointer;
+                font-size: 15px;
+                transition: transform 0.2s;
+            }
+            button:hover { transform: translateY(-2px); }
+            .btn-delete {
+                background: linear-gradient(135deg, #f44336 0%, #e91e63 100%);
+                padding: 8px 16px;
+                font-size: 13px;
+            }
+            .btn-edit {
+                background: linear-gradient(135deg, #ff9800 0%, #ff5722 100%);
+                padding: 8px 16px;
+                font-size: 13px;
+                margin-right: 8px;
+            }
+            .grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 15px;
+            }
+            @media (max-width: 768px) {
+                .grid { grid-template-columns: 1fr; }
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 20px;
+            }
+            th, td {
+                padding: 12px;
+                text-align: left;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+            }
+            th {
+                background: rgba(100,255,218,0.1);
+                color: #64ffda;
+                font-weight: 600;
+            }
+            .portfolio-pct {
+                font-weight: 600;
+                color: #ffc107;
+            }
+            .message {
+                padding: 12px;
+                border-radius: 8px;
+                margin-bottom: 15px;
+            }
+            .success {
+                background: rgba(76,175,80,0.2);
+                border: 1px solid rgba(76,175,80,0.4);
+                color: #4caf50;
+            }
+            .error {
+                background: rgba(244,67,54,0.2);
+                border: 1px solid rgba(244,67,54,0.4);
+                color: #f44336;
+            }
+            .cash-display {
+                font-size: 32px;
+                font-weight: 700;
+                color: #64ffda;
+                margin-top: 10px;
+            }
+            @media (max-width: 768px) {
+                table { font-size: 12px; }
+                th, td { padding: 8px 4px; }
+                .cash-display { font-size: 24px; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="nav">
+                <a href="/dashboard">📊 Stock Alerts</a>
+                <a href="/bitcoin-scanner">₿ Bitcoin Scanner</a>
+                <a href="/portfolio">💼 Portfolio</a>
+                <a href="#" onclick="logout()">Logout</a>
+            </div>
+
+            <div class="header">
+                <h1>💼 Portfolio Management</h1>
+                <p>Track your trades and manage your portfolio</p>
+            </div>
+
+            <div id="message"></div>
+
+            <!-- Portfolio Cash -->
+            <div class="card">
+                <h2 style="color: #64ffda; margin-bottom: 20px;">Portfolio Cash</h2>
+                <div class="form-group">
+                    <label>Total Portfolio Cash ($)</label>
+                    <input type="number" id="portfolioCash" placeholder="Enter total portfolio value" step="0.01" min="0">
+                </div>
+                <button onclick="updatePortfolioCash()">Update Portfolio Cash</button>
+                <div class="cash-display" id="cashDisplay">$0.00</div>
+            </div>
+
+            <!-- Add Trade Form -->
+            <div class="card">
+                <h2 style="color: #64ffda; margin-bottom: 20px;">Add New Trade</h2>
+                <div class="grid">
+                    <div class="form-group">
+                        <label>Ticker</label>
+                        <input type="text" id="ticker" placeholder="e.g., AAPL" maxlength="10">
+                    </div>
+                    <div class="form-group">
+                        <label>Buy Price ($)</label>
+                        <input type="number" id="buyPrice" step="0.01" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Quantity</label>
+                        <input type="number" id="quantity" step="0.0001" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Position Size ($)</label>
+                        <input type="number" id="positionSize" step="0.01" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Risk Amount ($)</label>
+                        <input type="number" id="riskAmount" step="0.01" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Timeframe</label>
+                        <select id="timeframe">
+                            <option value="Long">Long</option>
+                            <option value="Swing">Swing</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Trade Date</label>
+                        <input type="date" id="tradeDate">
+                    </div>
+                </div>
+                <button onclick="addTrade()" id="addTradeBtn">Add Trade</button>
+            </div>
+
+            <!-- Trades Table -->
+            <div class="card">
+                <h2 style="color: #64ffda; margin-bottom: 20px;">My Trades</h2>
+                <div style="overflow-x: auto;">
+                    <table id="tradesTable">
+                        <thead>
+                            <tr>
+                                <th>Ticker</th>
+                                <th>Buy Price</th>
+                                <th>Quantity</th>
+                                <th>Position Size</th>
+                                <th>Risk Amount</th>
+                                <th>Portfolio %</th>
+                                <th>Timeframe</th>
+                                <th>Trade Date</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tradesBody">
+                            <tr>
+                                <td colspan="9" style="text-align: center; padding: 40px;">
+                                    Loading trades...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            let portfolioCash = 0;
+            let editingTradeId = null;
+
+            // Load portfolio cash on page load
+            async function loadPortfolio() {
+                try {
+                    const res = await fetch('/api/portfolio');
+                    const data = await res.json();
+                    if (data.success) {
+                        portfolioCash = data.cash;
+                        document.getElementById('portfolioCash').value = portfolioCash;
+                        document.getElementById('cashDisplay').textContent = '$' + portfolioCash.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                    }
+                } catch (error) {
+                    console.error('Error loading portfolio:', error);
+                }
+            }
+
+            // Update portfolio cash
+            async function updatePortfolioCash() {
+                const cash = parseFloat(document.getElementById('portfolioCash').value);
+                
+                if (isNaN(cash) || cash < 0) {
+                    showMessage('Please enter a valid amount', 'error');
+                    return;
+                }
+
+                try {
+                    const res = await fetch('/api/portfolio', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ cash })
+                    });
+                    
+                    const data = await res.json();
+                    if (data.success) {
+                        portfolioCash = cash;
+                        document.getElementById('cashDisplay').textContent = '$' + cash.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                        showMessage('Portfolio cash updated!', 'success');
+                        loadTrades(); // Refresh to update percentages
+                    }
+                } catch (error) {
+                    showMessage('Failed to update portfolio cash', 'error');
+                }
+            }
+
+            // Load trades
+            async function loadTrades() {
+                try {
+                    const res = await fetch('/api/trades');
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        renderTrades(data.trades);
+                    }
+                } catch (error) {
+                    console.error('Error loading trades:', error);
+                }
+            }
+
+            // Render trades table
+            function renderTrades(trades) {
+                const tbody = document.getElementById('tradesBody');
+                
+                if (trades.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 40px; color: #888;">No trades yet. Add your first trade above!</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = trades.map(trade => {
+                    const portfolioPct = portfolioCash > 0 ? ((trade.position_size / portfolioCash) * 100).toFixed(2) : 0;
+                    
+                    return `
+                        <tr>
+                            <td><strong>${trade.ticker}</strong></td>
+                            <td>$${parseFloat(trade.buy_price).toFixed(2)}</td>
+                            <td>${parseFloat(trade.quantity).toFixed(4)}</td>
+                            <td>$${parseFloat(trade.position_size).toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
+                            <td>$${parseFloat(trade.risk_amount).toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
+                            <td class="portfolio-pct">${portfolioPct}%</td>
+                            <td>${trade.timeframe}</td>
+                            <td>${trade.trade_date}</td>
+                            <td>
+                                <button class="btn-edit" onclick="editTrade(${trade.id})">Edit</button>
+                                <button class="btn-delete" onclick="deleteTrade(${trade.id})">Delete</button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+
+            // Add trade
+            async function addTrade() {
+                const ticker = document.getElementById('ticker').value.toUpperCase().trim();
+                const buyPrice = parseFloat(document.getElementById('buyPrice').value);
+                const quantity = parseFloat(document.getElementById('quantity').value);
+                const positionSize = parseFloat(document.getElementById('positionSize').value);
+                const riskAmount = parseFloat(document.getElementById('riskAmount').value);
+                const timeframe = document.getElementById('timeframe').value;
+                const tradeDate = document.getElementById('tradeDate').value;
+
+                if (!ticker || isNaN(buyPrice) || isNaN(quantity) || isNaN(positionSize) || isNaN(riskAmount) || !tradeDate) {
+                    showMessage('Please fill in all fields', 'error');
+                    return;
+                }
+
+                try {
+                    const res = await fetch('/api/trades', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            ticker, buy_price: buyPrice, quantity, position_size: positionSize,
+                            risk_amount: riskAmount, timeframe, trade_date: tradeDate
+                        })
+                    });
+                    
+                    const data = await res.json();
+                    if (data.success) {
+                        showMessage('Trade added successfully!', 'success');
+                        clearForm();
+                        loadTrades();
+                    }
+                } catch (error) {
+                    showMessage('Failed to add trade', 'error');
+                }
+            }
+
+            // Edit trade
+            async function editTrade(id) {
+                const trades = await (await fetch('/api/trades')).json();
+                const trade = trades.trades.find(t => t.id === id);
+                
+                if (!trade) return;
+
+                document.getElementById('ticker').value = trade.ticker;
+                document.getElementById('buyPrice').value = trade.buy_price;
+                document.getElementById('quantity').value = trade.quantity;
+                document.getElementById('positionSize').value = trade.position_size;
+                document.getElementById('riskAmount').value = trade.risk_amount;
+                document.getElementById('timeframe').value = trade.timeframe;
+                document.getElementById('tradeDate').value = trade.trade_date;
+
+                editingTradeId = id;
+                document.getElementById('addTradeBtn').textContent = 'Update Trade';
+                document.getElementById('addTradeBtn').onclick = updateTrade;
+            }
+
+            // Update trade
+            async function updateTrade() {
+                const ticker = document.getElementById('ticker').value.toUpperCase().trim();
+                const buyPrice = parseFloat(document.getElementById('buyPrice').value);
+                const quantity = parseFloat(document.getElementById('quantity').value);
+                const positionSize = parseFloat(document.getElementById('positionSize').value);
+                const riskAmount = parseFloat(document.getElementById('riskAmount').value);
+                const timeframe = document.getElementById('timeframe').value;
+                const tradeDate = document.getElementById('tradeDate').value;
+
+                try {
+                    const res = await fetch(`/api/trades/${editingTradeId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            ticker, buy_price: buyPrice, quantity, position_size: positionSize,
+                            risk_amount: riskAmount, timeframe, trade_date: tradeDate
+                        })
+                    });
+                    
+                    const data = await res.json();
+                    if (data.success) {
+                        showMessage('Trade updated successfully!', 'success');
+                        clearForm();
+                        loadTrades();
+                        editingTradeId = null;
+                        document.getElementById('addTradeBtn').textContent = 'Add Trade';
+                        document.getElementById('addTradeBtn').onclick = addTrade;
+                    }
+                } catch (error) {
+                    showMessage('Failed to update trade', 'error');
+                }
+            }
+
+            // Delete trade
+            async function deleteTrade(id) {
+                if (!confirm('Delete this trade?')) return;
+
+                try {
+                    const res = await fetch(`/api/trades/${id}`, { method: 'DELETE' });
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        showMessage('Trade deleted!', 'success');
+                        loadTrades();
+                    }
+                } catch (error) {
+                    showMessage('Failed to delete trade', 'error');
+                }
+            }
+
+            // Clear form
+            function clearForm() {
+                document.getElementById('ticker').value = '';
+                document.getElementById('buyPrice').value = '';
+                document.getElementById('quantity').value = '';
+                document.getElementById('positionSize').value = '';
+                document.getElementById('riskAmount').value = '';
+                document.getElementById('timeframe').value = 'Long';
+                document.getElementById('tradeDate').value = '';
+            }
+
+            // Show message
+            function showMessage(msg, type) {
+                const msgEl = document.getElementById('message');
+                msgEl.innerHTML = `<div class="message ${type}">${msg}</div>`;
+                setTimeout(() => msgEl.innerHTML = '', 3000);
+            }
+
+            // Logout
+            async function logout() {
+                await fetch('/api/logout');
+                window.location.href = '/login';
+            }
+
+            // Initialize
+            loadPortfolio();
+            loadTrades();
+            document.getElementById('tradeDate').valueAsDate = new Date();
+        </script>
+    </body>
+    </html>
+    """
+    return render_template_string(html)
+
+@app.route('/api/portfolio', methods=['GET'])
+@login_required
+def get_portfolio():
+    """Get user's portfolio cash"""
+    try:
+        cash = Portfolio.get_user_portfolio(current_user.id)
+        return jsonify({'success': True, 'cash': float(cash)})
+    except Exception as e:
+        logger.error(f"Error getting portfolio for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/portfolio', methods=['POST'])
+@login_required
+def update_portfolio():
+    """Update user's portfolio cash"""
+    try:
+        data = request.json
+        cash = float(data.get('cash', 0))
         
-        logger.info(f"Trade created for user {user_id}: {ticker}")
-        return result['id']
-    
-    @staticmethod
-    def update_trade(trade_id, user_id, ticker, buy_price, quantity, position_size, risk_amount, timeframe, trade_date):
-        """Update an existing trade (with user verification)"""
-        db.execute("""
-            UPDATE trades
-            SET ticker = %s, buy_price = %s, quantity = %s, position_size = %s,
-                risk_amount = %s, timeframe = %s, trade_date = %s, updated_at = NOW()
-            WHERE id = %s AND user_id = %s
-        """, (ticker, buy_price, quantity, position_size, risk_amount, timeframe, trade_date, trade_id, user_id))
+        if cash < 0:
+            return jsonify({'success': False, 'error': 'Cash cannot be negative'}), 400
         
-        logger.info(f"Trade {trade_id} updated by user {user_id}")
-    
-    @staticmethod
-    def delete_trade(trade_id, user_id):
-        """Delete a trade (with user verification)"""
-        db.execute(
-            "DELETE FROM trades WHERE id = %s AND user_id = %s",
-            (trade_id, user_id)
+        Portfolio.set_user_portfolio(current_user.id, cash)
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Error updating portfolio for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/trades', methods=['GET'])
+@login_required
+def get_trades():
+    """Get user's trades"""
+    try:
+        trades_raw = Trade.get_user_trades(current_user.id)
+        
+        trades = []
+        for trade in trades_raw:
+            trades.append({
+                'id': trade['id'],
+                'ticker': trade['ticker'],
+                'buy_price': float(trade['buy_price']),
+                'quantity': float(trade['quantity']),
+                'position_size': float(trade['position_size']),
+                'risk_amount': float(trade['risk_amount']),
+                'timeframe': trade['timeframe'],
+                'trade_date': trade['trade_date'].isoformat() if hasattr(trade['trade_date'], 'isoformat') else str(trade['trade_date'])
+            })
+        
+        return jsonify({'success': True, 'trades': trades})
+    except Exception as e:
+        logger.error(f"Error getting trades for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/trades', methods=['POST'])
+@login_required
+def create_trade():
+    """Create a new trade"""
+    try:
+        data = request.json
+        
+        trade_id = Trade.create_trade(
+            current_user.id,
+            data['ticker'].upper(),
+            data['buy_price'],
+            data['quantity'],
+            data['position_size'],
+            data['risk_amount'],
+            data['timeframe'],
+            data['trade_date']
         )
-        logger.info(f"Trade {trade_id} deleted by user {user_id}")
+        
+        return jsonify({'success': True, 'id': trade_id})
+    except Exception as e:
+        logger.error(f"Error creating trade for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/trades/<int:trade_id>', methods=['PUT'])
+@login_required
+def update_trade_route(trade_id):
+    """Update a trade"""
+    try:
+        data = request.json
+        
+        Trade.update_trade(
+            trade_id,
+            current_user.id,
+            data['ticker'].upper(),
+            data['buy_price'],
+            data['quantity'],
+            data['position_size'],
+            data['risk_amount'],
+            data['timeframe'],
+            data['trade_date']
+        )
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Error updating trade {trade_id} for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/trades/<int:trade_id>', methods=['DELETE'])
+@login_required
+def delete_trade_route(trade_id):
+    """Delete a trade"""
+    try:
+        Trade.delete_trade(trade_id, current_user.id)
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Error deleting trade {trade_id} for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # Initialize database schema in background
 def init_db_and_scheduler():
