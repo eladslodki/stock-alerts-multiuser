@@ -525,6 +525,8 @@ def dashboard():
         <div class="nav">
             <a href="/dashboard">📊 Stock Alerts</a>
             <a href="/bitcoin-scanner">₿ Bitcoin Scanner</a>
+            <a href="/portfolio">💼 Portfolio</a>
+            <a href="#" onclick="logout()">Logout</a>
         </div>
         
         <div class="header">
@@ -1087,6 +1089,7 @@ def bitcoin_scanner_page():
             <div class="nav">
                 <a href="/dashboard">📊 Stock Alerts</a>
                 <a href="/bitcoin-scanner">₿ Bitcoin Scanner</a>
+                <a href="/portfolio">💼 Portfolio</a>
                 <a href="#" onclick="logout()">Logout</a>
             </div>
 
