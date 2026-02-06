@@ -47,6 +47,35 @@ class Database:
         """Initialize database schema"""
         try:
             schema = """
+            -- Portfolio table
+CREATE TABLE IF NOT EXISTS portfolios (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    cash DECIMAL(15, 2) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(user_id)
+);
+
+-- Trades table
+CREATE TABLE IF NOT EXISTS trades (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    ticker VARCHAR(10) NOT NULL,
+    buy_price DECIMAL(10, 2) NOT NULL,
+    quantity DECIMAL(10, 4) NOT NULL,
+    position_size DECIMAL(15, 2) NOT NULL,
+    risk_amount DECIMAL(15, 2) NOT NULL,
+    timeframe VARCHAR(10) NOT NULL CHECK (timeframe IN ('Long', 'Swing')),
+    trade_date DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_portfolios_user ON portfolios(user_id);
+CREATE INDEX IF NOT EXISTS idx_trades_user ON trades(user_id);
+CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(trade_date DESC);
             -- Users table
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
