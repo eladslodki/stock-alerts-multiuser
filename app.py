@@ -2573,17 +2573,6 @@ def get_trades():
         logger.error(f"Error getting trades for user {current_user.id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/trades/<int:trade_id>', methods=['DELETE'])
-@login_required
-def delete_trade_route(trade_id):
-    """Delete a trade"""
-    try:
-        Trade.delete_trade(trade_id, current_user.id)
-        return jsonify({'success': True})
-    except Exception as e:
-        logger.error(f"Error deleting trade {trade_id} for user {current_user.id}: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 from models import Portfolio, Trade
 from portfolio_calculator import portfolio_calculator
 from price_checker import price_checker
