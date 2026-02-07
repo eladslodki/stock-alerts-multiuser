@@ -1269,7 +1269,7 @@ def portfolio_page():
     """Portfolio management page"""
     html = """
     <!DOCTYPE html>
-    <html>
+<html>
 <head>
     <title>Portfolio Management - Stock Alerts</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1429,10 +1429,26 @@ def portfolio_page():
             background: rgba(255,255,255,0.15);
         }
         
+        input:disabled {
+            background: rgba(255,255,255,0.05);
+            color: rgba(255,255,255,0.5);
+            cursor: not-allowed;
+        }
+        
         .grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 15px;
+        }
+        
+        .calculated-value {
+            background: rgba(100,255,218,0.1);
+            padding: 12px 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(100,255,218,0.2);
+            color: #64ffda;
+            font-weight: 600;
+            font-size: 15px;
         }
         
         /* Buttons */
@@ -1455,6 +1471,12 @@ def portfolio_page():
         
         button:active {
             transform: translateY(0);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
         }
         
         .btn-delete {
@@ -1584,6 +1606,18 @@ def portfolio_page():
             padding: 12px;
             border-radius: 8px;
             margin-bottom: 15px;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
         
         .success {
@@ -1714,6 +1748,12 @@ def portfolio_page():
         .tab-content.active {
             display: block;
         }
+        
+        .info-text {
+            font-size: 12px;
+            color: rgba(255,255,255,0.6);
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -1729,7 +1769,7 @@ def portfolio_page():
         <!-- Header -->
         <div class="header">
             <h1>💼 Professional Portfolio Management</h1>
-            <p>Advanced trading & risk management tools</p>
+            <p>Advanced trading & risk management with automatic calculations</p>
         </div>
 
         <div id="message"></div>
@@ -1816,23 +1856,25 @@ def portfolio_page():
                 </div>
                 <div class="form-group">
                     <label>Buy Price ($) *</label>
-                    <input type="number" id="buyPrice" step="0.01" min="0">
+                    <input type="number" id="buyPrice" step="0.01" min="0" oninput="calculateValues()">
                 </div>
                 <div class="form-group">
                     <label>Quantity *</label>
-                    <input type="number" id="quantity" step="0.0001" min="0">
-                </div>
-                <div class="form-group">
-                    <label>Position Size ($) *</label>
-                    <input type="number" id="positionSize" step="0.01" min="0">
-                </div>
-                <div class="form-group">
-                    <label>Risk Amount ($) *</label>
-                    <input type="number" id="riskAmount" step="0.01" min="0">
+                    <input type="number" id="quantity" step="0.0001" min="0" oninput="calculateValues()">
                 </div>
                 <div class="form-group">
                     <label>Stop Loss ($)</label>
-                    <input type="number" id="stopLoss" step="0.01" min="0" placeholder="Optional">
+                    <input type="number" id="stopLoss" step="0.01" min="0" placeholder="Optional" oninput="calculateValues()">
+                </div>
+                <div class="form-group">
+                    <label>Position Size ($) - Auto Calculated</label>
+                    <div class="calculated-value" id="positionSizeDisplay">$0.00</div>
+                    <div class="info-text">= Buy Price × Quantity</div>
+                </div>
+                <div class="form-group">
+                    <label>Risk Amount ($) - Auto Calculated</label>
+                    <div class="calculated-value" id="riskAmountDisplay">$0.00</div>
+                    <div class="info-text">= |Buy Price - Stop Loss| × Quantity</div>
                 </div>
                 <div class="form-group">
                     <label>Take Profit ($)</label>
@@ -1864,9 +1906,9 @@ def portfolio_page():
             
             <!-- Tabs -->
             <div class="tabs">
-                <button class="tab active" onclick="switchTab('all')">All Trades</button>
-                <button class="tab" onclick="switchTab('open')">Open Positions</button>
-                <button class="tab" onclick="switchTab('closed')">Closed Positions</button>
+                <button class="tab active" onclick="switchTab(event, 'all')">All Trades</button>
+                <button class="tab" onclick="switchTab(event, 'open')">Open Positions</button>
+                <button class="tab" onclick="switchTab(event, 'closed')">Closed Positions</button>
             </div>
 
             <!-- All Trades Tab -->
@@ -1891,7 +1933,7 @@ def portfolio_page():
                             </tr>
                         </thead>
                         <tbody id="allTradesBody">
-                            <tr><td colspan="13" class="loading">Loading trades...</td></tr>
+                            <tr><td colspan="13" class="loading"><div class="spinner"></div>Loading trades...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1918,7 +1960,7 @@ def portfolio_page():
                             </tr>
                         </thead>
                         <tbody id="openTradesBody">
-                            <tr><td colspan="12" class="loading">Loading open trades...</td></tr>
+                            <tr><td colspan="12" class="loading"><div class="spinner"></div>Loading open trades...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1942,7 +1984,7 @@ def portfolio_page():
                             </tr>
                         </thead>
                         <tbody id="closedTradesBody">
-                            <tr><td colspan="9" class="loading">Loading closed trades...</td></tr>
+                            <tr><td colspan="9" class="loading"><div class="spinner"></div>Loading closed trades...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1977,17 +2019,42 @@ def portfolio_page():
 
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('Page loaded, initializing...');
             loadPortfolio();
             loadSummary();
             loadTrades();
             
             // Set today's date as default
-            document.getElementById('tradeDate').valueAsDate = new Date();
-            document.getElementById('closeDate').valueAsDate = new Date();
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('tradeDate').value = today;
+            document.getElementById('closeDate').value = today;
         });
 
+        // Calculate position size and risk amount automatically
+        function calculateValues() {
+            const buyPrice = parseFloat(document.getElementById('buyPrice').value) || 0;
+            const quantity = parseFloat(document.getElementById('quantity').value) || 0;
+            const stopLoss = parseFloat(document.getElementById('stopLoss').value) || 0;
+            
+            // Position Size = buy_price * quantity
+            const positionSize = buyPrice * quantity;
+            document.getElementById('positionSizeDisplay').textContent = 
+                '$' + positionSize.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            
+            // Risk Amount = |buy_price - stop_loss| * quantity
+            let riskAmount = 0;
+            if (stopLoss > 0) {
+                riskAmount = Math.abs(buyPrice - stopLoss) * quantity;
+            } else {
+                // Default 2% risk if no stop loss
+                riskAmount = positionSize * 0.02;
+            }
+            document.getElementById('riskAmountDisplay').textContent = 
+                '$' + riskAmount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+
         // Tab switching
-        function switchTab(tab) {
+        function switchTab(event, tab) {
             // Update tab buttons
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             event.target.classList.add('active');
@@ -2003,15 +2070,19 @@ def portfolio_page():
         // Load portfolio cash
         async function loadPortfolio() {
             try {
+                console.log('Loading portfolio...');
                 const res = await fetch('/api/portfolio');
                 const data = await res.json();
+                console.log('Portfolio response:', data);
                 if (data.success) {
                     portfolioCash = data.cash;
                     document.getElementById('portfolioCash').value = portfolioCash;
-                    document.getElementById('portfolioValue').textContent = '$' + portfolioCash.toLocaleString('en-US', {minimumFractionDigits: 2});
+                    document.getElementById('portfolioValue').textContent = 
+                        '$' + portfolioCash.toLocaleString('en-US', {minimumFractionDigits: 2});
                 }
             } catch (error) {
                 console.error('Error loading portfolio:', error);
+                showMessage('Error loading portfolio: ' + error.message, 'error');
             }
         }
 
@@ -2035,10 +2106,11 @@ def portfolio_page():
                 if (data.success) {
                     portfolioCash = cash;
                     showMessage('Portfolio balance updated!', 'success');
-                    loadSummary();
-                    loadTrades();
+                    await loadSummary();
+                    await loadTrades();
                 }
             } catch (error) {
+                console.error('Error updating portfolio:', error);
                 showMessage('Failed to update portfolio balance', 'error');
             }
         }
@@ -2046,16 +2118,20 @@ def portfolio_page():
         // Load portfolio summary
         async function loadSummary() {
             try {
+                console.log('Loading summary...');
                 const res = await fetch('/api/portfolio/summary');
                 const data = await res.json();
+                console.log('Summary response:', data);
                 
                 if (data.success) {
                     const summary = data.summary;
                     const stats = data.statistics;
                     
                     // Update summary
-                    document.getElementById('totalInvested').textContent = '$' + summary.total_invested.toLocaleString('en-US', {minimumFractionDigits: 2});
-                    document.getElementById('totalRisk').textContent = '$' + summary.total_risk.toLocaleString('en-US', {minimumFractionDigits: 2});
+                    document.getElementById('totalInvested').textContent = 
+                        '$' + summary.total_invested.toLocaleString('en-US', {minimumFractionDigits: 2});
+                    document.getElementById('totalRisk').textContent = 
+                        '$' + summary.total_risk.toLocaleString('en-US', {minimumFractionDigits: 2});
                     
                     const unrealizedEl = document.getElementById('unrealizedPnl');
                     unrealizedEl.textContent = '$' + summary.unrealized_pnl.toLocaleString('en-US', {minimumFractionDigits: 2});
@@ -2088,27 +2164,37 @@ def portfolio_page():
         // Load trades
         async function loadTrades() {
             try {
+                console.log('Loading trades...');
                 const res = await fetch('/api/trades/enriched');
                 const data = await res.json();
+                console.log('Trades response:', data);
                 
                 if (data.success) {
                     allTrades = data.trades;
+                    console.log('Loaded', allTrades.length, 'trades');
                     renderTrades();
+                } else {
+                    console.error('Failed to load trades:', data.error);
+                    showMessage('Failed to load trades: ' + data.error, 'error');
                 }
             } catch (error) {
                 console.error('Error loading trades:', error);
+                showMessage('Error loading trades: ' + error.message, 'error');
             }
         }
 
         // Render trades based on active tab
         function renderTrades() {
-            const activeTab = document.querySelector('.tab.active').textContent.toLowerCase();
+            const activeTab = document.querySelector('.tab.active');
+            if (!activeTab) return;
             
-            if (activeTab.includes('all')) {
+            const tabText = activeTab.textContent.toLowerCase();
+            
+            if (tabText.includes('all')) {
                 renderAllTrades();
-            } else if (activeTab.includes('open')) {
+            } else if (tabText.includes('open')) {
                 renderOpenTrades();
-            } else if (activeTab.includes('closed')) {
+            } else if (tabText.includes('closed')) {
                 renderClosedTrades();
             }
         }
@@ -2128,7 +2214,7 @@ def portfolio_page():
                 const pnlPct = trade.is_closed ? trade.realized_pnl_pct : trade.unrealized_pnl_pct;
                 
                 const warnings = (trade.warnings || []).map(w => 
-                    `<span class="warning-badge ${w.severity}">${w.type}</span>`
+                    `<span class="warning-badge ${w.severity}">${w.type.replace('_', ' ')}</span>`
                 ).join('');
                 
                 return `
@@ -2142,10 +2228,10 @@ def portfolio_page():
                         <td>$${parseFloat(trade.risk_amount).toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
                         <td class="${trade.risk_pct > 2 ? 'negative' : ''}">${trade.risk_pct}%</td>
                         <td class="${trade.rr_ratio !== null && trade.rr_ratio < 1.5 ? 'negative' : 'positive'}">${trade.rr_ratio !== null ? trade.rr_ratio.toFixed(2) : 'N/A'}</td>
-                        <td class="${pnl >= 0 ? 'positive' : 'negative'}">${pnl !== null ? '$' + pnl.toLocaleString('en-US', {minimumFractionDigits: 2}) : 'N/A'}</td>
-                        <td class="${pnlPct >= 0 ? 'positive' : 'negative'}">${pnlPct !== null ? pnlPct.toFixed(2) + '%' : 'N/A'}</td>
-                        <td>${warnings}</td>
-                        <td>
+                        <td class="${pnl !== null && pnl >= 0 ? 'positive' : 'negative'}">${pnl !== null ? '$' + pnl.toLocaleString('en-US', {minimumFractionDigits: 2}) : 'N/A'}</td>
+                        <td class="${pnlPct !== null && pnlPct >= 0 ? 'positive' : 'negative'}">${pnlPct !== null ? pnlPct.toFixed(2) + '%' : 'N/A'}</td>
+                        <td>${warnings || '-'}</td>
+                        <td style="white-space: nowrap;">
                             ${!trade.is_closed ? `<button class="btn-close" onclick="openCloseModal(${trade.id})">Close</button>` : ''}
                             <button class="btn-edit" onclick="editTrade(${trade.id})">Edit</button>
                             <button class="btn-delete" onclick="deleteTrade(${trade.id})">Delete</button>
@@ -2167,7 +2253,7 @@ def portfolio_page():
 
             tbody.innerHTML = openTrades.map(trade => {
                 const warnings = (trade.warnings || []).map(w => 
-                    `<span class="warning-badge ${w.severity}">${w.type}</span>`
+                    `<span class="warning-badge ${w.severity}">${w.type.replace('_', ' ')}</span>`
                 ).join('');
                 
                 return `
@@ -2180,10 +2266,10 @@ def portfolio_page():
                         <td>$${parseFloat(trade.risk_amount).toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
                         <td class="${trade.risk_pct > 2 ? 'negative' : ''}">${trade.risk_pct}%</td>
                         <td class="${trade.rr_ratio !== null && trade.rr_ratio < 1.5 ? 'negative' : 'positive'}">${trade.rr_ratio !== null ? trade.rr_ratio.toFixed(2) : 'N/A'}</td>
-                        <td class="${trade.unrealized_pnl >= 0 ? 'positive' : 'negative'}">${trade.unrealized_pnl !== null ? '$' + trade.unrealized_pnl.toLocaleString('en-US', {minimumFractionDigits: 2}) : 'N/A'}</td>
-                        <td class="${trade.unrealized_pnl_pct >= 0 ? 'positive' : 'negative'}">${trade.unrealized_pnl_pct !== null ? trade.unrealized_pnl_pct.toFixed(2) + '%' : 'N/A'}</td>
-                        <td>${warnings}</td>
-                        <td>
+                        <td class="${trade.unrealized_pnl !== null && trade.unrealized_pnl >= 0 ? 'positive' : 'negative'}">${trade.unrealized_pnl !== null ? '$' + trade.unrealized_pnl.toLocaleString('en-US', {minimumFractionDigits: 2}) : 'N/A'}</td>
+                        <td class="${trade.unrealized_pnl_pct !== null && trade.unrealized_pnl_pct >= 0 ? 'positive' : 'negative'}">${trade.unrealized_pnl_pct !== null ? trade.unrealized_pnl_pct.toFixed(2) + '%' : 'N/A'}</td>
+                        <td>${warnings || '-'}</td>
+                        <td style="white-space: nowrap;">
                             <button class="btn-close" onclick="openCloseModal(${trade.id})">Close</button>
                             <button class="btn-edit" onclick="editTrade(${trade.id})">Edit</button>
                             <button class="btn-delete" onclick="deleteTrade(${trade.id})">Delete</button>
@@ -2214,7 +2300,7 @@ def portfolio_page():
                         <td>${parseFloat(trade.quantity).toFixed(4)}</td>
                         <td class="${trade.realized_pnl >= 0 ? 'positive' : 'negative'}">$${trade.realized_pnl.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
                         <td class="${trade.realized_pnl_pct >= 0 ? 'positive' : 'negative'}">${trade.realized_pnl_pct.toFixed(2)}%</td>
-                        <td>
+                        <td style="white-space: nowrap;">
                             <button class="btn-edit" onclick="editTrade(${trade.id})">Edit</button>
                             <button class="btn-delete" onclick="deleteTrade(${trade.id})">Delete</button>
                         </td>
@@ -2228,26 +2314,40 @@ def portfolio_page():
             const ticker = document.getElementById('ticker').value.toUpperCase().trim();
             const buyPrice = parseFloat(document.getElementById('buyPrice').value);
             const quantity = parseFloat(document.getElementById('quantity').value);
-            const positionSize = parseFloat(document.getElementById('positionSize').value);
-            const riskAmount = parseFloat(document.getElementById('riskAmount').value);
             const stopLoss = document.getElementById('stopLoss').value ? parseFloat(document.getElementById('stopLoss').value) : null;
             const takeProfit = document.getElementById('takeProfit').value ? parseFloat(document.getElementById('takeProfit').value) : null;
             const timeframe = document.getElementById('timeframe').value;
             const tradeDate = document.getElementById('tradeDate').value;
             const notes = document.getElementById('notes').value.trim();
 
-            if (!ticker || isNaN(buyPrice) || isNaN(quantity) || isNaN(positionSize) || isNaN(riskAmount) || !tradeDate) {
-                showMessage('Please fill in all required fields', 'error');
+            if (!ticker || isNaN(buyPrice) || isNaN(quantity) || !tradeDate) {
+                showMessage('Please fill in all required fields (Ticker, Buy Price, Quantity, Date)', 'error');
+                return;
+            }
+
+            if (buyPrice <= 0 || quantity <= 0) {
+                showMessage('Buy price and quantity must be positive', 'error');
                 return;
             }
 
             const payload = {
-                ticker, buy_price: buyPrice, quantity, position_size: positionSize,
-                risk_amount: riskAmount, timeframe, trade_date: tradeDate,
-                stop_loss: stopLoss, take_profit: takeProfit, notes: notes || null
+                ticker,
+                buy_price: buyPrice,
+                quantity,
+                timeframe,
+                trade_date: tradeDate,
+                stop_loss: stopLoss,
+                take_profit: takeProfit,
+                notes: notes || null
             };
 
+            console.log('Saving trade:', payload);
+
             try {
+                const saveBtn = document.getElementById('saveTradeBtn');
+                saveBtn.disabled = true;
+                saveBtn.textContent = editingTradeId ? 'Updating...' : 'Adding...';
+                
                 const url = editingTradeId ? `/api/trades/${editingTradeId}` : '/api/trades';
                 const method = editingTradeId ? 'PUT' : 'POST';
                 
@@ -2258,32 +2358,50 @@ def portfolio_page():
                 });
                 
                 const data = await res.json();
+                console.log('Save response:', data);
+                
                 if (data.success) {
                     showMessage(editingTradeId ? 'Trade updated!' : 'Trade added!', 'success');
                     clearForm();
-                    loadSummary();
-                    loadTrades();
+                    
+                    // Reload all data
+                    await Promise.all([
+                        loadSummary(),
+                        loadTrades()
+                    ]);
+                } else {
+                    showMessage('Failed to save trade: ' + (data.error || 'Unknown error'), 'error');
                 }
             } catch (error) {
-                showMessage('Failed to save trade', 'error');
+                console.error('Error saving trade:', error);
+                showMessage('Failed to save trade: ' + error.message, 'error');
+            } finally {
+                const saveBtn = document.getElementById('saveTradeBtn');
+                saveBtn.disabled = false;
+                saveBtn.textContent = editingTradeId ? 'Update Trade' : 'Add Trade';
             }
         }
 
         // Edit trade
         function editTrade(id) {
             const trade = allTrades.find(t => t.id === id);
-            if (!trade) return;
+            if (!trade) {
+                console.error('Trade not found:', id);
+                return;
+            }
+
+            console.log('Editing trade:', trade);
 
             document.getElementById('ticker').value = trade.ticker;
             document.getElementById('buyPrice').value = trade.buy_price;
             document.getElementById('quantity').value = trade.quantity;
-            document.getElementById('positionSize').value = trade.position_size;
-            document.getElementById('riskAmount').value = trade.risk_amount;
             document.getElementById('stopLoss').value = trade.stop_loss || '';
             document.getElementById('takeProfit').value = trade.take_profit || '';
             document.getElementById('timeframe').value = trade.timeframe;
             document.getElementById('tradeDate').value = trade.trade_date;
             document.getElementById('notes').value = trade.notes || '';
+
+            calculateValues();
 
             editingTradeId = id;
             document.getElementById('formTitle').textContent = '✏️ Edit Trade';
@@ -2291,7 +2409,7 @@ def portfolio_page():
             document.getElementById('cancelBtn').style.display = 'inline-block';
             
             // Scroll to form
-            document.querySelector('.card').scrollIntoView({ behavior: 'smooth' });
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         // Delete trade
@@ -2304,11 +2422,16 @@ def portfolio_page():
                 
                 if (data.success) {
                     showMessage('Trade deleted', 'success');
-                    loadSummary();
-                    loadTrades();
+                    await Promise.all([
+                        loadSummary(),
+                        loadTrades()
+                    ]);
+                } else {
+                    showMessage('Failed to delete trade: ' + data.error, 'error');
                 }
             } catch (error) {
-                showMessage('Failed to delete trade', 'error');
+                console.error('Error deleting trade:', error);
+                showMessage('Failed to delete trade: ' + error.message, 'error');
             }
         }
 
@@ -2316,7 +2439,7 @@ def portfolio_page():
         function openCloseModal(id) {
             closingTradeId = id;
             document.getElementById('closeModal').classList.add('active');
-            document.getElementById('closeDate').valueAsDate = new Date();
+            document.getElementById('closeDate').value = new Date().toISOString().split('T')[0];
         }
 
         // Close modal
@@ -2347,11 +2470,16 @@ def portfolio_page():
                 if (data.success) {
                     showMessage('Trade closed successfully!', 'success');
                     closeModal();
-                    loadSummary();
-                    loadTrades();
+                    await Promise.all([
+                        loadSummary(),
+                        loadTrades()
+                    ]);
+                } else {
+                    showMessage('Failed to close trade: ' + data.error, 'error');
                 }
             } catch (error) {
-                showMessage('Failed to close trade', 'error');
+                console.error('Error closing trade:', error);
+                showMessage('Failed to close trade: ' + error.message, 'error');
             }
         }
 
@@ -2360,13 +2488,13 @@ def portfolio_page():
             document.getElementById('ticker').value = '';
             document.getElementById('buyPrice').value = '';
             document.getElementById('quantity').value = '';
-            document.getElementById('positionSize').value = '';
-            document.getElementById('riskAmount').value = '';
             document.getElementById('stopLoss').value = '';
             document.getElementById('takeProfit').value = '';
             document.getElementById('timeframe').value = 'Long';
-            document.getElementById('tradeDate').valueAsDate = new Date();
+            document.getElementById('tradeDate').value = new Date().toISOString().split('T')[0];
             document.getElementById('notes').value = '';
+            
+            calculateValues();
             
             editingTradeId = null;
             document.getElementById('formTitle').textContent = '➕ Add New Trade';
