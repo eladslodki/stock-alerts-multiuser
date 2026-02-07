@@ -2420,6 +2420,33 @@ def update_portfolio():
         logger.error(f"Error updating portfolio for user {current_user.id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/portfolio/summary', methods=['GET'])
+@login_required
+def get_portfolio_summary():
+    """Get comprehensive portfolio summary with all metrics"""
+    try:
+        portfolio_cash = float(Portfolio.get_user_portfolio(current_user.id))
+        trades_raw = Trade.get_user_trades(current_user.id)
+        
+        # Convert to dict list
+        trades = [dict(t) for t in trades_raw]
+        
+        # Calculate summary
+        summary = portfolio_calculator.calculate_portfolio_summary(trades, portfolio_cash)
+        
+        # Get trading statistics
+        stats = Trade.get_trade_statistics(current_user.id)
+        
+        return jsonify({
+            'success': True,
+            'portfolio_cash': portfolio_cash,
+            'summary': summary,
+            'statistics': stats
+        })
+    except Exception as e:
+        logger.error(f"Error getting portfolio summary for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/trades', methods=['GET'])
 @login_required
 def get_trades():
@@ -2531,55 +2558,126 @@ def get_enriched_trades():
 
 @app.route('/api/trades', methods=['POST'])
 @login_required
-def create_trade_enhanced():
-    """Create a new trade with optional stop loss, take profit, and notes"""
+def create_trade():
+    """
+    Create a new trade with automatic calculations
+    Position Size = buy_price * quantity
+    Risk Amount = |buy_price - stop_loss| * quantity
+    """
     try:
         data = request.json
         
+        # Get required fields
+        ticker = data['ticker'].upper()
+        buy_price = float(data['buy_price'])
+        quantity = float(data['quantity'])
+        timeframe = data['timeframe']
+        trade_date = data['trade_date']
+        
+        # Get optional fields
+        stop_loss = float(data['stop_loss']) if data.get('stop_loss') else None
+        take_profit = float(data['take_profit']) if data.get('take_profit') else None
+        notes = data.get('notes', '').strip() or None
+        
+        # AUTOMATIC CALCULATIONS
+        # Position Size = buy_price * quantity
+        position_size = buy_price * quantity
+        
+        # Risk Amount = |buy_price - stop_loss| * quantity (if stop_loss provided)
+        if stop_loss is not None:
+            risk_amount = abs(buy_price - stop_loss) * quantity
+        else:
+            # Default risk if no stop loss (e.g., 2% of position)
+            risk_amount = position_size * 0.02
+        
+        logger.info(f"Creating trade for user {current_user.id}: {ticker} - Position: ${position_size:.2f}, Risk: ${risk_amount:.2f}")
+        
         trade_id = Trade.create_trade(
             current_user.id,
-            data['ticker'].upper(),
-            data['buy_price'],
-            data['quantity'],
-            data['position_size'],
-            data['risk_amount'],
-            data['timeframe'],
-            data['trade_date'],
-            data.get('stop_loss'),
-            data.get('take_profit'),
-            data.get('notes')
+            ticker,
+            buy_price,
+            quantity,
+            position_size,
+            risk_amount,
+            timeframe,
+            trade_date,
+            stop_loss,
+            take_profit,
+            notes
         )
         
+        logger.info(f"Trade created successfully with ID: {trade_id}")
         return jsonify({'success': True, 'id': trade_id})
+    except KeyError as e:
+        logger.error(f"Missing required field: {e}")
+        return jsonify({'success': False, 'error': f'Missing required field: {e}'}), 400
     except Exception as e:
         logger.error(f"Error creating trade for user {current_user.id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/trades/<int:trade_id>', methods=['PUT'])
 @login_required
-def update_trade_enhanced(trade_id):
-    """Update a trade with optional stop loss, take profit, and notes"""
+def update_trade_route(trade_id):
+    """
+    Update a trade with automatic calculations
+    Position Size = buy_price * quantity
+    Risk Amount = |buy_price - stop_loss| * quantity
+    """
     try:
         data = request.json
+        
+        # Get required fields
+        ticker = data['ticker'].upper()
+        buy_price = float(data['buy_price'])
+        quantity = float(data['quantity'])
+        timeframe = data['timeframe']
+        trade_date = data['trade_date']
+        
+        # Get optional fields
+        stop_loss = float(data['stop_loss']) if data.get('stop_loss') else None
+        take_profit = float(data['take_profit']) if data.get('take_profit') else None
+        notes = data.get('notes', '').strip() or None
+        
+        # AUTOMATIC CALCULATIONS
+        # Position Size = buy_price * quantity
+        position_size = buy_price * quantity
+        
+        # Risk Amount = |buy_price - stop_loss| * quantity (if stop_loss provided)
+        if stop_loss is not None:
+            risk_amount = abs(buy_price - stop_loss) * quantity
+        else:
+            # Default risk if no stop loss
+            risk_amount = position_size * 0.02
         
         Trade.update_trade(
             trade_id,
             current_user.id,
-            data['ticker'].upper(),
-            data['buy_price'],
-            data['quantity'],
-            data['position_size'],
-            data['risk_amount'],
-            data['timeframe'],
-            data['trade_date'],
-            data.get('stop_loss'),
-            data.get('take_profit'),
-            data.get('notes')
+            ticker,
+            buy_price,
+            quantity,
+            position_size,
+            risk_amount,
+            timeframe,
+            trade_date,
+            stop_loss,
+            take_profit,
+            notes
         )
         
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Error updating trade {trade_id} for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/trades/<int:trade_id>', methods=['DELETE'])
+@login_required
+def delete_trade_route(trade_id):
+    """Delete a trade"""
+    try:
+        Trade.delete_trade(trade_id, current_user.id)
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Error deleting trade {trade_id} for user {current_user.id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/trades/<int:trade_id>/close', methods=['POST'])
@@ -2608,7 +2706,6 @@ def reopen_trade_route(trade_id):
     except Exception as e:
         logger.error(f"Error reopening trade {trade_id} for user {current_user.id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
-
 @app.route('/api/trades/<int:trade_id>/current-price', methods=['GET'])
 @login_required
 def get_trade_current_price(trade_id):
