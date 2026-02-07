@@ -8,6 +8,7 @@ from price_checker import price_checker
 from alert_processor import alert_processor
 from ticker_fetcher import ticker_fetcher
 from bitcoin_scanner import bitcoin_scanner
+from portfolio_calculator import portfolio_calculator
 import time
 
 # Configure logging
@@ -1269,476 +1270,1125 @@ def portfolio_page():
     html = """
     <!DOCTYPE html>
     <html>
-    <head>
-        <title>Portfolio - Stock Alerts</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                min-height: 100vh;
-                color: #fff;
-                padding: 20px;
+<head>
+    <title>Portfolio Management - Stock Alerts</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 20px;
+        }
+        
+        .container { max-width: 1600px; margin: 0 auto; }
+        
+        /* Navigation */
+        .nav {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            padding: 15px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+            flex-wrap: wrap;
+        }
+        .nav a {
+            color: #64ffda;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+        .nav a:hover { color: #fff; }
+        
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+        
+        /* Card Styles */
+        .card {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }
+        
+        .card h2 {
+            color: #64ffda;
+            margin-bottom: 20px;
+            font-size: 22px;
+        }
+        
+        .card h3 {
+            color: #64ffda;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        /* Portfolio Summary Grid */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .summary-item {
+            background: rgba(100,255,218,0.1);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(100,255,218,0.2);
+        }
+        
+        .summary-label {
+            font-size: 13px;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .summary-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #64ffda;
+        }
+        
+        .summary-value.positive { color: #4caf50; }
+        .summary-value.negative { color: #f44336; }
+        
+        /* Statistics */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+        
+        .stat-item {
+            background: rgba(255,255,255,0.05);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: rgba(255,255,255,0.6);
+            margin-bottom: 5px;
+        }
+        
+        .stat-value {
+            font-size: 20px;
+            font-weight: 600;
+            color: #fff;
+        }
+        
+        /* Form Styles */
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #64ffda;
+            font-size: 14px;
+        }
+        
+        input, select, textarea {
+            width: 100%;
+            padding: 12px 15px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 15px;
+            font-family: inherit;
+        }
+        
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #64ffda;
+            background: rgba(255,255,255,0.15);
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        /* Buttons */
+        button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 15px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102,126,234,0.4);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        .btn-delete {
+            background: linear-gradient(135deg, #f44336 0%, #e91e63 100%);
+            padding: 8px 16px;
+            font-size: 13px;
+        }
+        
+        .btn-edit {
+            background: linear-gradient(135deg, #ff9800 0%, #ff5722 100%);
+            padding: 8px 16px;
+            font-size: 13px;
+            margin-right: 8px;
+        }
+        
+        .btn-close {
+            background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+            padding: 8px 16px;
+            font-size: 13px;
+            margin-right: 8px;
+        }
+        
+        .btn-secondary {
+            background: rgba(255,255,255,0.1);
+            margin-left: 10px;
+        }
+        
+        /* Table Styles */
+        .table-container {
+            overflow-x: auto;
+            margin-top: 20px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 1000px;
+        }
+        
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        th {
+            background: rgba(100,255,218,0.1);
+            color: #64ffda;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        tbody tr {
+            transition: background 0.2s;
+        }
+        
+        tbody tr:hover {
+            background: rgba(255,255,255,0.05);
+        }
+        
+        .ticker-cell {
+            font-weight: 700;
+            color: #64ffda;
+            font-size: 15px;
+        }
+        
+        .positive {
+            color: #4caf50;
+            font-weight: 600;
+        }
+        
+        .negative {
+            color: #f44336;
+            font-weight: 600;
+        }
+        
+        .neutral {
+            color: #ffc107;
+        }
+        
+        /* Warning Badges */
+        .warning-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin: 2px;
+            text-transform: uppercase;
+        }
+        
+        .warning-badge.error {
+            background: rgba(244,67,54,0.3);
+            border: 1px solid #f44336;
+            color: #ff5252;
+        }
+        
+        .warning-badge.warning {
+            background: rgba(255,193,7,0.3);
+            border: 1px solid #ffc107;
+            color: #ffd54f;
+        }
+        
+        /* Status Badges */
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .status-badge.open {
+            background: rgba(76,175,80,0.2);
+            color: #4caf50;
+        }
+        
+        .status-badge.closed {
+            background: rgba(158,158,158,0.2);
+            color: #9e9e9e;
+        }
+        
+        /* Messages */
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        
+        .success {
+            background: rgba(76,175,80,0.2);
+            border: 1px solid rgba(76,175,80,0.4);
+            color: #4caf50;
+        }
+        
+        .error {
+            background: rgba(244,67,54,0.2);
+            border: 1px solid rgba(244,67,54,0.4);
+            color: #f44336;
+        }
+        
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #64ffda;
+        }
+        
+        .spinner {
+            border: 3px solid rgba(100,255,218,0.1);
+            border-top: 3px solid #64ffda;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(5px);
+        }
+        
+        .modal.active { display: flex; align-items: center; justify-content: center; }
+        
+        .modal-content {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 30px;
+            border-radius: 15px;
+            max-width: 500px;
+            width: 90%;
+            border: 1px solid rgba(100,255,218,0.2);
+        }
+        
+        .modal-header {
+            margin-bottom: 20px;
+        }
+        
+        .modal-header h3 {
+            color: #64ffda;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .summary-grid {
+                grid-template-columns: 1fr;
             }
-            .nav {
-                display: flex;
-                gap: 20px;
-                margin-bottom: 30px;
-                padding: 15px;
-                background: rgba(255,255,255,0.05);
-                border-radius: 10px;
-                flex-wrap: wrap;
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
             }
-            .nav a {
-                color: #64ffda;
-                text-decoration: none;
-                font-weight: 500;
-            }
-            .container { max-width: 1400px; margin: 0 auto; }
-            .header {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                padding: 30px;
-                border-radius: 15px;
-                margin-bottom: 30px;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-            }
-            .card {
-                background: rgba(255,255,255,0.05);
-                backdrop-filter: blur(10px);
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 15px;
-                padding: 25px;
-                margin-bottom: 25px;
-                box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-            }
-            .form-group {
-                margin-bottom: 15px;
-            }
-            label {
-                display: block;
-                margin-bottom: 8px;
-                font-weight: 500;
-                color: #64ffda;
-                font-size: 14px;
-            }
-            input, select {
-                width: 100%;
-                padding: 12px 15px;
-                background: rgba(255,255,255,0.1);
-                border: 1px solid rgba(255,255,255,0.2);
-                border-radius: 8px;
-                color: #fff;
-                font-size: 15px;
-            }
-            input:focus, select:focus {
-                outline: none;
-                border-color: #64ffda;
-            }
-            button {
-                padding: 12px 24px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                border: none;
-                border-radius: 8px;
-                font-weight: 600;
-                cursor: pointer;
-                font-size: 15px;
-                transition: transform 0.2s;
-            }
-            button:hover { transform: translateY(-2px); }
-            .btn-delete {
-                background: linear-gradient(135deg, #f44336 0%, #e91e63 100%);
-                padding: 8px 16px;
-                font-size: 13px;
-            }
-            .btn-edit {
-                background: linear-gradient(135deg, #ff9800 0%, #ff5722 100%);
-                padding: 8px 16px;
-                font-size: 13px;
-                margin-right: 8px;
-            }
+            
             .grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 15px;
+                grid-template-columns: 1fr;
             }
-            @media (max-width: 768px) {
-                .grid { grid-template-columns: 1fr; }
-            }
+            
             table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 20px;
+                font-size: 12px;
             }
+            
             th, td {
-                padding: 12px;
-                text-align: left;
-                border-bottom: 1px solid rgba(255,255,255,0.1);
+                padding: 8px 4px;
             }
-            th {
-                background: rgba(100,255,218,0.1);
-                color: #64ffda;
-                font-weight: 600;
+            
+            .summary-value {
+                font-size: 22px;
             }
-            .portfolio-pct {
-                font-weight: 600;
-                color: #ffc107;
-            }
-            .message {
-                padding: 12px;
-                border-radius: 8px;
-                margin-bottom: 15px;
-            }
-            .success {
-                background: rgba(76,175,80,0.2);
-                border: 1px solid rgba(76,175,80,0.4);
-                color: #4caf50;
-            }
-            .error {
-                background: rgba(244,67,54,0.2);
-                border: 1px solid rgba(244,67,54,0.4);
-                color: #f44336;
-            }
-            .cash-display {
-                font-size: 32px;
-                font-weight: 700;
-                color: #64ffda;
-                margin-top: 10px;
-            }
-            @media (max-width: 768px) {
-                table { font-size: 12px; }
-                th, td { padding: 8px 4px; }
-                .cash-display { font-size: 24px; }
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="nav">
-                <a href="/dashboard">📊 Stock Alerts</a>
-                <a href="/bitcoin-scanner">₿ Bitcoin Scanner</a>
-                <a href="/portfolio">💼 Portfolio</a>
-                <a href="#" onclick="logout()">Logout</a>
+        }
+        
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid rgba(255,255,255,0.1);
+        }
+        
+        .tab {
+            padding: 12px 24px;
+            background: transparent;
+            border: none;
+            color: rgba(255,255,255,0.6);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.3s;
+        }
+        
+        .tab.active {
+            color: #64ffda;
+            border-bottom-color: #64ffda;
+        }
+        
+        .tab:hover {
+            color: #fff;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Navigation -->
+        <div class="nav">
+            <a href="/dashboard">📊 Stock Alerts</a>
+            <a href="/bitcoin-scanner">₿ Bitcoin Scanner</a>
+            <a href="/portfolio">💼 Portfolio</a>
+            <a href="#" onclick="logout()">Logout</a>
+        </div>
+
+        <!-- Header -->
+        <div class="header">
+            <h1>💼 Professional Portfolio Management</h1>
+            <p>Advanced trading & risk management tools</p>
+        </div>
+
+        <div id="message"></div>
+
+        <!-- Portfolio Cash -->
+        <div class="card">
+            <h2>Portfolio Balance</h2>
+            <div class="form-group">
+                <label>Total Portfolio Cash ($)</label>
+                <input type="number" id="portfolioCash" placeholder="Enter total portfolio value" step="0.01" min="0">
             </div>
+            <button onclick="updatePortfolioCash()">Update Balance</button>
+        </div>
 
-            <div class="header">
-                <h1>💼 Portfolio Management</h1>
-                <p>Track your trades and manage your portfolio</p>
+        <!-- Portfolio Summary -->
+        <div class="card" id="summaryCard">
+            <h2>📈 Portfolio Overview</h2>
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <div class="summary-label">Portfolio Value</div>
+                    <div class="summary-value" id="portfolioValue">$0.00</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Total Invested</div>
+                    <div class="summary-value" id="totalInvested">$0.00</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Total at Risk</div>
+                    <div class="summary-value neutral" id="totalRisk">$0.00</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Unrealized P&L</div>
+                    <div class="summary-value" id="unrealizedPnl">$0.00</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Realized P&L</div>
+                    <div class="summary-value" id="realizedPnl">$0.00</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Total Return</div>
+                    <div class="summary-value" id="portfolioReturn">0.00%</div>
+                </div>
             </div>
+        </div>
 
-            <div id="message"></div>
+        <!-- Trading Statistics -->
+        <div class="card" id="statsCard">
+            <h2>📊 Trading Performance</h2>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-label">Win Rate</div>
+                    <div class="stat-value" id="winRate">0%</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Total Trades</div>
+                    <div class="stat-value" id="totalTrades">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Wins / Losses</div>
+                    <div class="stat-value" id="winsLosses">0 / 0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Avg Win</div>
+                    <div class="stat-value positive" id="avgWin">$0.00</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Avg Loss</div>
+                    <div class="stat-value negative" id="avgLoss">$0.00</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Expectancy</div>
+                    <div class="stat-value" id="expectancy">$0.00</div>
+                </div>
+            </div>
+        </div>
 
-            <!-- Portfolio Cash -->
-            <div class="card">
-                <h2 style="color: #64ffda; margin-bottom: 20px;">Portfolio Cash</h2>
+        <!-- Add/Edit Trade Form -->
+        <div class="card">
+            <h2 id="formTitle">➕ Add New Trade</h2>
+            <div class="grid">
                 <div class="form-group">
-                    <label>Total Portfolio Cash ($)</label>
-                    <input type="number" id="portfolioCash" placeholder="Enter total portfolio value" step="0.01" min="0">
+                    <label>Ticker *</label>
+                    <input type="text" id="ticker" placeholder="e.g., AAPL" maxlength="10">
                 </div>
-                <button onclick="updatePortfolioCash()">Update Portfolio Cash</button>
-                <div class="cash-display" id="cashDisplay">$0.00</div>
+                <div class="form-group">
+                    <label>Buy Price ($) *</label>
+                    <input type="number" id="buyPrice" step="0.01" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Quantity *</label>
+                    <input type="number" id="quantity" step="0.0001" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Position Size ($) *</label>
+                    <input type="number" id="positionSize" step="0.01" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Risk Amount ($) *</label>
+                    <input type="number" id="riskAmount" step="0.01" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Stop Loss ($)</label>
+                    <input type="number" id="stopLoss" step="0.01" min="0" placeholder="Optional">
+                </div>
+                <div class="form-group">
+                    <label>Take Profit ($)</label>
+                    <input type="number" id="takeProfit" step="0.01" min="0" placeholder="Optional">
+                </div>
+                <div class="form-group">
+                    <label>Timeframe *</label>
+                    <select id="timeframe">
+                        <option value="Long">Long</option>
+                        <option value="Swing">Swing</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Trade Date *</label>
+                    <input type="date" id="tradeDate">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Notes</label>
+                <textarea id="notes" placeholder="Optional trade notes..."></textarea>
+            </div>
+            <button id="saveTradeBtn" onclick="saveTrade()">Add Trade</button>
+            <button class="btn-secondary" onclick="clearForm()" style="display:none;" id="cancelBtn">Cancel</button>
+        </div>
+
+        <!-- Trades Table -->
+        <div class="card">
+            <h2>📋 Trade Journal</h2>
+            
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('all')">All Trades</button>
+                <button class="tab" onclick="switchTab('open')">Open Positions</button>
+                <button class="tab" onclick="switchTab('closed')">Closed Positions</button>
             </div>
 
-            <!-- Add Trade Form -->
-            <div class="card">
-                <h2 style="color: #64ffda; margin-bottom: 20px;">Add New Trade</h2>
-                <div class="grid">
-                    <div class="form-group">
-                        <label>Ticker</label>
-                        <input type="text" id="ticker" placeholder="e.g., AAPL" maxlength="10">
-                    </div>
-                    <div class="form-group">
-                        <label>Buy Price ($)</label>
-                        <input type="number" id="buyPrice" step="0.01" min="0">
-                    </div>
-                    <div class="form-group">
-                        <label>Quantity</label>
-                        <input type="number" id="quantity" step="0.0001" min="0">
-                    </div>
-                    <div class="form-group">
-                        <label>Position Size ($)</label>
-                        <input type="number" id="positionSize" step="0.01" min="0">
-                    </div>
-                    <div class="form-group">
-                        <label>Risk Amount ($)</label>
-                        <input type="number" id="riskAmount" step="0.01" min="0">
-                    </div>
-                    <div class="form-group">
-                        <label>Timeframe</label>
-                        <select id="timeframe">
-                            <option value="Long">Long</option>
-                            <option value="Swing">Swing</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Trade Date</label>
-                        <input type="date" id="tradeDate">
-                    </div>
-                </div>
-                <button onclick="addTrade()" id="addTradeBtn">Add Trade</button>
-            </div>
-
-            <!-- Trades Table -->
-            <div class="card">
-                <h2 style="color: #64ffda; margin-bottom: 20px;">My Trades</h2>
-                <div style="overflow-x: auto;">
-                    <table id="tradesTable">
+            <!-- All Trades Tab -->
+            <div id="allTab" class="tab-content active">
+                <div class="table-container">
+                    <table>
                         <thead>
                             <tr>
+                                <th>Status</th>
                                 <th>Ticker</th>
+                                <th>Date</th>
                                 <th>Buy Price</th>
-                                <th>Quantity</th>
-                                <th>Position Size</th>
-                                <th>Risk Amount</th>
-                                <th>Portfolio %</th>
-                                <th>Timeframe</th>
-                                <th>Trade Date</th>
+                                <th>Qty</th>
+                                <th>Position $</th>
+                                <th>Risk $</th>
+                                <th>Risk %</th>
+                                <th>R:R</th>
+                                <th>P&L $</th>
+                                <th>P&L %</th>
+                                <th>Warnings</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="tradesBody">
+                        <tbody id="allTradesBody">
+                            <tr><td colspan="13" class="loading">Loading trades...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Open Trades Tab -->
+            <div id="openTab" class="tab-content">
+                <div class="table-container">
+                    <table>
+                        <thead>
                             <tr>
-                                <td colspan="9" style="text-align: center; padding: 40px;">
-                                    Loading trades...
-                                </td>
+                                <th>Ticker</th>
+                                <th>Date</th>
+                                <th>Buy Price</th>
+                                <th>Qty</th>
+                                <th>Position $</th>
+                                <th>Risk $</th>
+                                <th>Risk %</th>
+                                <th>R:R</th>
+                                <th>Unrealized P&L $</th>
+                                <th>Unrealized P&L %</th>
+                                <th>Warnings</th>
+                                <th>Actions</th>
                             </tr>
+                        </thead>
+                        <tbody id="openTradesBody">
+                            <tr><td colspan="12" class="loading">Loading open trades...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Closed Trades Tab -->
+            <div id="closedTab" class="tab-content">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Ticker</th>
+                                <th>Open Date</th>
+                                <th>Close Date</th>
+                                <th>Buy Price</th>
+                                <th>Close Price</th>
+                                <th>Qty</th>
+                                <th>Realized P&L $</th>
+                                <th>Realized P&L %</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="closedTradesBody">
+                            <tr><td colspan="9" class="loading">Loading closed trades...</td></tr>
                         </tbody>
                     </table>
                 </div>
             </div>
         </div>
+    </div>
 
-        <script>
-            let portfolioCash = 0;
-            let editingTradeId = null;
+    <!-- Close Trade Modal -->
+    <div id="closeModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Close Trade</h3>
+            </div>
+            <div class="form-group">
+                <label>Close Price ($)</label>
+                <input type="number" id="closePrice" step="0.01" min="0">
+            </div>
+            <div class="form-group">
+                <label>Close Date</label>
+                <input type="date" id="closeDate">
+            </div>
+            <button onclick="confirmCloseTrade()">Close Trade</button>
+            <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+        </div>
+    </div>
 
-            // Load portfolio cash on page load
-            async function loadPortfolio() {
-                try {
-                    const res = await fetch('/api/portfolio');
-                    const data = await res.json();
-                    if (data.success) {
-                        portfolioCash = data.cash;
-                        document.getElementById('portfolioCash').value = portfolioCash;
-                        document.getElementById('cashDisplay').textContent = '$' + portfolioCash.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                    }
-                } catch (error) {
-                    console.error('Error loading portfolio:', error);
-                }
-            }
+    <script>
+        let portfolioCash = 0;
+        let allTrades = [];
+        let editingTradeId = null;
+        let closingTradeId = null;
 
-            // Update portfolio cash
-            async function updatePortfolioCash() {
-                const cash = parseFloat(document.getElementById('portfolioCash').value);
-                
-                if (isNaN(cash) || cash < 0) {
-                    showMessage('Please enter a valid amount', 'error');
-                    return;
-                }
-
-                try {
-                    const res = await fetch('/api/portfolio', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ cash })
-                    });
-                    
-                    const data = await res.json();
-                    if (data.success) {
-                        portfolioCash = cash;
-                        document.getElementById('cashDisplay').textContent = '$' + cash.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                        showMessage('Portfolio cash updated!', 'success');
-                        loadTrades(); // Refresh to update percentages
-                    }
-                } catch (error) {
-                    showMessage('Failed to update portfolio cash', 'error');
-                }
-            }
-
-            // Load trades
-            async function loadTrades() {
-                try {
-                    const res = await fetch('/api/trades');
-                    const data = await res.json();
-                    
-                    if (data.success) {
-                        renderTrades(data.trades);
-                    }
-                } catch (error) {
-                    console.error('Error loading trades:', error);
-                }
-            }
-
-            // Render trades table
-            function renderTrades(trades) {
-                const tbody = document.getElementById('tradesBody');
-                
-                if (trades.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 40px; color: #888;">No trades yet. Add your first trade above!</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = trades.map(trade => {
-                    const portfolioPct = portfolioCash > 0 ? ((trade.position_size / portfolioCash) * 100).toFixed(2) : 0;
-                    
-                    return `
-                        <tr>
-                            <td><strong>${trade.ticker}</strong></td>
-                            <td>$${parseFloat(trade.buy_price).toFixed(2)}</td>
-                            <td>${parseFloat(trade.quantity).toFixed(4)}</td>
-                            <td>$${parseFloat(trade.position_size).toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
-                            <td>$${parseFloat(trade.risk_amount).toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
-                            <td class="portfolio-pct">${portfolioPct}%</td>
-                            <td>${trade.timeframe}</td>
-                            <td>${trade.trade_date}</td>
-                            <td>
-                                <button class="btn-edit" onclick="editTrade(${trade.id})">Edit</button>
-                                <button class="btn-delete" onclick="deleteTrade(${trade.id})">Delete</button>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
-            }
-
-            // Add trade
-            async function addTrade() {
-                const ticker = document.getElementById('ticker').value.toUpperCase().trim();
-                const buyPrice = parseFloat(document.getElementById('buyPrice').value);
-                const quantity = parseFloat(document.getElementById('quantity').value);
-                const positionSize = parseFloat(document.getElementById('positionSize').value);
-                const riskAmount = parseFloat(document.getElementById('riskAmount').value);
-                const timeframe = document.getElementById('timeframe').value;
-                const tradeDate = document.getElementById('tradeDate').value;
-
-                if (!ticker || isNaN(buyPrice) || isNaN(quantity) || isNaN(positionSize) || isNaN(riskAmount) || !tradeDate) {
-                    showMessage('Please fill in all fields', 'error');
-                    return;
-                }
-
-                try {
-                    const res = await fetch('/api/trades', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            ticker, buy_price: buyPrice, quantity, position_size: positionSize,
-                            risk_amount: riskAmount, timeframe, trade_date: tradeDate
-                        })
-                    });
-                    
-                    const data = await res.json();
-                    if (data.success) {
-                        showMessage('Trade added successfully!', 'success');
-                        clearForm();
-                        loadTrades();
-                    }
-                } catch (error) {
-                    showMessage('Failed to add trade', 'error');
-                }
-            }
-
-            // Edit trade
-            async function editTrade(id) {
-                const trades = await (await fetch('/api/trades')).json();
-                const trade = trades.trades.find(t => t.id === id);
-                
-                if (!trade) return;
-
-                document.getElementById('ticker').value = trade.ticker;
-                document.getElementById('buyPrice').value = trade.buy_price;
-                document.getElementById('quantity').value = trade.quantity;
-                document.getElementById('positionSize').value = trade.position_size;
-                document.getElementById('riskAmount').value = trade.risk_amount;
-                document.getElementById('timeframe').value = trade.timeframe;
-                document.getElementById('tradeDate').value = trade.trade_date;
-
-                editingTradeId = id;
-                document.getElementById('addTradeBtn').textContent = 'Update Trade';
-                document.getElementById('addTradeBtn').onclick = updateTrade;
-            }
-
-            // Update trade
-            async function updateTrade() {
-                const ticker = document.getElementById('ticker').value.toUpperCase().trim();
-                const buyPrice = parseFloat(document.getElementById('buyPrice').value);
-                const quantity = parseFloat(document.getElementById('quantity').value);
-                const positionSize = parseFloat(document.getElementById('positionSize').value);
-                const riskAmount = parseFloat(document.getElementById('riskAmount').value);
-                const timeframe = document.getElementById('timeframe').value;
-                const tradeDate = document.getElementById('tradeDate').value;
-
-                try {
-                    const res = await fetch(`/api/trades/${editingTradeId}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            ticker, buy_price: buyPrice, quantity, position_size: positionSize,
-                            risk_amount: riskAmount, timeframe, trade_date: tradeDate
-                        })
-                    });
-                    
-                    const data = await res.json();
-                    if (data.success) {
-                        showMessage('Trade updated successfully!', 'success');
-                        clearForm();
-                        loadTrades();
-                        editingTradeId = null;
-                        document.getElementById('addTradeBtn').textContent = 'Add Trade';
-                        document.getElementById('addTradeBtn').onclick = addTrade;
-                    }
-                } catch (error) {
-                    showMessage('Failed to update trade', 'error');
-                }
-            }
-
-            // Delete trade
-            async function deleteTrade(id) {
-                if (!confirm('Delete this trade?')) return;
-
-                try {
-                    const res = await fetch(`/api/trades/${id}`, { method: 'DELETE' });
-                    const data = await res.json();
-                    
-                    if (data.success) {
-                        showMessage('Trade deleted!', 'success');
-                        loadTrades();
-                    }
-                } catch (error) {
-                    showMessage('Failed to delete trade', 'error');
-                }
-            }
-
-            // Clear form
-            function clearForm() {
-                document.getElementById('ticker').value = '';
-                document.getElementById('buyPrice').value = '';
-                document.getElementById('quantity').value = '';
-                document.getElementById('positionSize').value = '';
-                document.getElementById('riskAmount').value = '';
-                document.getElementById('timeframe').value = 'Long';
-                document.getElementById('tradeDate').value = '';
-            }
-
-            // Show message
-            function showMessage(msg, type) {
-                const msgEl = document.getElementById('message');
-                msgEl.innerHTML = `<div class="message ${type}">${msg}</div>`;
-                setTimeout(() => msgEl.innerHTML = '', 3000);
-            }
-
-            // Logout
-            async function logout() {
-                await fetch('/api/logout');
-                window.location.href = '/login';
-            }
-
-            // Initialize
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
             loadPortfolio();
+            loadSummary();
             loadTrades();
+            
+            // Set today's date as default
             document.getElementById('tradeDate').valueAsDate = new Date();
-        </script>
-    </body>
-    </html>
+            document.getElementById('closeDate').valueAsDate = new Date();
+        });
+
+        // Tab switching
+        function switchTab(tab) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById(tab + 'Tab').classList.add('active');
+            
+            // Render appropriate table
+            renderTrades();
+        }
+
+        // Load portfolio cash
+        async function loadPortfolio() {
+            try {
+                const res = await fetch('/api/portfolio');
+                const data = await res.json();
+                if (data.success) {
+                    portfolioCash = data.cash;
+                    document.getElementById('portfolioCash').value = portfolioCash;
+                    document.getElementById('portfolioValue').textContent = '$' + portfolioCash.toLocaleString('en-US', {minimumFractionDigits: 2});
+                }
+            } catch (error) {
+                console.error('Error loading portfolio:', error);
+            }
+        }
+
+        // Update portfolio cash
+        async function updatePortfolioCash() {
+            const cash = parseFloat(document.getElementById('portfolioCash').value);
+            
+            if (isNaN(cash) || cash < 0) {
+                showMessage('Please enter a valid amount', 'error');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/portfolio', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cash })
+                });
+                
+                const data = await res.json();
+                if (data.success) {
+                    portfolioCash = cash;
+                    showMessage('Portfolio balance updated!', 'success');
+                    loadSummary();
+                    loadTrades();
+                }
+            } catch (error) {
+                showMessage('Failed to update portfolio balance', 'error');
+            }
+        }
+
+        // Load portfolio summary
+        async function loadSummary() {
+            try {
+                const res = await fetch('/api/portfolio/summary');
+                const data = await res.json();
+                
+                if (data.success) {
+                    const summary = data.summary;
+                    const stats = data.statistics;
+                    
+                    // Update summary
+                    document.getElementById('totalInvested').textContent = '$' + summary.total_invested.toLocaleString('en-US', {minimumFractionDigits: 2});
+                    document.getElementById('totalRisk').textContent = '$' + summary.total_risk.toLocaleString('en-US', {minimumFractionDigits: 2});
+                    
+                    const unrealizedEl = document.getElementById('unrealizedPnl');
+                    unrealizedEl.textContent = '$' + summary.unrealized_pnl.toLocaleString('en-US', {minimumFractionDigits: 2});
+                    unrealizedEl.className = 'summary-value ' + (summary.unrealized_pnl >= 0 ? 'positive' : 'negative');
+                    
+                    const realizedEl = document.getElementById('realizedPnl');
+                    realizedEl.textContent = '$' + summary.realized_pnl.toLocaleString('en-US', {minimumFractionDigits: 2});
+                    realizedEl.className = 'summary-value ' + (summary.realized_pnl >= 0 ? 'positive' : 'negative');
+                    
+                    const returnEl = document.getElementById('portfolioReturn');
+                    returnEl.textContent = summary.portfolio_return_pct.toFixed(2) + '%';
+                    returnEl.className = 'summary-value ' + (summary.portfolio_return_pct >= 0 ? 'positive' : 'negative');
+                    
+                    // Update statistics
+                    document.getElementById('winRate').textContent = stats.win_rate.toFixed(1) + '%';
+                    document.getElementById('totalTrades').textContent = stats.total_trades;
+                    document.getElementById('winsLosses').textContent = stats.winning_trades + ' / ' + stats.losing_trades;
+                    document.getElementById('avgWin').textContent = '$' + stats.avg_win.toLocaleString('en-US', {minimumFractionDigits: 2});
+                    document.getElementById('avgLoss').textContent = '$' + stats.avg_loss.toLocaleString('en-US', {minimumFractionDigits: 2});
+                    
+                    const expectancyEl = document.getElementById('expectancy');
+                    expectancyEl.textContent = '$' + stats.expectancy.toLocaleString('en-US', {minimumFractionDigits: 2});
+                    expectancyEl.className = 'stat-value ' + (stats.expectancy >= 0 ? 'positive' : 'negative');
+                }
+            } catch (error) {
+                console.error('Error loading summary:', error);
+            }
+        }
+
+        // Load trades
+        async function loadTrades() {
+            try {
+                const res = await fetch('/api/trades/enriched');
+                const data = await res.json();
+                
+                if (data.success) {
+                    allTrades = data.trades;
+                    renderTrades();
+                }
+            } catch (error) {
+                console.error('Error loading trades:', error);
+            }
+        }
+
+        // Render trades based on active tab
+        function renderTrades() {
+            const activeTab = document.querySelector('.tab.active').textContent.toLowerCase();
+            
+            if (activeTab.includes('all')) {
+                renderAllTrades();
+            } else if (activeTab.includes('open')) {
+                renderOpenTrades();
+            } else if (activeTab.includes('closed')) {
+                renderClosedTrades();
+            }
+        }
+
+        // Render all trades
+        function renderAllTrades() {
+            const tbody = document.getElementById('allTradesBody');
+            
+            if (allTrades.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="13" style="text-align: center; padding: 40px; color: #888;">No trades yet. Add your first trade above!</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = allTrades.map(trade => {
+                const status = trade.is_closed ? 'closed' : 'open';
+                const pnl = trade.is_closed ? trade.realized_pnl : trade.unrealized_pnl;
+                const pnlPct = trade.is_closed ? trade.realized_pnl_pct : trade.unrealized_pnl_pct;
+                
+                const warnings = (trade.warnings || []).map(w => 
+                    `<span class="warning-badge ${w.severity}">${w.type}</span>`
+                ).join('');
+                
+                return `
+                    <tr>
+                        <td><span class="status-badge ${status}">${status.toUpperCase()}</span></td>
+                        <td class="ticker-cell">${trade.ticker}</td>
+                        <td>${trade.trade_date}</td>
+                        <td>$${parseFloat(trade.buy_price).toFixed(2)}</td>
+                        <td>${parseFloat(trade.quantity).toFixed(4)}</td>
+                        <td>$${parseFloat(trade.position_size).toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
+                        <td>$${parseFloat(trade.risk_amount).toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
+                        <td class="${trade.risk_pct > 2 ? 'negative' : ''}">${trade.risk_pct}%</td>
+                        <td class="${trade.rr_ratio !== null && trade.rr_ratio < 1.5 ? 'negative' : 'positive'}">${trade.rr_ratio !== null ? trade.rr_ratio.toFixed(2) : 'N/A'}</td>
+                        <td class="${pnl >= 0 ? 'positive' : 'negative'}">${pnl !== null ? '$' + pnl.toLocaleString('en-US', {minimumFractionDigits: 2}) : 'N/A'}</td>
+                        <td class="${pnlPct >= 0 ? 'positive' : 'negative'}">${pnlPct !== null ? pnlPct.toFixed(2) + '%' : 'N/A'}</td>
+                        <td>${warnings}</td>
+                        <td>
+                            ${!trade.is_closed ? `<button class="btn-close" onclick="openCloseModal(${trade.id})">Close</button>` : ''}
+                            <button class="btn-edit" onclick="editTrade(${trade.id})">Edit</button>
+                            <button class="btn-delete" onclick="deleteTrade(${trade.id})">Delete</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // Render open trades
+        function renderOpenTrades() {
+            const tbody = document.getElementById('openTradesBody');
+            const openTrades = allTrades.filter(t => !t.is_closed);
+            
+            if (openTrades.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="12" style="text-align: center; padding: 40px; color: #888;">No open positions</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = openTrades.map(trade => {
+                const warnings = (trade.warnings || []).map(w => 
+                    `<span class="warning-badge ${w.severity}">${w.type}</span>`
+                ).join('');
+                
+                return `
+                    <tr>
+                        <td class="ticker-cell">${trade.ticker}</td>
+                        <td>${trade.trade_date}</td>
+                        <td>$${parseFloat(trade.buy_price).toFixed(2)}</td>
+                        <td>${parseFloat(trade.quantity).toFixed(4)}</td>
+                        <td>$${parseFloat(trade.position_size).toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
+                        <td>$${parseFloat(trade.risk_amount).toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
+                        <td class="${trade.risk_pct > 2 ? 'negative' : ''}">${trade.risk_pct}%</td>
+                        <td class="${trade.rr_ratio !== null && trade.rr_ratio < 1.5 ? 'negative' : 'positive'}">${trade.rr_ratio !== null ? trade.rr_ratio.toFixed(2) : 'N/A'}</td>
+                        <td class="${trade.unrealized_pnl >= 0 ? 'positive' : 'negative'}">${trade.unrealized_pnl !== null ? '$' + trade.unrealized_pnl.toLocaleString('en-US', {minimumFractionDigits: 2}) : 'N/A'}</td>
+                        <td class="${trade.unrealized_pnl_pct >= 0 ? 'positive' : 'negative'}">${trade.unrealized_pnl_pct !== null ? trade.unrealized_pnl_pct.toFixed(2) + '%' : 'N/A'}</td>
+                        <td>${warnings}</td>
+                        <td>
+                            <button class="btn-close" onclick="openCloseModal(${trade.id})">Close</button>
+                            <button class="btn-edit" onclick="editTrade(${trade.id})">Edit</button>
+                            <button class="btn-delete" onclick="deleteTrade(${trade.id})">Delete</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // Render closed trades
+        function renderClosedTrades() {
+            const tbody = document.getElementById('closedTradesBody');
+            const closedTrades = allTrades.filter(t => t.is_closed);
+            
+            if (closedTrades.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 40px; color: #888;">No closed positions</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = closedTrades.map(trade => {
+                return `
+                    <tr>
+                        <td class="ticker-cell">${trade.ticker}</td>
+                        <td>${trade.trade_date}</td>
+                        <td>${trade.close_date || 'N/A'}</td>
+                        <td>$${parseFloat(trade.buy_price).toFixed(2)}</td>
+                        <td>$${parseFloat(trade.close_price).toFixed(2)}</td>
+                        <td>${parseFloat(trade.quantity).toFixed(4)}</td>
+                        <td class="${trade.realized_pnl >= 0 ? 'positive' : 'negative'}">$${trade.realized_pnl.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
+                        <td class="${trade.realized_pnl_pct >= 0 ? 'positive' : 'negative'}">${trade.realized_pnl_pct.toFixed(2)}%</td>
+                        <td>
+                            <button class="btn-edit" onclick="editTrade(${trade.id})">Edit</button>
+                            <button class="btn-delete" onclick="deleteTrade(${trade.id})">Delete</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // Save trade (add or update)
+        async function saveTrade() {
+            const ticker = document.getElementById('ticker').value.toUpperCase().trim();
+            const buyPrice = parseFloat(document.getElementById('buyPrice').value);
+            const quantity = parseFloat(document.getElementById('quantity').value);
+            const positionSize = parseFloat(document.getElementById('positionSize').value);
+            const riskAmount = parseFloat(document.getElementById('riskAmount').value);
+            const stopLoss = document.getElementById('stopLoss').value ? parseFloat(document.getElementById('stopLoss').value) : null;
+            const takeProfit = document.getElementById('takeProfit').value ? parseFloat(document.getElementById('takeProfit').value) : null;
+            const timeframe = document.getElementById('timeframe').value;
+            const tradeDate = document.getElementById('tradeDate').value;
+            const notes = document.getElementById('notes').value.trim();
+
+            if (!ticker || isNaN(buyPrice) || isNaN(quantity) || isNaN(positionSize) || isNaN(riskAmount) || !tradeDate) {
+                showMessage('Please fill in all required fields', 'error');
+                return;
+            }
+
+            const payload = {
+                ticker, buy_price: buyPrice, quantity, position_size: positionSize,
+                risk_amount: riskAmount, timeframe, trade_date: tradeDate,
+                stop_loss: stopLoss, take_profit: takeProfit, notes: notes || null
+            };
+
+            try {
+                const url = editingTradeId ? `/api/trades/${editingTradeId}` : '/api/trades';
+                const method = editingTradeId ? 'PUT' : 'POST';
+                
+                const res = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await res.json();
+                if (data.success) {
+                    showMessage(editingTradeId ? 'Trade updated!' : 'Trade added!', 'success');
+                    clearForm();
+                    loadSummary();
+                    loadTrades();
+                }
+            } catch (error) {
+                showMessage('Failed to save trade', 'error');
+            }
+        }
+
+        // Edit trade
+        function editTrade(id) {
+            const trade = allTrades.find(t => t.id === id);
+            if (!trade) return;
+
+            document.getElementById('ticker').value = trade.ticker;
+            document.getElementById('buyPrice').value = trade.buy_price;
+            document.getElementById('quantity').value = trade.quantity;
+            document.getElementById('positionSize').value = trade.position_size;
+            document.getElementById('riskAmount').value = trade.risk_amount;
+            document.getElementById('stopLoss').value = trade.stop_loss || '';
+            document.getElementById('takeProfit').value = trade.take_profit || '';
+            document.getElementById('timeframe').value = trade.timeframe;
+            document.getElementById('tradeDate').value = trade.trade_date;
+            document.getElementById('notes').value = trade.notes || '';
+
+            editingTradeId = id;
+            document.getElementById('formTitle').textContent = '✏️ Edit Trade';
+            document.getElementById('saveTradeBtn').textContent = 'Update Trade';
+            document.getElementById('cancelBtn').style.display = 'inline-block';
+            
+            // Scroll to form
+            document.querySelector('.card').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Delete trade
+        async function deleteTrade(id) {
+            if (!confirm('Delete this trade? This cannot be undone.')) return;
+
+            try {
+                const res = await fetch(`/api/trades/${id}`, { method: 'DELETE' });
+                const data = await res.json();
+                
+                if (data.success) {
+                    showMessage('Trade deleted', 'success');
+                    loadSummary();
+                    loadTrades();
+                }
+            } catch (error) {
+                showMessage('Failed to delete trade', 'error');
+            }
+        }
+
+        // Open close modal
+        function openCloseModal(id) {
+            closingTradeId = id;
+            document.getElementById('closeModal').classList.add('active');
+            document.getElementById('closeDate').valueAsDate = new Date();
+        }
+
+        // Close modal
+        function closeModal() {
+            closingTradeId = null;
+            document.getElementById('closeModal').classList.remove('active');
+            document.getElementById('closePrice').value = '';
+        }
+
+        // Confirm close trade
+        async function confirmCloseTrade() {
+            const closePrice = parseFloat(document.getElementById('closePrice').value);
+            const closeDate = document.getElementById('closeDate').value;
+
+            if (isNaN(closePrice) || !closeDate) {
+                showMessage('Please enter close price and date', 'error');
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/trades/${closingTradeId}/close`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ close_price: closePrice, close_date: closeDate })
+                });
+                
+                const data = await res.json();
+                if (data.success) {
+                    showMessage('Trade closed successfully!', 'success');
+                    closeModal();
+                    loadSummary();
+                    loadTrades();
+                }
+            } catch (error) {
+                showMessage('Failed to close trade', 'error');
+            }
+        }
+
+        // Clear form
+        function clearForm() {
+            document.getElementById('ticker').value = '';
+            document.getElementById('buyPrice').value = '';
+            document.getElementById('quantity').value = '';
+            document.getElementById('positionSize').value = '';
+            document.getElementById('riskAmount').value = '';
+            document.getElementById('stopLoss').value = '';
+            document.getElementById('takeProfit').value = '';
+            document.getElementById('timeframe').value = 'Long';
+            document.getElementById('tradeDate').valueAsDate = new Date();
+            document.getElementById('notes').value = '';
+            
+            editingTradeId = null;
+            document.getElementById('formTitle').textContent = '➕ Add New Trade';
+            document.getElementById('saveTradeBtn').textContent = 'Add Trade';
+            document.getElementById('cancelBtn').style.display = 'none';
+        }
+
+        // Show message
+        function showMessage(text, type) {
+            const msgEl = document.getElementById('message');
+            msgEl.innerHTML = `<div class="message ${type}">${text}</div>`;
+            setTimeout(() => msgEl.innerHTML = '', 5000);
+        }
+
+        // Logout
+        async function logout() {
+            await fetch('/api/logout');
+            window.location.href = '/login';
+        }
+    </script>
+</body>
+</html>
     """
     return render_template_string(html)
 
@@ -1795,10 +2445,94 @@ def get_trades():
         logger.error(f"Error getting trades for user {current_user.id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/trades/<int:trade_id>', methods=['DELETE'])
+@login_required
+def delete_trade_route(trade_id):
+    """Delete a trade"""
+    try:
+        Trade.delete_trade(trade_id, current_user.id)
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Error deleting trade {trade_id} for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+from models import Portfolio, Trade
+from portfolio_calculator import portfolio_calculator
+from price_checker import price_checker
+
+@app.route('/api/portfolio/summary', methods=['GET'])
+@login_required
+def get_portfolio_summary():
+    """Get comprehensive portfolio summary with all metrics"""
+    try:
+        portfolio_cash = float(Portfolio.get_user_portfolio(current_user.id))
+        trades_raw = Trade.get_user_trades(current_user.id)
+        
+        # Convert to dict list
+        trades = [dict(t) for t in trades_raw]
+        
+        # Calculate summary
+        summary = portfolio_calculator.calculate_portfolio_summary(trades, portfolio_cash)
+        
+        # Get trading statistics
+        stats = Trade.get_trade_statistics(current_user.id)
+        
+        return jsonify({
+            'success': True,
+            'portfolio_cash': portfolio_cash,
+            'summary': summary,
+            'statistics': stats
+        })
+    except Exception as e:
+        logger.error(f"Error getting portfolio summary for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/trades/enriched', methods=['GET'])
+@login_required
+def get_enriched_trades():
+    """Get trades with all calculated fields (risk %, R:R, P&L, warnings)"""
+    try:
+        portfolio_cash = float(Portfolio.get_user_portfolio(current_user.id))
+        trades_raw = Trade.get_user_trades(current_user.id)
+        
+        enriched_trades = []
+        
+        for trade in trades_raw:
+            # Get current price for open trades
+            current_price = None
+            if not trade.get('is_closed'):
+                try:
+                    current_price = price_checker.get_price(trade['ticker'])
+                except Exception as e:
+                    logger.warning(f"Could not fetch price for {trade['ticker']}: {e}")
+            
+            # Enrich trade with all calculations
+            enriched = portfolio_calculator.enrich_trade_with_calculations(
+                dict(trade), portfolio_cash, current_price
+            )
+            
+            # Convert dates to strings
+            if enriched.get('trade_date'):
+                enriched['trade_date'] = enriched['trade_date'].isoformat() if hasattr(enriched['trade_date'], 'isoformat') else str(enriched['trade_date'])
+            if enriched.get('close_date'):
+                enriched['close_date'] = enriched['close_date'].isoformat() if hasattr(enriched['close_date'], 'isoformat') else str(enriched['close_date'])
+            
+            # Convert Decimal to float
+            for key in enriched:
+                if hasattr(enriched[key], '__float__'):
+                    enriched[key] = float(enriched[key])
+            
+            enriched_trades.append(enriched)
+        
+        return jsonify({'success': True, 'trades': enriched_trades})
+    except Exception as e:
+        logger.error(f"Error getting enriched trades for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/trades', methods=['POST'])
 @login_required
-def create_trade():
-    """Create a new trade"""
+def create_trade_enhanced():
+    """Create a new trade with optional stop loss, take profit, and notes"""
     try:
         data = request.json
         
@@ -1810,7 +2544,10 @@ def create_trade():
             data['position_size'],
             data['risk_amount'],
             data['timeframe'],
-            data['trade_date']
+            data['trade_date'],
+            data.get('stop_loss'),
+            data.get('take_profit'),
+            data.get('notes')
         )
         
         return jsonify({'success': True, 'id': trade_id})
@@ -1820,8 +2557,8 @@ def create_trade():
 
 @app.route('/api/trades/<int:trade_id>', methods=['PUT'])
 @login_required
-def update_trade_route(trade_id):
-    """Update a trade"""
+def update_trade_enhanced(trade_id):
+    """Update a trade with optional stop loss, take profit, and notes"""
     try:
         data = request.json
         
@@ -1834,7 +2571,10 @@ def update_trade_route(trade_id):
             data['position_size'],
             data['risk_amount'],
             data['timeframe'],
-            data['trade_date']
+            data['trade_date'],
+            data.get('stop_loss'),
+            data.get('take_profit'),
+            data.get('notes')
         )
         
         return jsonify({'success': True})
@@ -1842,17 +2582,55 @@ def update_trade_route(trade_id):
         logger.error(f"Error updating trade {trade_id} for user {current_user.id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/trades/<int:trade_id>', methods=['DELETE'])
+@app.route('/api/trades/<int:trade_id>/close', methods=['POST'])
 @login_required
-def delete_trade_route(trade_id):
-    """Delete a trade"""
+def close_trade_route(trade_id):
+    """Close a trade and record realized P&L"""
     try:
-        Trade.delete_trade(trade_id, current_user.id)
+        data = request.json
+        close_price = float(data['close_price'])
+        close_date = data['close_date']
+        
+        Trade.close_trade(trade_id, current_user.id, close_price, close_date)
+        
         return jsonify({'success': True})
     except Exception as e:
-        logger.error(f"Error deleting trade {trade_id} for user {current_user.id}: {e}")
+        logger.error(f"Error closing trade {trade_id} for user {current_user.id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/trades/<int:trade_id>/reopen', methods=['POST'])
+@login_required
+def reopen_trade_route(trade_id):
+    """Reopen a closed trade"""
+    try:
+        Trade.reopen_trade(trade_id, current_user.id)
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Error reopening trade {trade_id} for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/trades/<int:trade_id>/current-price', methods=['GET'])
+@login_required
+def get_trade_current_price(trade_id):
+    """Get current market price for a trade's ticker"""
+    try:
+        # Get trade to find ticker
+        trades = Trade.get_user_trades(current_user.id)
+        trade = next((t for t in trades if t['id'] == trade_id), None)
+        
+        if not trade:
+            return jsonify({'success': False, 'error': 'Trade not found'}), 404
+        
+        current_price = price_checker.get_price(trade['ticker'])
+        
+        if current_price is None:
+            return jsonify({'success': False, 'error': 'Could not fetch price'}), 500
+        
+        return jsonify({'success': True, 'price': current_price})
+    except Exception as e:
+        logger.error(f"Error fetching current price for trade {trade_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+        
 # Initialize database schema in background
 def init_db_and_scheduler():
     try:
