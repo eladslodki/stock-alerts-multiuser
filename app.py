@@ -2548,33 +2548,6 @@ def update_portfolio():
         logger.error(f"Error updating portfolio for user {current_user.id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/portfolio/summary', methods=['GET'])
-@login_required
-def get_portfolio_summary():
-    """Get comprehensive portfolio summary with all metrics"""
-    try:
-        portfolio_cash = float(Portfolio.get_user_portfolio(current_user.id))
-        trades_raw = Trade.get_user_trades(current_user.id)
-        
-        # Convert to dict list
-        trades = [dict(t) for t in trades_raw]
-        
-        # Calculate summary
-        summary = portfolio_calculator.calculate_portfolio_summary(trades, portfolio_cash)
-        
-        # Get trading statistics
-        stats = Trade.get_trade_statistics(current_user.id)
-        
-        return jsonify({
-            'success': True,
-            'portfolio_cash': portfolio_cash,
-            'summary': summary,
-            'statistics': stats
-        })
-    except Exception as e:
-        logger.error(f"Error getting portfolio summary for user {current_user.id}: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 @app.route('/api/trades', methods=['GET'])
 @login_required
 def get_trades():
@@ -2641,7 +2614,7 @@ def get_portfolio_summary():
     except Exception as e:
         logger.error(f"Error getting portfolio summary for user {current_user.id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
-
+        
 @app.route('/api/trades/enriched', methods=['GET'])
 @login_required
 def get_enriched_trades():
