@@ -43,39 +43,69 @@ class Database:
                     return cur.fetchone()
                 return None
     
+    def run_migrations(self):
+        """Run database migrations automatically"""
+        logger.info("=" * 60)
+        logger.info("🔄 Running database migrations...")
+        logger.info("=" * 60)
+        
+        migrations = [
+            # Migration 1: Add new columns to trades table
+            """
+            ALTER TABLE trades ADD COLUMN IF NOT EXISTS stop_loss DECIMAL(10, 2);
+            """,
+            """
+            ALTER TABLE trades ADD COLUMN IF NOT EXISTS take_profit DECIMAL(10, 2);
+            """,
+            """
+            ALTER TABLE trades ADD COLUMN IF NOT EXISTS is_closed BOOLEAN DEFAULT FALSE;
+            """,
+            """
+            ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_price DECIMAL(10, 2);
+            """,
+            """
+            ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_date DATE;
+            """,
+            """
+            ALTER TABLE trades ADD COLUMN IF NOT EXISTS notes TEXT;
+            """,
+            # Migration 2: Add indexes
+            """
+            CREATE INDEX IF NOT EXISTS idx_trades_closed ON trades(user_id, is_closed);
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_trades_close_date ON trades(close_date DESC) WHERE close_date IS NOT NULL;
+            """,
+        ]
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    for i, migration in enumerate(migrations, 1):
+                        try:
+                            cur.execute(migration)
+                            logger.info(f"✅ Migration {i}/{len(migrations)} completed")
+                        except Exception as e:
+                            logger.warning(f"⚠️  Migration {i} skipped (may already exist): {e}")
+            
+            logger.info("=" * 60)
+            logger.info("✅ All migrations completed successfully!")
+            logger.info("=" * 60)
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Migration failed: {e}")
+            logger.error("=" * 60)
+            return False
+    
     def init_schema(self):
         """Initialize database schema"""
         try:
+            # First run migrations to add new columns
+            self.run_migrations()
+            
+            # Then create tables if they don't exist
             schema = """
-            -- Portfolio table
-CREATE TABLE IF NOT EXISTS portfolios (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    cash DECIMAL(15, 2) NOT NULL DEFAULT 0,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(user_id)
-);
-
--- Trades table
-CREATE TABLE IF NOT EXISTS trades (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    ticker VARCHAR(10) NOT NULL,
-    buy_price DECIMAL(10, 2) NOT NULL,
-    quantity DECIMAL(10, 4) NOT NULL,
-    position_size DECIMAL(15, 2) NOT NULL,
-    risk_amount DECIMAL(15, 2) NOT NULL,
-    timeframe VARCHAR(10) NOT NULL CHECK (timeframe IN ('Long', 'Swing')),
-    trade_date DATE NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Indexes for performance
-CREATE INDEX IF NOT EXISTS idx_portfolios_user ON portfolios(user_id);
-CREATE INDEX IF NOT EXISTS idx_trades_user ON trades(user_id);
-CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(trade_date DESC);
             -- Users table
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -98,6 +128,31 @@ CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(trade_date DESC);
                 triggered_price DECIMAL(10, 2)
             );
             
+            -- Portfolio table
+            CREATE TABLE IF NOT EXISTS portfolios (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                cash DECIMAL(15, 2) NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(user_id)
+            );
+
+            -- Trades table (base structure - new columns added via migrations)
+            CREATE TABLE IF NOT EXISTS trades (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                ticker VARCHAR(10) NOT NULL,
+                buy_price DECIMAL(10, 2) NOT NULL,
+                quantity DECIMAL(10, 4) NOT NULL,
+                position_size DECIMAL(15, 2) NOT NULL,
+                risk_amount DECIMAL(15, 2) NOT NULL,
+                timeframe VARCHAR(10) NOT NULL CHECK (timeframe IN ('Long', 'Swing')),
+                trade_date DATE NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            );
+            
             -- Indexes for performance
             CREATE INDEX IF NOT EXISTS idx_alerts_user_active 
                 ON alerts(user_id, active);
@@ -105,13 +160,16 @@ CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(trade_date DESC);
                 ON alerts(active) WHERE active = TRUE;
             CREATE INDEX IF NOT EXISTS idx_users_email 
                 ON users(email);
+            CREATE INDEX IF NOT EXISTS idx_portfolios_user ON portfolios(user_id);
+            CREATE INDEX IF NOT EXISTS idx_trades_user ON trades(user_id);
+            CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(trade_date DESC);
             """
             
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(schema)
             
-            logger.info("Database schema initialized")
+            logger.info("✅ Database schema initialized")
         except Exception as e:
             logger.error(f"Schema init error (may be normal if tables exist): {e}")
 
