@@ -2577,6 +2577,31 @@ def get_portfolio_summary():
     except Exception as e:
         logger.error(f"Error getting portfolio summary for user {current_user.id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/trades', methods=['GET'])
+@login_required
+def get_trades():
+    """Get user's trades"""
+    try:
+        trades_raw = Trade.get_user_trades(current_user.id)
+        
+        trades = []
+        for trade in trades_raw:
+            trades.append({
+                'id': trade['id'],
+                'ticker': trade['ticker'],
+                'buy_price': float(trade['buy_price']),
+                'quantity': float(trade['quantity']),
+                'position_size': float(trade['position_size']),
+                'risk_amount': float(trade['risk_amount']),
+                'timeframe': trade['timeframe'],
+                'trade_date': trade['trade_date'].isoformat() if hasattr(trade['trade_date'], 'isoformat') else str(trade['trade_date'])
+            })
+        
+        return jsonify({'success': True, 'trades': trades})
+    except Exception as e:
+        logger.error(f"Error getting trades for user {current_user.id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
         
 @app.route('/api/trades/enriched', methods=['GET'])
 @login_required
