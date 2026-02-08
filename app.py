@@ -2641,7 +2641,7 @@ def create_trade():
         # Get optional fields
         stop_loss = float(data['stop_loss']) if data.get('stop_loss') else None
         take_profit = float(data['take_profit']) if data.get('take_profit') else None
-        notes = data.get('notes', '').strip() or None
+        notes = (data.get('notes') or '').strip() or None
         
         # AUTOMATIC CALCULATIONS
         # Position Size = buy_price * quantity
