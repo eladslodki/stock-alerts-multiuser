@@ -1252,31 +1252,33 @@ def scan_bitcoin():
     try:
         data = request.json
         min_amount = float(data.get('min_amount', 100))
-        
-        # NEW: Support different timeframes
+
         timeframe = data.get('timeframe', '24h')
-        
-        # Convert timeframe to hours
+
         if timeframe == '7d':
-            time_range = 24 * 7  # 168 hours
+            time_range = 24 * 7
         elif timeframe == '30d':
-            time_range = 24 * 30  # 720 hours
+            time_range = 24 * 30
         elif timeframe == '180d':
-            time_range = 24 * 180  # 4320 hours
-        else:  # Default '24h'
+            time_range = 24 * 180
+        else:
             time_range = 24
-        
-        logger.info(f"Scanning for transactions > {min_amount} BTC in last {time_range} hours")
-        # ... rest of existing code stays the same
-    
-        transactions = bitcoin_scanner.scan_large_transactions(min_amount, time_range)
-    
+
+        logger.info(
+            f"Scanning for transactions > {min_amount} BTC in last {time_range} hours"
+        )
+
+        transactions = bitcoin_scanner.scan_large_transactions(
+            min_amount, time_range
+        )
+
         return jsonify({
             'success': True,
             'transactions': transactions,
             'count': len(transactions)
         })
-        except Exception as e:
+
+    except Exception as e:
         logger.error(f"Error scanning Bitcoin transactions: {e}")
         return jsonify({
             'success': False,
