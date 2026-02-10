@@ -1267,17 +1267,15 @@ def scan_bitcoin():
             time_range = 24
         
         logger.info(f"Scanning for transactions > {min_amount} BTC in last {time_range} hours")
-        
-        results = bitcoin_scanner.scan_large_transactions(min_amount, time_range)
         # ... rest of existing code stays the same
     
-    transactions = bitcoin_scanner.scan_large_transactions(min_amount, time_range)
+        transactions = bitcoin_scanner.scan_large_transactions(min_amount, time_range)
     
-    return jsonify({
-        'success': True,
-        'transactions': transactions,
-        'count': len(transactions)
-    })
+        return jsonify({
+            'success': True,
+            'transactions': transactions,
+            'count': len(transactions)
+        })
 # ============================================================================
 # PORTFOLIO MANAGEMENT ROUTES
 # ============================================================================
