@@ -1276,6 +1276,13 @@ def scan_bitcoin():
             'transactions': transactions,
             'count': len(transactions)
         })
+        except Exception as e:
+        logger.error(f"Error scanning Bitcoin transactions: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'transactions': []
+        }), 500
 # ============================================================================
 # PORTFOLIO MANAGEMENT ROUTES
 # ============================================================================
