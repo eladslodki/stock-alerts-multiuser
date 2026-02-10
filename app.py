@@ -1109,15 +1109,16 @@ def bitcoin_scanner_page():
                         <label>Minimum Amount (BTC)</label>
                         <input type="number" id="minAmount" value="10" step="0.1" min="0.1">
                     </div>
-                    <div>
-                        <label>Time Range</label>
-                        <select id="timeRange">
-                            <option value="24">Last 24 hours</option>
-                            <option value="168">Last 7 days</option>
-                            <option value="720">Last 30 days</option>
-                            <option value="4320">Last 6 months</option>
-                        </select>
-                    </div>
+                    <div class="form-group">
+    <label>Time Period</label>
+    <select id="timeframeSelect" style="width: 100%; padding: 12px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; color: #fff;">
+        <option value="24h">Last 24 Hours</option>
+        <option value="7d">Last Week (7 days)</option>
+        <option value="30d">Last Month (30 days)</option>
+        <option value="180d">Last 6 Months (180 days)</option>
+    </select>
+</div>
+
                     <div style="display: flex; align-items: flex-end;">
                         <button onclick="scanTransactions()" id="scanBtn">Scan Blockchain</button>
                     </div>
@@ -1248,10 +1249,27 @@ def bitcoin_scanner_page():
 @app.route('/api/bitcoin/scan', methods=['POST'])
 @login_required
 def scan_bitcoin():
-    """Scan Bitcoin blockchain for large transactions"""
-    data = request.json
-    min_amount = float(data.get('min_amount', 10))
-    time_range = int(data.get('time_range', 24))
+    try:
+        data = request.json
+        min_amount = float(data.get('min_amount', 100))
+        
+        # NEW: Support different timeframes
+        timeframe = data.get('timeframe', '24h')
+        
+        # Convert timeframe to hours
+        if timeframe == '7d':
+            time_range = 24 * 7  # 168 hours
+        elif timeframe == '30d':
+            time_range = 24 * 30  # 720 hours
+        elif timeframe == '180d':
+            time_range = 24 * 180  # 4320 hours
+        else:  # Default '24h'
+            time_range = 24
+        
+        logger.info(f"Scanning for transactions > {min_amount} BTC in last {time_range} hours")
+        
+        results = bitcoin_scanner.scan_large_transactions(min_amount, time_range)
+        # ... rest of existing code stays the same
     
     transactions = bitcoin_scanner.scan_large_transactions(min_amount, time_range)
     
