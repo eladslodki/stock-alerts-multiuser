@@ -1271,7 +1271,7 @@ def bitcoin_scanner_page():
         <script>
             async function scanTransactions() {
                 const minAmount = parseFloat(document.getElementById('minAmount').value);
-                const timeRange = parseInt(document.getElementById('timeRange').value);
+                const timeRange = document.getElementById('timeRange').value; // Remove parseInt, keep as string
                 const resultsEl = document.getElementById('results');
                 const scanBtn = document.getElementById('scanBtn');
                 
@@ -1283,7 +1283,7 @@ def bitcoin_scanner_page():
                     const res = await fetch('/api/bitcoin/scan', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ min_amount: minAmount, time_range: timeRange })
+                        body: JSON.stringify({ min_amount: minAmount, timeframe: timeRange })
                     });
                     
                     const data = await res.json();
