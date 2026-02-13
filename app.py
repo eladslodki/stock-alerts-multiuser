@@ -782,10 +782,13 @@ def dashboard():
     const alertsEl = document.getElementById('alertsList');
     
     try {
+        console.log('🔄 Loading alerts...');  // ADD THIS
         // Add timestamp to prevent caching
         const timestamp = new Date().getTime();
         const res = await fetch(`/api/alerts?t=${timestamp}`);
+        console.log('Response status:', res.status);  // ADD THIS
         const data = await res.json();
+        console.log('Alerts data:', data);  // ADD THIS
         
         console.log(`📊 [${new Date().toLocaleTimeString()}] Alerts loaded:`, data);
         
