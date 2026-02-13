@@ -62,13 +62,13 @@ class User(UserMixin):
 
 class Alert:
     @staticmethod
-    def create(user_id, ticker, target_price, current_price, direction):
+        def create(user_id, ticker, target_price, current_price, direction, alert_type='price', ma_period=None):
         """Create alert for user"""
-        result = db.execute("""
-            INSERT INTO alerts (user_id, ticker, target_price, current_price, direction)
-            VALUES (%s, %s, %s, %s, %s)
+            result = db.execute("""
+            INSERT INTO alerts (user_id, ticker, target_price, current_price, direction, alert_type, ma_period)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (user_id, ticker, target_price, current_price, direction), fetchone=True)
+        """, (user_id, ticker, target_price, current_price, direction, alert_type, ma_period), fetchone=True)
         
         logger.info(f"Alert created for user {user_id}: {ticker} @ ${target_price}")
         return result['id']
@@ -83,6 +83,14 @@ class Alert:
             WHERE user_id = %s
             ORDER BY created_at DESC
         """, (user_id,), fetchall=True)
+
+    @staticmethod
+    def update_ma_value(alert_id, ma_value):
+        """Update the cached MA value for an alert"""
+        db.execute(
+            "UPDATE alerts SET ma_value = %s WHERE id = %s",
+            (ma_value, alert_id)
+        )
     
     @staticmethod
     def get_all_active():
