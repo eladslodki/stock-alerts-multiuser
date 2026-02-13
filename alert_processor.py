@@ -119,35 +119,77 @@ class AlertProcessor:
             except Exception as e:
                 logger.error(f"❌ Failed to update price for alert {alert['id']}: {e}")
             
+            # NEW: Get alert type
+            alert_type = alert.get('alert_type', 'price')
             target_price = float(alert['target_price'])
             direction = alert['direction']
             
             asset_type = '₿ CRYPTO' if self.is_crypto(ticker) else '📈 STOCK'
             
-            logger.info(
-                f"🎯 {asset_type} Alert #{alert['id']} - {ticker} | "
-                f"Current: ${current_price:.2f} | "
-                f"Target: ${target_price:.2f} | "
-                f"Direction: {direction.upper()} | "
-                f"User: {alert['user_email']}"
-            )
-            
+            # NEW: Handle different alert types
             triggered = False
-            if direction == 'up' and current_price >= target_price:
-                triggered = True
-                logger.info(f"✅ CONDITION MET: ${current_price:.2f} >= ${target_price:.2f} (UP)")
-            elif direction == 'down' and current_price <= target_price:
-                triggered = True
-                logger.info(f"✅ CONDITION MET: ${current_price:.2f} <= ${target_price:.2f} (DOWN)")
-            else:
-                diff = abs(current_price - target_price)
-                pct = (diff / target_price) * 100
-                logger.info(f"⏳ Not triggered - ${diff:.2f} away ({pct:.1f}%)")
             
+            if alert_type == 'ma':
+                # Moving Average Alert Logic
+                from price_checker import get_moving_average
+                
+                ma_period = alert['ma_period']
+                ma_value = get_moving_average(ticker, ma_period)
+                
+                if ma_value is not None:
+                    # Update cached MA value in database
+                    Alert.update_ma_value(alert['id'], ma_value)
+                    
+                    logger.info(
+                        f"🎯 {asset_type} MA Alert #{alert['id']} - {ticker} | "
+                        f"Current: ${current_price:.2f} | "
+                        f"MA{ma_period}: ${ma_value:.2f} | "
+                        f"Direction: {direction.upper()} | "
+                        f"User: {alert['user_email']}"
+                    )
+                    
+                    # Check MA condition
+                    if direction == 'up' and current_price >= ma_value:
+                        triggered = True
+                        logger.info(f"✅ MA CONDITION MET: ${current_price:.2f} >= MA{ma_period} ${ma_value:.2f} (ABOVE)")
+                    elif direction == 'down' and current_price <= ma_value:
+                        triggered = True
+                        logger.info(f"✅ MA CONDITION MET: ${current_price:.2f} <= MA{ma_period} ${ma_value:.2f} (BELOW)")
+                    else:
+                        diff = abs(current_price - ma_value)
+                        pct = (diff / ma_value) * 100
+                        logger.info(f"⏳ Not triggered - ${diff:.2f} away from MA{ma_period} ({pct:.1f}%)")
+                else:
+                    logger.warning(f"⚠️ Could not calculate MA{ma_period} for {ticker}")
+            
+            else:
+                # Price Alert Logic (original)
+                logger.info(
+                    f"🎯 {asset_type} Alert #{alert['id']} - {ticker} | "
+                    f"Current: ${current_price:.2f} | "
+                    f"Target: ${target_price:.2f} | "
+                    f"Direction: {direction.upper()} | "
+                    f"User: {alert['user_email']}"
+                )
+                
+                if direction == 'up' and current_price >= target_price:
+                    triggered = True
+                    logger.info(f"✅ CONDITION MET: ${current_price:.2f} >= ${target_price:.2f} (UP)")
+                elif direction == 'down' and current_price <= target_price:
+                    triggered = True
+                    logger.info(f"✅ CONDITION MET: ${current_price:.2f} <= ${target_price:.2f} (DOWN)")
+                else:
+                    diff = abs(current_price - target_price)
+                    pct = (diff / target_price) * 100
+                    logger.info(f"⏳ Not triggered - ${diff:.2f} away ({pct:.1f}%)")
+            
+            # Trigger handling (same for both alert types)
             if triggered:
+                alert_description = f"MA{alert['ma_period']}" if alert_type == 'ma' else f"${target_price:.2f}"
+                
                 logger.info(
                     f"🔔 ALERT TRIGGERED! {ticker} for user {alert['user_email']} | "
-                    f"Target: ${target_price:.2f} | Triggered at: ${current_price:.2f}"
+                    f"Target: {alert_description} | Triggered at: ${current_price:.2f}"
                 )
                 
                 try:
