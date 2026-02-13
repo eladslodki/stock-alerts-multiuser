@@ -62,8 +62,6 @@ class User(UserMixin):
 
 class Alert:
     @staticmethod
-   class Alert:
-    @staticmethod
     def create(user_id, ticker, target_price, current_price, direction, alert_type='price', ma_period=None):
         """Create alert for user"""
         result = db.execute(
