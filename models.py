@@ -82,7 +82,8 @@ class Alert:
         """Get all alerts for specific user"""
         return db.execute("""
             SELECT id, ticker, target_price, current_price, direction,
-                   active, created_at, triggered_at, triggered_price
+                   active, created_at, triggered_at, triggered_price,
+                   alert_type, ma_period, ma_value
             FROM alerts
             WHERE user_id = %s
             ORDER BY created_at DESC
@@ -101,7 +102,8 @@ class Alert:
         """Get all active alerts across all users (for background processing)"""
         return db.execute("""
             SELECT a.id, a.user_id, a.ticker, a.target_price, a.direction,
-                   a.current_price, u.email as user_email
+                   a.current_price, a.alert_type, a.ma_period, a.ma_value,
+                   u.email as user_email
             FROM alerts a
             JOIN users u ON a.user_id = u.id
             WHERE a.active = TRUE
