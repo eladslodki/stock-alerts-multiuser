@@ -51,4 +51,36 @@ class PriceChecker:
             logger.error(f"Parse error for {ticker}: {e}")
             return None
 
+    def get_moving_average(ticker, period):
+    """
+    Calculate moving average for a ticker
+    
+    Args:
+        ticker: Stock symbol
+        period: MA period (20, 50, 150)
+    
+    Returns:
+        float: MA value or None if error
+    """
+    try:
+        import yfinance as yf
+        
+        # Fetch historical data (need period + buffer days)
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period=f"{period + 10}d")  # Extra days for safety
+        
+        if hist.empty or len(hist) < period:
+            logger.warning(f"Not enough data to calculate MA{period} for {ticker}")
+            return None
+        
+        # Calculate MA from Close prices
+        ma_value = hist['Close'].tail(period).mean()
+        
+        logger.info(f"Calculated MA{period} for {ticker}: ${ma_value:.2f}")
+        return float(ma_value)
+        
+    except Exception as e:
+        logger.error(f"Error calculating MA for {ticker}: {e}")
+        return None
+
 price_checker = PriceChecker()
