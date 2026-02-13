@@ -2,6 +2,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime
 import pytz
 import logging
+from database import db
 from models import Alert
 from price_checker import price_checker
 from email_sender import email_sender
@@ -119,73 +120,38 @@ class AlertProcessor:
             except Exception as e:
                 logger.error(f"❌ Failed to update price for alert {alert['id']}: {e}")
             
-            # NEW: Get alert type
-            alert_type = alert.get('alert_type', 'price')
             target_price = float(alert['target_price'])
             direction = alert['direction']
+            alert_type = alert.get('alert_type', 'price')
+            ma_period = alert.get('ma_period')
             
             asset_type = '₿ CRYPTO' if self.is_crypto(ticker) else '📈 STOCK'
+            alert_label = f"MA{ma_period}" if alert_type == 'ma' else f"${target_price:.2f}"
             
-            # NEW: Handle different alert types
+            logger.info(
+                f"🎯 {asset_type} Alert #{alert['id']} - {ticker} | "
+                f"Current: ${current_price:.2f} | "
+                f"Target: {alert_label} | "
+                f"Direction: {direction.upper()} | "
+                f"User: {alert['user_email']}"
+            )
+            
+            # Check if triggered (same logic for all alerts)
             triggered = False
-            
-            if alert_type == 'ma':
-                # Moving Average Alert Logic
-                from price_checker import get_moving_average
-                
-                ma_period = alert['ma_period']
-                ma_value = get_moving_average(ticker, ma_period)
-                
-                if ma_value is not None:
-                    # Update cached MA value in database
-                    Alert.update_ma_value(alert['id'], ma_value)
-                    
-                    logger.info(
-                        f"🎯 {asset_type} MA Alert #{alert['id']} - {ticker} | "
-                        f"Current: ${current_price:.2f} | "
-                        f"MA{ma_period}: ${ma_value:.2f} | "
-                        f"Direction: {direction.upper()} | "
-                        f"User: {alert['user_email']}"
-                    )
-                    
-                    # Check MA condition
-                    if direction == 'up' and current_price >= ma_value:
-                        triggered = True
-                        logger.info(f"✅ MA CONDITION MET: ${current_price:.2f} >= MA{ma_period} ${ma_value:.2f} (ABOVE)")
-                    elif direction == 'down' and current_price <= ma_value:
-                        triggered = True
-                        logger.info(f"✅ MA CONDITION MET: ${current_price:.2f} <= MA{ma_period} ${ma_value:.2f} (BELOW)")
-                    else:
-                        diff = abs(current_price - ma_value)
-                        pct = (diff / ma_value) * 100
-                        logger.info(f"⏳ Not triggered - ${diff:.2f} away from MA{ma_period} ({pct:.1f}%)")
-                else:
-                    logger.warning(f"⚠️ Could not calculate MA{ma_period} for {ticker}")
-            
+            if direction == 'up' and current_price >= target_price:
+                triggered = True
+                logger.info(f"✅ CONDITION MET: ${current_price:.2f} >= {alert_label} (UP)")
+            elif direction == 'down' and current_price <= target_price:
+                triggered = True
+                logger.info(f"✅ CONDITION MET: ${current_price:.2f} <= {alert_label} (DOWN)")
             else:
-                # Price Alert Logic (original)
-                logger.info(
-                    f"🎯 {asset_type} Alert #{alert['id']} - {ticker} | "
-                    f"Current: ${current_price:.2f} | "
-                    f"Target: ${target_price:.2f} | "
-                    f"Direction: {direction.upper()} | "
-                    f"User: {alert['user_email']}"
-                )
-                
-                if direction == 'up' and current_price >= target_price:
-                    triggered = True
-                    logger.info(f"✅ CONDITION MET: ${current_price:.2f} >= ${target_price:.2f} (UP)")
-                elif direction == 'down' and current_price <= target_price:
-                    triggered = True
-                    logger.info(f"✅ CONDITION MET: ${current_price:.2f} <= ${target_price:.2f} (DOWN)")
-                else:
-                    diff = abs(current_price - target_price)
-                    pct = (diff / target_price) * 100
-                    logger.info(f"⏳ Not triggered - ${diff:.2f} away ({pct:.1f}%)")
+                diff = abs(current_price - target_price)
+                pct = (diff / target_price) * 100
+                logger.info(f"⏳ Not triggered - ${diff:.2f} away ({pct:.1f}%)")
             
-            # Trigger handling (same for both alert types)
+            # Trigger handling
             if triggered:
-                alert_description = f"MA{alert['ma_period']}" if alert_type == 'ma' else f"${target_price:.2f}"
+                alert_description = alert_label
                 
                 logger.info(
                     f"🔔 ALERT TRIGGERED! {ticker} for user {alert['user_email']} | "
@@ -213,17 +179,73 @@ class AlertProcessor:
                     logger.error(f"❌ Error processing triggered alert {alert['id']}: {e}")
         
         logger.info("✅ Alert processing complete")
+        
+    def update_ma_alerts(self):
+        """
+        Daily job to update target_price for all MA alerts to current MA value
+        This keeps MA alerts aligned with the moving average
+        """
+        logger.info("=" * 60)
+        logger.info("🔄 UPDATING MA ALERTS")
+        logger.info("=" * 60)
     
+        try:
+            from price_checker import get_moving_average
+            
+            # Get all active MA alerts
+            all_alerts = Alert.get_all_active()
+            ma_alerts = [a for a in all_alerts if a.get('alert_type') == 'ma']
+            
+            logger.info(f"Found {len(ma_alerts)} MA alerts to update")
+            
+            for alert in ma_alerts:
+                ticker = alert['ticker']
+                ma_period = alert['ma_period']
+                
+                try:
+                    # Calculate new MA value
+                    ma_value = get_moving_average(ticker, ma_period)
+                    
+                    if ma_value is not None:
+                        # Update the alert's target price to new MA value
+                        db.execute(
+                            "UPDATE alerts SET target_price = %s, current_price = %s WHERE id = %s",
+                            (ma_value, alert['current_price'], alert['id'])
+                        )
+                        logger.info(f"✅ Updated alert #{alert['id']} - {ticker} MA{ma_period} = ${ma_value:.2f}")
+                    else:
+                        logger.warning(f"⚠️ Could not calculate MA{ma_period} for {ticker}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error updating MA alert #{alert['id']}: {e}")
+            
+            logger.info("✅ MA alert update complete")
+            
+        except Exception as e:
+            logger.error(f"❌ Error in MA alert updater: {e}")
+            
     def start(self):
         """Start the background scheduler"""
+        # Check alerts every minute
         self.scheduler.add_job(
             self.process_alerts,
             'interval',
             minutes=1,
             id='process_alerts'
         )
+    
+        # Update MA alerts daily at 4 AM ET
+        self.scheduler.add_job(
+            self.update_ma_alerts,
+            'cron',
+            hour=4,
+            minute=0,
+            id='update_ma_alerts'
+        )
+    
         self.scheduler.start()
         logger.info("✅ Alert processor started - checking every 60 seconds")
+        logger.info("✅ MA alert updater scheduled - daily at 4 AM ET")
     
     def shutdown(self):
         """Stop the scheduler"""
