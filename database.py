@@ -69,6 +69,15 @@ class Database:
             """
             ALTER TABLE trades ADD COLUMN IF NOT EXISTS notes TEXT;
             """,
+            """
+            ALTER TABLE alerts ADD COLUMN IF NOT EXISTS alert_type VARCHAR(10) DEFAULT 'price' CHECK (alert_type IN ('price', 'ma'));
+            """,
+            """
+            ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ma_period INTEGER;
+            """,
+            """
+            ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ma_value DECIMAL(10, 2);
+            """,
             # Migration 2: Add indexes
             """
             CREATE INDEX IF NOT EXISTS idx_trades_closed ON trades(user_id, is_closed);
