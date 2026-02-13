@@ -543,25 +543,57 @@ def dashboard():
         
         <div class="grid">
             <div class="card">
-                <h2>Create New Alert</h2>
-                
-                <div class="autocomplete-container">
-                    <label>Stock / Crypto Ticker</label>
-                    <input 
-                        type="text" 
-                        id="tickerInput" 
-                        placeholder="Search ticker (e.g., AAPL, BTC-USD)" 
-                        autocomplete="off"
-                    />
-                    <div id="autocompleteDropdown" class="autocomplete-dropdown"></div>
-                </div>
-                
-                <label>Target Price ($)</label>
-                <input type="number" id="targetPrice" placeholder="Enter target price" step="0.01" />
-                
-                <button onclick="createAlert()" id="createBtn">
-                    Create Alert
-                </button>
+    <h2>Create New Alert</h2>
+    
+    <!-- NEW: Alert Type Selection -->
+    <label>Alert Type</label>
+    <select id="alertType" onchange="toggleAlertFields()">
+        <option value="price">Price Alert</option>
+        <option value="ma">Moving Average Alert</option>
+    </select>
+    
+    <div class="autocomplete-container">
+        <label>Stock / Crypto Ticker</label>
+        <input 
+            type="text" 
+            id="tickerInput" 
+            placeholder="Search ticker (e.g., AAPL, BTC-USD)" 
+            autocomplete="off"
+        />
+        <div id="autocompleteDropdown" class="autocomplete-dropdown"></div>
+    </div>
+    
+    <!-- Price Alert Fields (shown by default) -->
+    <div id="priceAlertFields">
+        <label>Target Price ($)</label>
+        <input type="number" id="targetPrice" placeholder="Enter target price" step="0.01" />
+        
+        <label>Direction</label>
+        <select id="direction">
+            <option value="up">Above (↗️)</option>
+            <option value="down">Below (↘️)</option>
+        </select>
+    </div>
+    
+    <!-- NEW: MA Alert Fields (hidden by default) -->
+    <div id="maAlertFields" style="display: none;">
+        <label>Moving Average Period</label>
+        <select id="maPeriod">
+            <option value="20">MA 20 (Short-term)</option>
+            <option value="50">MA 50 (Medium-term)</option>
+            <option value="150">MA 150 (Long-term)</option>
+        </select>
+        
+        <label>Price vs MA</label>
+        <select id="maDirection">
+            <option value="up">Price Above MA (↗️)</option>
+            <option value="down">Price Below MA (↘️)</option>
+        </select>
+    </div>
+    
+    <button onclick="createAlert()" id="createBtn">
+        Create Alert
+    </button>
                 
                 <div id="message"></div>
             </div>
@@ -581,6 +613,23 @@ def dashboard():
     <script>
         let allTickers = [];
         let selectedTicker = null;
+        let allTickers = [];
+        let selectedTicker = null;
+
+            // NEW: Toggle between price and MA alert fields
+        function toggleAlertFields() {
+             const alertType = document.getElementById('alertType').value;
+             const priceFields = document.getElementById('priceAlertFields');
+             const maFields = document.getElementById('maAlertFields');
+    
+             if (alertType === 'ma') {
+                priceFields.style.display = 'none';
+                maFields.style.display = 'block';
+             } else {
+                priceFields.style.display = 'block';
+                maFields.style.display = 'none';
+            }
+        }
         
         // Load tickers on page load
         async function loadTickers() {
@@ -669,26 +718,49 @@ def dashboard():
             }
         });
         
-        async function createAlert() {
-            const ticker = selectedTicker || tickerInput.value.toUpperCase().trim();
+    async function createAlert() {
+        const ticker = selectedTicker || tickerInput.value.toUpperCase().trim();
+        const alertType = document.getElementById('alertType').value;
+        const msgEl = document.getElementById('message');
+        const btn = document.getElementById('createBtn');
+    
+        if (!ticker) {
+            msgEl.innerHTML = '<div class="message error">Please select a ticker</div>';
+            return;
+        }
+    
+    // Build payload based on alert type
+        let payload = { ticker, alert_type: alertType };
+    
+        if (alertType === 'ma') {
+            const maPeriod = parseInt(document.getElementById('maPeriod').value);
+            const direction = document.getElementById('maDirection').value;
+        
+            payload.ma_period = maPeriod;
+            payload.direction = direction;
+            payload.target_price = 0;  // Not used for MA, but backend expects it
+        } else {
             const target = parseFloat(document.getElementById('targetPrice').value);
-            const msgEl = document.getElementById('message');
-            const btn = document.getElementById('createBtn');
-            
-            if (!ticker || !target) {
-                msgEl.innerHTML = '<div class="message error">Please select a ticker and enter a target price</div>';
+            const direction = document.getElementById('direction').value;
+        
+            if (!target) {
+                msgEl.innerHTML = '<div class="message error">Please enter a target price</div>';
                 return;
             }
-            
-            btn.disabled = true;
-            btn.textContent = 'Creating...';
-            
-            try {
-                const res = await fetch('/api/alerts', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ticker, target_price: target })
-                });
+        
+            payload.target_price = target;
+            payload.direction = direction;
+        }
+    
+        btn.disabled = true;
+        btn.textContent = 'Creating...';
+    
+        try {
+            const res = await fetch('/api/alerts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
                 
                 const data = await res.json();
                 
@@ -696,6 +768,8 @@ def dashboard():
                     msgEl.innerHTML = '<div class="message success">✓ Alert created successfully!</div>';
                     tickerInput.value = '';
                     document.getElementById('targetPrice').value = '';
+                    document.getElementById('alertType').value = 'price';
+                    toggleAlertFields();  // Reset to price view
                     selectedTicker = null;
                     loadAlerts();
                 } else {
@@ -736,49 +810,74 @@ def dashboard():
         const renderKey = Math.random().toString(36).substring(7);
         
         alertsEl.innerHTML = active.map(alert => {
-            const direction = alert.direction === 'up' ? 'UP ↑' : 'DOWN ↓';
-            const directionClass = alert.direction === 'up' ? 'direction-up' : 'direction-down';
-            
-            const current = alert.current_price || 0;
+        const direction = alert.direction === 'up' ? 'UP ↑' : 'DOWN ↓';
+        const directionClass = alert.direction === 'up' ? 'direction-up' : 'direction-down';
+    
+        const current = alert.current_price || 0;
+    
+        // NEW: Determine alert type and display accordingly
+        const alertType = alert.alert_type || 'price';
+        let targetDisplay = '';
+        let distanceDisplay = '';
+        let alertTypeLabel = '';
+    
+        if (alertType === 'ma') {
+            // Moving Average Alert
+            const maPeriod = alert.ma_period;
+            const maValue = alert.ma_value || 0;
+        
+            alertTypeLabel = `📊 MA${maPeriod} Alert`;
+            targetDisplay = `MA${maPeriod}: <span class="target-price">$${maValue.toFixed(2)}</span>`;
+        
+            const diff = Math.abs(current - maValue);
+            const pct = maValue > 0 ? ((diff / maValue) * 100).toFixed(1) : '0.0';
+            distanceDisplay = `${pct}% away from MA`;
+        
+            console.log(`  ${alert.ticker}: $${current.toFixed(2)} → MA${maPeriod} $${maValue.toFixed(2)} (${pct}% away)`);
+        } else {
+            // Price Alert
             const target = alert.target_price;
-            const progress = alert.direction === 'up' 
-                ? (current / target * 100).toFixed(1)
-                : (target / current * 100).toFixed(1);
-            
+        
+            alertTypeLabel = '💰 Price Alert';
+            targetDisplay = `Target: <span class="target-price">$${target.toFixed(2)}</span>`;
+        
             const diff = Math.abs(current - target);
             const pct = ((diff / target) * 100).toFixed(1);
-            
-            // Visual indicator if price just updated
-            const priceClass = 'current-price';
-            
+            distanceDisplay = `${pct}% away`;
+        
             console.log(`  ${alert.ticker}: $${current.toFixed(2)} → $${target.toFixed(2)} (${pct}% away)`);
-            
-            return `
-                <div class="alert-item" data-key="${renderKey}">
-                    <div class="alert-info">
-                        <div class="alert-ticker">
-                            ${alert.ticker}
-                            <span class="alert-direction ${directionClass}">${direction}</span>
-                        </div>
-                        <div class="alert-prices">
-                            Current: <span class="${priceClass}" id="price-${alert.id}">$${current.toFixed(2)}</span>
-                            →
-                            Target: <span class="target-price">$${target.toFixed(2)}</span>
-                            <span style="color: #888; margin-left: 10px; font-size: 12px;">
-                                ${pct}% away
-                            </span>
-                        </div>
-                        <div style="font-size: 11px; color: #666; margin-top: 4px;">
-                            Last updated: ${new Date().toLocaleTimeString()}
-                        </div>
+        }
+    
+        const priceClass = 'current-price';
+    
+        return `
+            <div class="alert-item" data-key="${renderKey}">
+                <div class="alert-info">
+                    <div class="alert-ticker">
+                        ${alert.ticker}
+                        <span class="alert-direction ${directionClass}">${direction}</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <span class="alert-status status-active">ACTIVE</span>
-                        <button class="delete-btn" onclick="deleteAlert(${alert.id})">Delete</button>
+                    <div class="alert-prices">
+                        <span style="font-size: 11px; color: #64ffda; font-weight: 600; margin-right: 8px;">${alertTypeLabel}</span>
+                        <br>
+                        Current: <span class="${priceClass}" id="price-${alert.id}">$${current.toFixed(2)}</span>
+                        →
+                        ${targetDisplay}
+                        <span style="color: #888; margin-left: 10px; font-size: 12px;">
+                            ${distanceDisplay}
+                        </span>
+                    </div>
+                    <div style="font-size: 11px; color: #666; margin-top: 4px;">
+                        Last updated: ${new Date().toLocaleTimeString()}
                     </div>
                 </div>
-            `;
-        }).join('');
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="alert-status status-active">ACTIVE</span>
+                    <button class="delete-btn" onclick="deleteAlert(${alert.id})">Delete</button>
+                </div>
+            </div>
+        `;
+    }).join('');
         
     } catch (error) {
         console.error('❌ Error loading alerts:', error);
