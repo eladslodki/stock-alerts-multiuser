@@ -583,12 +583,10 @@ def dashboard():
             <option value="50">MA 50 (Medium-term)</option>
             <option value="150">MA 150 (Long-term)</option>
         </select>
-        
-        <label>Price vs MA</label>
-        <select id="maDirection">
-            <option value="up">Price Above MA (↗️)</option>
-            <option value="down">Price Below MA (↘️)</option>
-        </select>
+    
+        <p style="color: #888; font-size: 13px; margin-top: 10px;">
+            Alert will trigger when price crosses above the selected moving average.
+        </p>
     </div>
     
     <button onclick="createAlert()" id="createBtn">
@@ -611,8 +609,6 @@ def dashboard():
     </div>
     
     <script>
-        let allTickers = [];
-        let selectedTicker = null;
         let allTickers = [];
         let selectedTicker = null;
 
@@ -734,20 +730,19 @@ def dashboard():
     
         if (alertType === 'ma') {
             const maPeriod = parseInt(document.getElementById('maPeriod').value);
-            const direction = document.getElementById('maDirection').value;
-        
+    
             payload.ma_period = maPeriod;
-            payload.direction = direction;
-            payload.target_price = 0;  // Not used for MA, but backend expects it
+            payload.direction = 'up';  // MA alerts always trigger when price > MA
+            payload.target_price = 0;  // Will be set by backend to current MA value
         } else {
             const target = parseFloat(document.getElementById('targetPrice').value);
             const direction = document.getElementById('direction').value;
-        
+    
             if (!target) {
                 msgEl.innerHTML = '<div class="message error">Please enter a target price</div>';
                 return;
             }
-        
+    
             payload.target_price = target;
             payload.direction = direction;
         }
@@ -1008,17 +1003,27 @@ def create_alert():
     # Validate MA period if MA alert
     if alert_type == 'ma' and ma_period not in [20, 50, 150]:
         return jsonify({'success': False, 'error': 'Invalid MA period'}), 400
-    
-    # Validate target price for price alerts
-    if alert_type == 'price' and target_price <= 0:
-        return jsonify({'success': False, 'error': 'Invalid target price'}), 400
-    
+
     # Get current price
     current_price = price_checker.get_price(ticker)
     if current_price is None:
         return jsonify({'success': False, 'error': 'Invalid ticker or unable to fetch price'}), 400
-    
-    # Create alert with new parameters
+
+    # For MA alerts, calculate and set target_price to current MA value
+    if alert_type == 'ma':
+        from price_checker import get_moving_average
+        ma_value = get_moving_average(ticker, ma_period)
+        if ma_value is None:
+            return jsonify({'success': False, 'error': f'Could not calculate MA{ma_period} for {ticker}'}), 400
+        target_price = ma_value  # Set target to current MA value
+        direction = 'up'  # Always trigger when price > MA
+        logger.info(f"MA alert created: {ticker} MA{ma_period} = ${ma_value:.2f}")
+    else:
+        # Validate target price for price alerts
+        if target_price <= 0:
+            return jsonify({'success': False, 'error': 'Invalid target price'}), 400
+
+    # Create alert
     alert_id = Alert.create(current_user.id, ticker, target_price, current_price, direction, alert_type, ma_period)
     
     return jsonify({
@@ -1356,8 +1361,8 @@ def bitcoin_scanner_page():
                 window.location.href = '/login';
             }
             // Initialize
-            loadTickers();
-            loadAlerts();
+            // loadTickers();
+            // loadAlerts();
             setInterval(loadAlerts, 30000); // Refresh every 30 seconds
         </script>
     </body>
