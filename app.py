@@ -991,17 +991,35 @@ def get_alerts():
 def create_alert():
     data = request.json
     ticker = data.get('ticker', '').upper()
-    target_price = float(data.get('target_price'))
+    target_price = float(data.get('target_price', 0))
     
-    if not ticker or target_price <= 0:
-        return jsonify({'success': False, 'error': 'Invalid input'}), 400
+    # NEW: Get alert type and MA period
+    alert_type = data.get('alert_type', 'price')
+    ma_period = data.get('ma_period')
+    direction = data.get('direction', 'up')
     
+    if not ticker:
+        return jsonify({'success': False, 'error': 'Ticker required'}), 400
+    
+    # Validate alert type
+    if alert_type not in ['price', 'ma']:
+        return jsonify({'success': False, 'error': 'Invalid alert type'}), 400
+    
+    # Validate MA period if MA alert
+    if alert_type == 'ma' and ma_period not in [20, 50, 150]:
+        return jsonify({'success': False, 'error': 'Invalid MA period'}), 400
+    
+    # Validate target price for price alerts
+    if alert_type == 'price' and target_price <= 0:
+        return jsonify({'success': False, 'error': 'Invalid target price'}), 400
+    
+    # Get current price
     current_price = price_checker.get_price(ticker)
     if current_price is None:
-        return jsonify({'success': False, 'error': 'Invalid ticker'}), 400
+        return jsonify({'success': False, 'error': 'Invalid ticker or unable to fetch price'}), 400
     
-    direction = 'up' if target_price > current_price else 'down'
-    alert_id = Alert.create(current_user.id, ticker, target_price, current_price, direction)
+    # Create alert with new parameters
+    alert_id = Alert.create(current_user.id, ticker, target_price, current_price, direction, alert_type, ma_period)
     
     return jsonify({
         'success': True,
@@ -1010,7 +1028,9 @@ def create_alert():
             'ticker': ticker,
             'target_price': target_price,
             'current_price': current_price,
-            'direction': direction
+            'direction': direction,
+            'alert_type': alert_type,
+            'ma_period': ma_period
         }
     })
 
