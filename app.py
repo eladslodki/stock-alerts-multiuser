@@ -966,7 +966,10 @@ def get_alerts():
                 'active': alert['active'],
                 'created_at': alert['created_at'].isoformat() if hasattr(alert['created_at'], 'isoformat') else str(alert['created_at']),
                 'triggered_at': alert['triggered_at'].isoformat() if alert.get('triggered_at') and hasattr(alert['triggered_at'], 'isoformat') else alert.get('triggered_at'),
-                'triggered_price': float(alert['triggered_price']) if alert.get('triggered_price') else None
+                'triggered_price': float(alert['triggered_price']) if alert.get('triggered_price') else None,
+                'alert_type': alert.get('alert_type', 'price'),
+                'ma_period': alert.get('ma_period'),
+                'ma_value': float(alert['ma_value']) if alert.get('ma_value') else None
             })
         
         logger.info(f"📤 Returning {len(alerts)} alerts for user {current_user.id}")
