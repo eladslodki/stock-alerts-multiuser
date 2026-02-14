@@ -190,7 +190,7 @@ class AlertProcessor:
         logger.info("=" * 60)
     
         try:
-            from price_checker import get_moving_average
+            # get_moving_average is a method, use it from price_checker instance
             
             # Get all active MA alerts
             all_alerts = Alert.get_all_active()
@@ -204,7 +204,7 @@ class AlertProcessor:
                 
                 try:
                     # Calculate new MA value
-                    ma_value = get_moving_average(ticker, ma_period)
+                    ma_value = price_checker.get_moving_average(ticker, ma_period)
                     
                     if ma_value is not None:
                         # Update the alert's target price to new MA value
