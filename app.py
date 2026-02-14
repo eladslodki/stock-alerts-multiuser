@@ -568,11 +568,9 @@ def dashboard():
         <label>Target Price ($)</label>
         <input type="number" id="targetPrice" placeholder="Enter target price" step="0.01" />
         
-        <label>Direction</label>
-        <select id="direction">
-            <option value="up">Above (↗️)</option>
-            <option value="down">Below (↘️)</option>
-        </select>
+        <p style="color: #888; font-size: 13px; margin-top: 10px;">
+            Alert will trigger when price crosses the target price (either direction).
+        </p>
     </div>
     
     <!-- NEW: MA Alert Fields (hidden by default) -->
@@ -735,17 +733,16 @@ def dashboard():
             payload.direction = 'up';  // MA alerts always trigger when price > MA
             payload.target_price = 0;  // Will be set by backend to current MA value
         } else {
-            const target = parseFloat(document.getElementById('targetPrice').value);
-            const direction = document.getElementById('direction').value;
-    
-            if (!target) {
-                msgEl.innerHTML = '<div class="message error">Please enter a target price</div>';
-                return;
-            }
-    
-            payload.target_price = target;
-            payload.direction = direction;
+        const target = parseFloat(document.getElementById('targetPrice').value);
+        
+        if (!target) {
+            msgEl.innerHTML = '<div class="message error">Please enter a target price</div>';
+            return;
         }
+        
+        payload.target_price = target;
+        payload.direction = 'both';  // Trigger on crossing either direction
+    }
     
         btn.disabled = true;
         btn.textContent = 'Creating...';
@@ -1006,26 +1003,30 @@ def create_alert():
     # Validate MA period if MA alert
     if alert_type == 'ma' and ma_period not in [20, 50, 150]:
         return jsonify({'success': False, 'error': 'Invalid MA period'}), 400
-
+    
     # Get current price
     current_price = price_checker.get_price(ticker)
     if current_price is None:
         return jsonify({'success': False, 'error': 'Invalid ticker or unable to fetch price'}), 400
-
+    
     # For MA alerts, calculate and set target_price to current MA value
     if alert_type == 'ma':
-        from price_checker import get_moving_average
-        ma_value = get_moving_average(ticker, ma_period)
+        ma_value = price_checker.get_moving_average(ticker, ma_period)  # FIXED: Use price_checker.
         if ma_value is None:
             return jsonify({'success': False, 'error': f'Could not calculate MA{ma_period} for {ticker}'}), 400
-        target_price = ma_value  # Set target to current MA value
-        direction = 'up'  # Always trigger when price > MA
+        target_price = ma_value
+        direction = 'up'  # MA alerts trigger when crossing in either direction
         logger.info(f"MA alert created: {ticker} MA{ma_period} = ${ma_value:.2f}")
     else:
         # Validate target price for price alerts
         if target_price <= 0:
             return jsonify({'success': False, 'error': 'Invalid target price'}), 400
-
+            
+    # Determine direction based on current price vs target
+    if direction == 'both':
+        # Alert triggers on crossing - set direction based on current position
+        direction = 'up' if current_price < target_price else 'down'
+        
     # Create alert
     alert_id = Alert.create(current_user.id, ticker, target_price, current_price, direction, alert_type, ma_period)
     
@@ -1237,14 +1238,14 @@ def bitcoin_scanner_page():
                         <input type="number" id="minAmount" value="10" step="0.1" min="0.1">
                     </div>
                     <div class="form-group">
-    <label>Time Period</label>
-    <select id="timeframeSelect" style="width: 100%; padding: 12px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; color: #fff;">
-        <option value="24h">Last 24 Hours</option>
-        <option value="7d">Last Week (7 days)</option>
-        <option value="30d">Last Month (30 days)</option>
-        <option value="180d">Last 6 Months (180 days)</option>
-    </select>
-</div>
+            <label>Time Period</label>
+            <select id="timeRange">
+                <option value="24">Last 24 Hours</option>
+                <option value="168">Last Week</option>
+                <option value="720">Last Month</option>
+                <option value="4320">Last 6 Months</option>
+            </select>
+        </div>
 
                     <div style="display: flex; align-items: flex-end;">
                         <button onclick="scanTransactions()" id="scanBtn">Scan Blockchain</button>
