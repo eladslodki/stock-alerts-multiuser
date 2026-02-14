@@ -1349,17 +1349,19 @@ def dashboard():
         let selectedTicker = null;
 
             // NEW: Toggle between price and MA alert fields
-        function toggleAlertFields() {
-             const alertType = document.getElementById('alertType').value;
-             const priceFields = document.getElementById('priceAlertFields');
-             const maFields = document.getElementById('maAlertFields');
-    
-             if (alertType === 'ma') {
-                priceFields.style.display = 'none';
-                maFields.style.display = 'block';
-             } else {
+       function toggleAlertFields() {
+            const priceFields = document.getElementById('priceAlertFields');
+            const maFields = document.getElementById('maAlertFields');
+            
+            // Check which button is active
+            const isPriceActive = document.getElementById('priceTypeBtn').classList.contains('active');
+            
+            if (isPriceActive) {
                 priceFields.style.display = 'block';
                 maFields.style.display = 'none';
+            } else {
+                priceFields.style.display = 'none';
+                maFields.style.display = 'block';
             }
         }
         
@@ -1543,71 +1545,61 @@ def dashboard():
         const renderKey = Math.random().toString(36).substring(7);
         
         alertsEl.innerHTML = active.map(alert => {
-        const direction = alert.direction === 'up' ? 'UP ↑' : 'DOWN ↓';
-        const directionClass = alert.direction === 'up' ? 'direction-up' : 'direction-down';
-    
         const current = alert.current_price || 0;
-    
-        // NEW: Determine alert type and display accordingly
+        const target = alert.target_price || 0;
         const alertType = alert.alert_type || 'price';
-        let targetDisplay = '';
-        let distanceDisplay = '';
-        let alertTypeLabel = '';
-    
-        if (alertType === 'ma') {
-            // Moving Average Alert
-            const maPeriod = alert.ma_period;
-            const maValue = alert.target_price || 0;  // MA alerts store MA value in target_price
-            
-            alertTypeLabel = `📊 MA${maPeriod} Alert`;
-            targetDisplay = `MA${maPeriod}: <span class="target-price">$${maValue.toFixed(2)}</span>`;
+        const maPeriod = alert.ma_period;
         
-            const diff = Math.abs(current - maValue);
-            const pct = maValue > 0 ? ((diff / maValue) * 100).toFixed(1) : '0.0';
-            distanceDisplay = `${pct}% away from MA`;
+        // Calculate status (above/below)
+        const isAbove = current >= target;
         
-            console.log(`  ${alert.ticker}: $${current.toFixed(2)} → MA${maPeriod} $${maValue.toFixed(2)} (${pct}% away)`);
-        } else {
-            // Price Alert
-            const target = alert.target_price;
+        // Calculate percentage difference
+        const diff = Math.abs(current - target);
+        const pct = target > 0 ? ((diff / target) * 100).toFixed(1) : '0.0';
         
-            alertTypeLabel = '💰 Price Alert';
-            targetDisplay = `Target: <span class="target-price">$${target.toFixed(2)}</span>`;
+        // Determine colors and labels
+        const accentClass = alertType === 'ma' ? 'ma-alert' : '';
+        const badgeLabel = alertType === 'ma' ? `MA ${maPeriod}` : 'PRICE';
+        const badgeClass = alertType === 'ma' ? 'ma' : 'price';
+        const targetLabel = alertType === 'ma' ? `MA${maPeriod}` : 'Target';
         
-            const diff = Math.abs(current - target);
-            const pct = ((diff / target) * 100).toFixed(1);
-            distanceDisplay = `${pct}% away`;
-        
-            console.log(`  ${alert.ticker}: $${current.toFixed(2)} → $${target.toFixed(2)} (${pct}% away)`);
-        }
-    
-        const priceClass = 'current-price';
-    
         return `
-            <div class="alert-item" data-key="${renderKey}">
-                <div class="alert-info">
-                    <div class="alert-ticker">
-                        ${alert.ticker}
-                        <span class="alert-direction ${directionClass}">${direction}</span>
+            <div class="alert-card ${accentClass}" style="background: rgba(255,255,255,0.05); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); position: relative; overflow: hidden;">
+                
+                <!-- Header Row -->
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: #FFFFFF;">${alert.ticker}</span>
+                        <span class="status-badge ${badgeClass}" style="font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px;">${badgeLabel}</span>
                     </div>
-                    <div class="alert-prices">
-                        <span style="font-size: 11px; color: #64ffda; font-weight: 600; margin-right: 8px;">${alertTypeLabel}</span>
-                        <br>
-                        Current: <span class="${priceClass}" id="price-${alert.id}">$${current.toFixed(2)}</span>
-                        →
-                        ${targetDisplay}
-                        <span style="color: #888; margin-left: 10px; font-size: 12px;">
-                            ${distanceDisplay}
-                        </span>
-                    </div>
-                    <div style="font-size: 11px; color: #666; margin-top: 4px;">
-                        Last updated: ${new Date().toLocaleTimeString()}
+                    
+                    <div class="status-indicator ${isAbove ? 'above' : 'below'}" style="font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 8px; display: inline-flex; align-items: center; gap: 4px;">
+                        <span class="status-dot" style="width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor;"></span>
+                        ${isAbove ? 'Above' : 'Below'}
                     </div>
                 </div>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span class="alert-status status-active">ACTIVE</span>
-                    <button class="delete-btn" onclick="deleteAlert(${alert.id})">Delete</button>
+                
+                <!-- Prices Grid -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div>
+                        <div style="font-size: 12px; font-weight: 500; color: #8B92A8; margin-bottom: 4px;">Current Price</div>
+                        <div style="font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.3px; color: #FFFFFF;">$${current.toFixed(2)}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; font-weight: 500; color: #8B92A8; margin-bottom: 4px;">${targetLabel}</div>
+                        <div style="font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.3px; color: #FFFFFF;">$${target.toFixed(2)}</div>
+                    </div>
                 </div>
+                
+                <!-- Distance Info -->
+                <div style="margin-top: 12px; font-size: 13px; color: #8B92A8;">
+                    ${pct}% away from ${targetLabel.toLowerCase()}
+                </div>
+                
+                <!-- Delete Button -->
+                <button onclick="deleteAlert(${alert.id})" style="width: 100%; margin-top: 16px; padding: 10px; background: rgba(255,107,107,0.15); border: 1px solid rgba(255,107,107,0.25); border-radius: 8px; color: #FF6B6B; font-size: 13px; font-weight: 600;">
+                    Delete Alert
+                </button>
             </div>
         `;
     }).join('');
@@ -2501,11 +2493,8 @@ def portfolio_page():
         
         /* Header */
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 30px;
-            border-radius: 15px;
+            padding: 0;
             margin-bottom: 30px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
         }
         
         /* Card Styles */
