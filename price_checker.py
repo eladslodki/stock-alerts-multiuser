@@ -54,8 +54,8 @@ class PriceChecker:
     @staticmethod
     def get_moving_average(ticker, period):
         """
-        Calculate Simple Moving Average using yfinance
-        Fetches historical data and computes the average
+        Calculate Simple Moving Average using direct Yahoo Finance API
+        Does NOT use yfinance library - uses raw API calls
         
         Args:
             ticker: Stock symbol
@@ -65,40 +65,85 @@ class PriceChecker:
             float: MA value or None if error
         """
         try:
-            import yfinance as yf
+            # Calculate timestamp range (we need period + buffer days)
+            import time
+            from datetime import datetime, timedelta
             
-            # Fetch enough historical data
-            # Use different period formats based on MA length
-            if period <= 50:
-                fetch_period = "3mo"  # 3 months for MA20, MA50
-            else:
-                fetch_period = "1y"   # 1 year for MA150
+            # Get data for last (period * 2) days to ensure we have enough
+            days_to_fetch = period * 2
+            end_time = int(time.time())
+            start_time = int((datetime.now() - timedelta(days=days_to_fetch)).timestamp())
             
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period=fetch_period)
+            # Yahoo Finance Chart API - Direct call
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+            params = {
+                'period1': start_time,
+                'period2': end_time,
+                'interval': '1d',
+                'includePrePost': 'false'
+            }
             
-            if hist.empty:
-                logger.warning(f"No historical data for {ticker}")
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            
+            logger.info(f"Fetching {days_to_fetch} days of data for {ticker} to calculate MA{period}")
+            
+            response = requests.get(url, params=params, headers=headers, timeout=15)
+            
+            if response.status_code == 404:
+                logger.error(f"Ticker {ticker} not found (404)")
                 return None
             
-            if len(hist) < period:
-                logger.warning(f"Not enough data to calculate MA{period} for {ticker} (got {len(hist)} days, need {period})")
+            if response.status_code == 429:
+                logger.warning(f"Rate limited for {ticker}")
                 return None
             
-            # Calculate SMA from Close prices (last N days)
-            close_prices = hist['Close'].tail(period)
-            ma_value = close_prices.mean()
+            response.raise_for_status()
+            data = response.json()
             
-            logger.info(f"Calculated MA{period} for {ticker}: ${ma_value:.2f} (from {len(hist)} days of data)")
+            # Parse the response
+            chart = data.get('chart', {})
+            result = chart.get('result', [])
+            
+            if not result or len(result) == 0:
+                logger.error(f"No chart data for {ticker}")
+                return None
+            
+            result_data = result[0]
+            
+            # Get close prices
+            indicators = result_data.get('indicators', {})
+            quote = indicators.get('quote', [{}])[0]
+            close_prices = quote.get('close', [])
+            
+            # Filter out None values
+            valid_prices = [p for p in close_prices if p is not None]
+            
+            if len(valid_prices) < period:
+                logger.warning(f"Not enough data for MA{period} on {ticker} (got {len(valid_prices)} days, need {period})")
+                return None
+            
+            # Calculate MA from last N valid prices
+            recent_prices = valid_prices[-period:]
+            ma_value = sum(recent_prices) / len(recent_prices)
+            
+            logger.info(f"✅ Calculated MA{period} for {ticker}: ${ma_value:.2f} (from {len(valid_prices)} days)")
             return float(ma_value)
             
+        except requests.exceptions.Timeout:
+            logger.error(f"Timeout fetching data for {ticker}")
+            return None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request error for {ticker}: {e}")
+            return None
+        except (KeyError, IndexError, ValueError, TypeError) as e:
+            logger.error(f"Parse error calculating MA{period} for {ticker}: {e}")
+            logger.error(f"Response data: {data if 'data' in locals() else 'N/A'}")
+            return None
         except Exception as e:
-            logger.error(f"Error calculating MA{period} for {ticker}: {e}")
-            # Fallback: Try with basic requests if yfinance fails
-            try:
-                return PriceChecker._fallback_ma_calculation(ticker, period)
-            except:
-                return None
+            logger.error(f"Unexpected error calculating MA{period} for {ticker}: {e}")
+            return None
     
     @staticmethod
     def _fallback_ma_calculation(ticker, period):
