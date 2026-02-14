@@ -711,14 +711,8 @@ def dashboard():
         .nav a:hover { color: #5B7CFF; }
 
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 30px;
-            border-radius: 15px;
+            padding: 0;
             margin-bottom: 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
         }
 
         .header h1 {
@@ -731,17 +725,6 @@ def dashboard():
         .header p {
             opacity: 0.9;
             font-size: 14px;
-        }
-
-        .logout-btn {
-            padding: 10px 20px;
-            background: rgba(255,255,255,0.2);
-            border: 1px solid rgba(255,255,255,0.3);
-            color: white;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.3s;
         }
 
         .logout-btn:hover {
@@ -1034,8 +1017,8 @@ def dashboard():
         }
         
         .spinner {
-            border: 3px solid rgba(100,255,218,0.1);
-            border-top: 3px solid #64ffda;
+            border: 3px solid rgba(91,124,255,0.1);
+            border-top: 3px solid #5B7CFF;
             border-radius: 50%;
             width: 40px;
             height: 40px;
@@ -1280,12 +1263,11 @@ def dashboard():
             <a href="#" onclick="logout()">Logout</a>
         </div>
         
-        <div class="header">
-            <div>
-                <h1>📊 Stock Price Alerts</h1>
-                <p id="userEmail">Loading...</p>
+        <div class="header" style="padding: 56px 0 24px; position: relative;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div style="font-size: 15px; font-weight: 500; color: #8B92A8; letter-spacing: -0.2px;">Good Evening</div>
             </div>
-            <button class="logout-btn" onclick="logout()">Logout</button>
+            <h1 style="font-size: 32px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 24px;">Dashboard</h1>
         </div>
         
         <div class="grid">
@@ -1293,11 +1275,10 @@ def dashboard():
     <h2>Create New Alert</h2>
     
     <!-- NEW: Alert Type Selection -->
-    <label>Alert Type</label>
-    <select id="alertType" onchange="toggleAlertFields()">
-        <option value="price">Price Alert</option>
-        <option value="ma">Moving Average Alert</option>
-    </select>
+    <div class="alert-type-toggle">
+        <button id="priceTypeBtn" class="toggle-option active" onclick="switchAlertType('price')">Price Alert</button>
+        <button id="maTypeBtn" class="toggle-option" onclick="switchAlertType('ma')">MA Alert</button>
+    </div>
     
     <div class="autocomplete-container">
         <label>Stock / Crypto Ticker</label>
@@ -1323,11 +1304,21 @@ def dashboard():
     <!-- NEW: MA Alert Fields (hidden by default) -->
     <div id="maAlertFields" style="display: none;">
         <label>Moving Average Period</label>
-        <select id="maPeriod">
-            <option value="20">MA 20 (Short-term)</option>
-            <option value="50">MA 50 (Medium-term)</option>
-            <option value="150">MA 150 (Long-term)</option>
-        </select>
+        <div class="ma-selector">
+            <div class="ma-option active" onclick="selectMA(20)">
+                <div class="ma-label">MA 20</div>
+                <div class="ma-sublabel">Short</div>
+            </div>
+            <div class="ma-option" onclick="selectMA(50)">
+                <div class="ma-label">MA 50</div>
+                <div class="ma-sublabel">Medium</div>
+            </div>
+            <div class="ma-option" onclick="selectMA(150)">
+                <div class="ma-label">MA 150</div>
+                <div class="ma-sublabel">Long</div>
+            </div>
+        </div>
+        <input type="hidden" id="maPeriod" value="20" />
     
         <p style="color: #888; font-size: 13px; margin-top: 10px;">
             Alert will trigger when price crosses above the selected moving average.
@@ -1461,7 +1452,7 @@ def dashboard():
         
     async function createAlert() {
         const ticker = selectedTicker || tickerInput.value.toUpperCase().trim();
-        const alertType = document.getElementById('alertType').value;
+        const alertType = document.getElementById('priceTypeBtn').classList.contains('active') ? 'price' : 'ma';
         const msgEl = document.getElementById('message');
         const btn = document.getElementById('createBtn');
     
@@ -1649,6 +1640,33 @@ def dashboard():
         loadAlerts();
         loadTickers();
         setInterval(loadAlerts, 10000); // Refresh every 30 seconds
+        // Premium UI Functions
+        function switchAlertType(type) {
+        document.querySelectorAll('.toggle-option').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        
+        if (type === 'price') {
+            document.getElementById('priceTypeBtn').classList.add('active');
+        } else {
+            document.getElementById('maTypeBtn').classList.add('active');
+        }
+        
+        toggleAlertFields();
+    }
+    
+    function selectMA(period) {
+        // Remove active from all
+        document.querySelectorAll('.ma-option').forEach(opt => {
+            opt.classList.remove('active');
+        });
+        
+        // Add active to clicked
+        event.target.closest('.ma-option').classList.add('active');
+        
+        // Update hidden input
+        document.getElementById('maPeriod').value = period;
+    }
     </script>
 </body>
 </html>
@@ -2242,9 +2260,9 @@ def bitcoin_scanner_page():
                 <a href="#" onclick="logout()">Logout</a>
             </div>
 
-            <div class="header">
-                <h1>₿ Bitcoin Transaction Scanner</h1>
-                <p>Scan on-chain transactions for large BTC movements</p>
+            <div class="header" style="padding: 56px 0 24px;">
+                <div style="font-size: 15px; font-weight: 500; color: #8B92A8; margin-bottom: 8px;">Blockchain Analysis</div>
+                <h1 style="font-size: 32px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 24px;">Bitcoin Scanner</h1>
             </div>
 
             <div class="card">
@@ -3169,9 +3187,11 @@ def portfolio_page():
         </div>
 
         <!-- Header -->
-        <div class="header">
-            <h1>💼 Professional Portfolio Management</h1>
-            <p>Advanced trading & risk management with automatic calculations</p>
+        <div class="header" style="padding: 56px 0 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div style="font-size: 15px; font-weight: 500; color: #8B92A8;">Portfolio</div>
+            </div>
+            <h1 style="font-size: 32px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 24px;">Trading Performance</h1>
         </div>
 
         <div id="message"></div>
