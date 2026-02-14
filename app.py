@@ -819,8 +819,8 @@ def dashboard():
         if (alertType === 'ma') {
             // Moving Average Alert
             const maPeriod = alert.ma_period;
-            const maValue = alert.ma_value || 0;
-        
+            const maValue = alert.target_price || 0;  // MA alerts store MA value in target_price
+            
             alertTypeLabel = `📊 MA${maPeriod} Alert`;
             targetDisplay = `MA${maPeriod}: <span class="target-price">$${maValue.toFixed(2)}</span>`;
         
