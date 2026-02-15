@@ -5,7 +5,7 @@ Scans user's watchlist for unusual activity
 
 import logging
 import json
-from typing import List, Dict
+from typing import List, Dict, Optional
 from datetime import datetime
 from database import db
 
