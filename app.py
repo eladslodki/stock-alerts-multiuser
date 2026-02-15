@@ -1258,11 +1258,13 @@ def dashboard():
     <div class="container">
         <div class="nav">
             <a href="/dashboard">📊 Stock Alerts</a>
+            <a href="/alerts/history">📜 History</a>
+            <a href="/radar">🚨 Radar</a>
             <a href="/bitcoin-scanner">₿ Bitcoin Scanner</a>
             <a href="/portfolio">💼 Portfolio</a>
             <a href="#" onclick="logout()">Logout</a>
         </div>
-        
+       
         <div class="header" style="padding: 56px 0 24px; position: relative;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <div style="font-size: 15px; font-weight: 500; color: #8B92A8; letter-spacing: -0.2px;">Good Evening</div>
@@ -1330,6 +1332,32 @@ def dashboard():
     </button>
                 
                 <div id="message"></div>
+            </div>
+            <!-- NEW: Natural Language Alert Creator -->
+            <div class="card">
+                <h2>✨ Create Alert from Text</h2>
+                <p style="color: #8B92A8; font-size: 13px; margin-bottom: 12px;">
+                    Try: "Alert me if TSLA breaks 200" or "Tell me when AAPL dumps hard"
+                </p>
+    
+                <input 
+                    type="text" 
+                    id="nlAlertInput" 
+                    placeholder="Type your alert in plain English..."
+                    style="width: 100%; margin-bottom: 12px;"
+                />
+    
+               <button onclick="parseNLAlert()" id="parseBtn">Parse Alert</button>
+
+               <!-- Preview Section (hidden initially) -->
+               <div id="nlPreview" style="display: none; margin-top: 16px; padding: 16px; background: rgba(91,124,255,0.1); border-radius: 12px; border: 1px solid rgba(91,124,255,0.2);">
+                   <div style="font-size: 13px; font-weight: 600; color: #5B7CFF; margin-bottom: 8px;">Preview:</div>
+                   <div id="nlSummary" style="margin-bottom: 12px;"></div>
+                   <button onclick="confirmNLAlert()" id="confirmBtn">Confirm & Create</button>
+                   <button onclick="cancelNLAlert()" class="btn-secondary" style="margin-left: 8px;">Cancel</button>
+              </div>
+    
+              <div id="nlMessage"></div>
             </div>
             
             <div class="card">
@@ -1659,6 +1687,89 @@ def dashboard():
         // Update hidden input
         document.getElementById('maPeriod').value = period;
     }
+    // Natural Language Alert Functions
+let nlSuggestion = null;
+
+async function parseNLAlert() {
+    const text = document.getElementById('nlAlertInput').value.trim();
+    const msgEl = document.getElementById('nlMessage');
+    const parseBtn = document.getElementById('parseBtn');
+    
+    if (!text) {
+        msgEl.innerHTML = '<div class="message error">Please enter some text</div>';
+        return;
+    }
+    
+    parseBtn.disabled = true;
+    parseBtn.textContent = 'Parsing...';
+    msgEl.innerHTML = '';
+    
+    try {
+        const res = await fetch('/api/alerts/parse-text', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+            nlSuggestion = data.suggestion;
+            document.getElementById('nlSummary').textContent = nlSuggestion.summary;
+            document.getElementById('nlPreview').style.display = 'block';
+            msgEl.innerHTML = '';
+        } else {
+            msgEl.innerHTML = `<div class="message error">${data.error}</div>`;
+        }
+    } catch (error) {
+        console.error('Parse error:', error);
+        msgEl.innerHTML = '<div class="message error">Failed to parse alert</div>';
+    } finally {
+        parseBtn.disabled = false;
+        parseBtn.textContent = 'Parse Alert';
+    }
+}
+
+async function confirmNLAlert() {
+    if (!nlSuggestion) return;
+    
+    const confirmBtn = document.getElementById('confirmBtn');
+    const msgEl = document.getElementById('nlMessage');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Creating...';
+    
+    try {
+        const res = await fetch('/api/alerts/create-from-suggestion', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(nlSuggestion)
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+            msgEl.innerHTML = '<div class="message success">✓ Alert created successfully!</div>';
+            document.getElementById('nlAlertInput').value = '';
+            cancelNLAlert();
+            loadAlerts();  // Refresh alert list
+        } else {
+            msgEl.innerHTML = `<div class="message error">${data.error}</div>`;
+        }
+    } catch (error) {
+        console.error('Create error:', error);
+        msgEl.innerHTML = '<div class="message error">Failed to create alert</div>';
+    } finally {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Confirm & Create';
+    }
+}
+
+function cancelNLAlert() {
+    document.getElementById('nlPreview').style.display = 'none';
+    document.getElementById('nlMessage').innerHTML = '';
+    nlSuggestion = null;
+}
+
     </script>
 </body>
 </html>
