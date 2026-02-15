@@ -4416,19 +4416,260 @@ def get_market_radar():
 @app.route('/alerts/history')
 @login_required
 def alert_history_page():
-    # Copy dashboard HTML structure
-    # Replace body with: <div id="historyList"></div>
-    # Add JS: fetch('/api/alerts/history') and render cards
-    # Include explanation in card: <div class="explanation">{explanation}</div>
-    return render_template_string(html)  # See Part 2 for full HTML
+    """Alert trigger history page with AI explanations"""
+    html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Alert History</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+            background: #0A0E1A;
+            background-image: radial-gradient(circle at 50% 0%, #1a1f2e 0%, #0a0e1a 50%);
+            color: #FFFFFF;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .nav {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            padding: 15px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+        }
+        .nav a {
+            color: #8B92A8;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .nav a:hover { color: #5B7CFF; }
+        .history-card {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .explanation {
+            background: rgba(91,124,255,0.1);
+            border-left: 3px solid #5B7CFF;
+            padding: 12px;
+            margin-top: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .loading { text-align: center; padding: 40px; color: #8B92A8; }
+        .empty { text-align: center; padding: 60px; color: #8B92A8; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="/dashboard">📊 Dashboard</a>
+            <a href="/alerts/history">📜 History</a>
+            <a href="/radar">🚨 Radar</a>
+            <a href="/portfolio">💼 Portfolio</a>
+            <a href="/bitcoin-scanner">₿ Bitcoin</a>
+            <a href="#" onclick="logout()">Logout</a>
+        </div>
+        
+        <h1 style="font-size: 32px; font-weight: 700; margin-bottom: 24px;">Triggered Alerts</h1>
+        
+        <div id="historyList">
+            <div class="loading">Loading history...</div>
+        </div>
+    </div>
+    
+    <script>
+        async function loadHistory() {
+            const container = document.getElementById('historyList');
+            
+            try {
+                const res = await fetch('/api/alerts/history');
+                const data = await res.json();
+                
+                if (!data.success || data.history.length === 0) {
+                    container.innerHTML = '<div class="empty">No triggered alerts yet</div>';
+                    return;
+                }
+                
+                container.innerHTML = data.history.map(record => {
+                    const date = new Date(record.triggered_at).toLocaleString();
+                    
+                    return `
+                        <div class="history-card">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                                <span style="font-size: 20px; font-weight: 700;">${record.ticker}</span>
+                                <span style="font-size: 13px; color: #8B92A8;">${date}</span>
+                            </div>
+                            
+                            <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px;">
+                                Triggered at: $${record.price_at_trigger?.toFixed(2) || 'N/A'}
+                            </div>
+                            
+                            ${record.explanation ? `
+                            <div class="explanation">
+                                <strong>🤖 AI Insight:</strong> ${record.explanation}
+                            </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }).join('');
+                
+            } catch (error) {
+                console.error('Error loading history:', error);
+                container.innerHTML = '<div class="empty">Failed to load history</div>';
+            }
+        }
+        
+        async function logout() {
+            await fetch('/api/logout');
+            window.location.href = '/login';
+        }
+        
+        loadHistory();
+    </script>
+</body>
+</html>
+    """
+    return render_template_string(html)
 
 @app.route('/radar')
 @login_required
 def radar_page():
-    # Similar to history page
-    # Fetch from /api/radar
-    # Render anomaly cards with severity colors
-    return render_template_string(html)  # See Part 2 for full HTML
+    """Market anomaly radar page"""
+    html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Market Radar</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+            background: #0A0E1A;
+            background-image: radial-gradient(circle at 50% 0%, #1a1f2e 0%, #0a0e1a 50%);
+            color: #FFFFFF;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .nav {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            padding: 15px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+        }
+        .nav a {
+            color: #8B92A8;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .nav a:hover { color: #5B7CFF; }
+        .anomaly-card {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 12px;
+            position: relative;
+        }
+        .anomaly-card.high::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 4px;
+            height: 100%;
+            background: #FF6B6B;
+        }
+        .loading { text-align: center; padding: 40px; color: #8B92A8; }
+        .empty { text-align: center; padding: 60px; color: #8B92A8; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="/dashboard">📊 Dashboard</a>
+            <a href="/alerts/history">📜 History</a>
+            <a href="/radar">🚨 Radar</a>
+            <a href="/portfolio">💼 Portfolio</a>
+            <a href="/bitcoin-scanner">₿ Bitcoin</a>
+            <a href="#" onclick="logout()">Logout</a>
+        </div>
+        
+        <h1 style="font-size: 32px; font-weight: 700; margin-bottom: 8px;">Market Radar</h1>
+        <p style="color: #8B92A8; font-size: 14px; margin-bottom: 24px;">Unusual activity in your watchlist</p>
+        
+        <div id="radarList">
+            <div class="loading">Scanning for anomalies...</div>
+        </div>
+    </div>
+    
+    <script>
+        async function loadRadar() {
+            const container = document.getElementById('radarList');
+            
+            try {
+                const res = await fetch('/api/radar');
+                const data = await res.json();
+                
+                if (!data.success || data.anomalies.length === 0) {
+                    container.innerHTML = '<div class="empty">No anomalies detected</div>';
+                    return;
+                }
+                
+                container.innerHTML = data.anomalies.map(anomaly => {
+                    const metrics = anomaly.metrics || {};
+                    const date = new Date(anomaly.detected_at).toLocaleString();
+                    
+                    return `
+                        <div class="anomaly-card ${anomaly.severity}">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                                <span style="font-size: 20px; font-weight: 700;">${anomaly.ticker}</span>
+                                <span style="font-size: 13px; color: #8B92A8;">${date}</span>
+                            </div>
+                            
+                            ${anomaly.anomaly_type === 'BIG_MOVE' ? `
+                            <div style="font-size: 14px; color: #8B92A8;">
+                                Price moved <strong style="color: ${metrics.direction === 'up' ? '#00FFA3' : '#FF6B6B'};">
+                                ${metrics.pct_change > 0 ? '+' : ''}${metrics.pct_change?.toFixed(2)}%
+                                </strong> to $${metrics.current_price?.toFixed(2)}
+                            </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }).join('');
+                
+            } catch (error) {
+                console.error('Error loading radar:', error);
+                container.innerHTML = '<div class="empty">Failed to load radar</div>';
+            }
+        }
+        
+        async function logout() {
+            await fetch('/api/logout');
+            window.location.href = '/login';
+        }
+        
+        loadRadar();
+        setInterval(loadRadar, 60000);
+    </script>
+</body>
+</html>
+    """
+    return render_template_string(html)
 
 
 # Gunicorn will run the app, this is only for local testing
