@@ -326,3 +326,47 @@ class Trade:
             'expectancy': round(expectancy, 2),
             'total_realized_pnl': round(total_pnl, 2)
         }
+
+class AlertTrigger:
+    @staticmethod
+    def create(user_id, ticker, alert_type, alert_params, price_at_trigger, 
+               explanation=None, metrics=None):
+        import json
+        result = db.execute("""
+            INSERT INTO alert_triggers 
+            (user_id, ticker, alert_type, alert_params_json, price_at_trigger, explanation_text, metrics_json)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (user_id, ticker, alert_type, json.dumps(alert_params), 
+              price_at_trigger, explanation, json.dumps(metrics) if metrics else None), 
+        fetchone=True)
+        return result['id']
+    
+    @staticmethod
+    def get_user_history(user_id, limit=50):
+        return db.execute("""
+            SELECT * FROM alert_triggers
+            WHERE user_id = %s ORDER BY triggered_at DESC LIMIT %s
+        """, (user_id, limit), fetchall=True)
+
+
+class Anomaly:
+    @staticmethod
+    def get_user_anomalies(user_id, limit=50, ticker=None, anomaly_type=None):
+        query = "SELECT * FROM market_anomalies WHERE user_id = %s"
+        params = [user_id]
+        if ticker:
+            query += " AND ticker = %s"
+            params.append(ticker)
+        if anomaly_type:
+            query += " AND anomaly_type = %s"
+            params.append(anomaly_type)
+        query += " ORDER BY detected_at DESC LIMIT %s"
+        params.append(limit)
+        return db.execute(query, tuple(params), fetchall=True)
+    
+    @staticmethod
+    def mark_read(anomaly_id, user_id):
+        db.execute("UPDATE market_anomalies SET is_read = TRUE WHERE id = %s AND user_id = %s", 
+                   (anomaly_id, user_id))
+
