@@ -85,6 +85,34 @@ class Database:
             """
             CREATE INDEX IF NOT EXISTS idx_trades_close_date ON trades(close_date DESC) WHERE close_date IS NOT NULL;
             """,
+            """
+            CREATE TABLE IF NOT EXISTS alert_triggers (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            ticker VARCHAR(10) NOT NULL,
+            alert_type VARCHAR(10) NOT NULL,
+            alert_params_json JSONB NOT NULL,
+            triggered_at TIMESTAMP DEFAULT NOW(),
+            price_at_trigger DECIMAL(10, 2) NOT NULL,
+            explanation_text TEXT,
+            metrics_json JSONB
+            );
+            CREATE INDEX IF NOT EXISTS idx_triggers_user_time ON alert_triggers(user_id, triggered_at DESC);
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS market_anomalies (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            ticker VARCHAR(10) NOT NULL,
+            anomaly_type VARCHAR(20) NOT NULL,
+            metrics_json JSONB NOT NULL,
+            detected_at TIMESTAMP DEFAULT NOW(),
+            severity VARCHAR(10) DEFAULT 'medium',
+            is_read BOOLEAN DEFAULT FALSE
+            );
+            CREATE INDEX IF NOT EXISTS idx_anomalies_user_time ON market_anomalies(user_id, detected_at DESC);
+            """
+
         ]
         
         try:
