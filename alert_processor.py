@@ -151,63 +151,64 @@ class AlertProcessor:
             
             # Trigger handling
             if triggered:
-    from services.ai_explanations import explanation_generator
-    from models import AlertTrigger
-    
-    alert_description = f"MA{alert['ma_period']}" if alert_type == 'ma' else f"${target_price:.2f}"
-    
-    logger.info(
-        f"🔔 ALERT TRIGGERED! {ticker} for user {alert['user_email']} | "
-        f"Target: {alert_description} | Triggered at: ${current_price:.2f}"
-    )
-    
-    try:
-        # Generate AI explanation
-        alert_data = {
-            'ticker': ticker,
-            'alert_type': alert_type,
-            'price_at_trigger': current_price,
-            'target_price': target_price,
-            'direction': direction,
-            'ma_period': alert.get('ma_period'),
-            'ma_value': alert.get('ma_value')
-        }
-        
-        explanation = explanation_generator.generate(alert_data)
-        logger.info(f"🤖 AI Explanation: {explanation}")
-        
-        # Record trigger history
-        AlertTrigger.create(
-            user_id=alert['user_id'],
-            ticker=ticker,
-            alert_type=alert_type,
-            alert_params={'target_price': target_price, 'direction': direction},
-            price_at_trigger=current_price,
-            explanation=explanation,
-            metrics={'alert_id': alert['id']}
-        )
-        
-        # Send email with explanation
-        email_sent = email_sender.send_alert_email(
-            to_email=alert['user_email'],
-            ticker=ticker,
-            target_price=target_price,
-            triggered_price=current_price,
-            direction=direction,
-            explanation=explanation
-        )
-        
-        if email_sent:
-            logger.info(f"📧 Email sent successfully to {alert['user_email']}")
-        else:
-            logger.error(f"📧 Email failed to send to {alert['user_email']}")
-        
-        Alert.delete_by_id(alert['id'])
-        logger.info(f"🗑️ Alert #{alert['id']} deleted after trigger")
-        
-    except Exception as e:
-        logger.error(f"❌ Error processing triggered alert {alert['id']}: {e}")
+                        from services.ai_explanations import explanation_generator
+                        from models import AlertTrigger
+            
+                        alert_description = f"MA{alert['ma_period']}" if alert_type == 'ma' else f"${target_price:.2f}"
+            
+                        logger.info(
+                            f"🔔 ALERT TRIGGERED! {ticker} for user {alert['user_email']} | "
+                            f"Target: {alert_description} | Triggered at: ${current_price:.2f}"
+                        )
+            
+                        try:
+                            # Generate AI explanation
+                            alert_data = {
+                                'ticker': ticker,
+                                'alert_type': alert_type,
+                                'price_at_trigger': current_price,
+                                'target_price': target_price,
+                                'direction': direction,
+                                'ma_period': alert.get('ma_period'),
+                                'ma_value': alert.get('ma_value')
+                            }
+                
+                            explanation = explanation_generator.generate(alert_data)
+                            logger.info(f"🤖 AI Explanation: {explanation}")
+                
+                            # Record trigger history
+                            AlertTrigger.create(
+                                user_id=alert['user_id'],
+                                ticker=ticker,
+                                alert_type=alert_type,
+                                alert_params={'target_price': target_price, 'direction': direction},
+                                price_at_trigger=current_price,
+                                explanation=explanation,
+                                metrics={'alert_id': alert['id']}
+                            )
+                
+                            # Send email with explanation
+                            email_sent = email_sender.send_alert_email(
+                                to_email=alert['user_email'],
+                                ticker=ticker,
+                                target_price=target_price,
+                                triggered_price=current_price,
+                                direction=direction,
+                                explanation=explanation
+                            )
+                
+                            if email_sent:
+                                logger.info(f"📧 Email sent successfully to {alert['user_email']}")
+                            else:
+                                logger.error(f"📧 Email failed to send to {alert['user_email']}")
+                
+                            Alert.delete_by_id(alert['id'])
+                            logger.info(f"🗑️ Alert #{alert['id']} deleted after trigger")
+                
+                        except Exception as e:
+                            logger.error(f"❌ Error processing triggered alert {alert['id']}: {e}")
 
+    
     def update_ma_alerts(self):
         """
         Daily job to update target_price for all MA alerts to current MA value
