@@ -151,28 +151,30 @@ class AlertProcessor:
             
             # Trigger handling
             if triggered:
-                from services.ai_explanations import explanation_generator
-                from models import AlertTrigger
+    from services.ai_explanations import explanation_generator
+    from models import AlertTrigger
     
-                alert_description = f"MA{alert['ma_period']}" if alert_type == 'ma' else f"${target_price:.2f}"
+    alert_description = f"MA{alert['ma_period']}" if alert_type == 'ma' else f"${target_price:.2f}"
     
-                logger.info(f"🔔 ALERT TRIGGERED! {ticker} for user {alert['user_email']} | "
-                f"Target: {alert_description} | Triggered at: ${current_price:.2f}")
+    logger.info(
+        f"🔔 ALERT TRIGGERED! {ticker} for user {alert['user_email']} | "
+        f"Target: {alert_description} | Triggered at: ${current_price:.2f}"
+    )
     
-                try:
-                    # Generate AI explanation
-                    alert_data = {
-                    'ticker': ticker,
-                    'alert_type': alert_type,
-                    'price_at_trigger': current_price,
-                    'target_price': target_price,
-                    'direction': direction,
-                    'ma_period': alert.get('ma_period'),
-                    'ma_value': alert.get('ma_value')
-                    }
+    try:
+        # Generate AI explanation
+        alert_data = {
+            'ticker': ticker,
+            'alert_type': alert_type,
+            'price_at_trigger': current_price,
+            'target_price': target_price,
+            'direction': direction,
+            'ma_period': alert.get('ma_period'),
+            'ma_value': alert.get('ma_value')
+        }
         
-                    explanation = explanation_generator.generate(alert_data)
-                    logger.info(f"🤖 AI Explanation: {explanation}")
+        explanation = explanation_generator.generate(alert_data)
+        logger.info(f"🤖 AI Explanation: {explanation}")
         
         # Record trigger history
         AlertTrigger.create(
@@ -192,20 +194,20 @@ class AlertProcessor:
             target_price=target_price,
             triggered_price=current_price,
             direction=direction,
-            explanation=explanation  # NEW parameter
+            explanation=explanation
         )
         
         if email_sent:
-            logger.info(f"📧 Email sent successfully")
+            logger.info(f"📧 Email sent successfully to {alert['user_email']}")
+        else:
+            logger.error(f"📧 Email failed to send to {alert['user_email']}")
         
         Alert.delete_by_id(alert['id'])
-        logger.info(f"🗑️ Alert deleted after trigger")
+        logger.info(f"🗑️ Alert #{alert['id']} deleted after trigger")
         
     except Exception as e:
-        logger.error(f"❌ Error processing triggered alert: {e}")
+        logger.error(f"❌ Error processing triggered alert {alert['id']}: {e}")
 
-        logger.info("✅ Alert processing complete")
-        
     def update_ma_alerts(self):
         """
         Daily job to update target_price for all MA alerts to current MA value
