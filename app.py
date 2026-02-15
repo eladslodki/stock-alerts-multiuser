@@ -4243,6 +4243,82 @@ def before_first_request():
         app._initialized = True
         from threading import Thread
         Thread(target=init_db_and_scheduler, daemon=True).start()
+@app.route('/api/alerts/history', methods=['GET'])
+@login_required
+def get_alert_history():
+    from models import AlertTrigger
+    history = AlertTrigger.get_user_history(current_user.id)
+    return jsonify({'success': True, 'history': [
+        {
+            'id': r['id'], 'ticker': r['ticker'], 'alert_type': r['alert_type'],
+            'triggered_at': r['triggered_at'].isoformat() if r['triggered_at'] else None,
+            'price_at_trigger': float(r['price_at_trigger']) if r['price_at_trigger'] else None,
+            'explanation': r['explanation_text']
+        } for r in history
+    ]})
+
+@app.route('/api/alerts/parse-text', methods=['POST'])
+@login_required
+def parse_alert_text():
+    from services.nl_alert_parser import nl_parser
+    text = request.json.get('text', '').strip()
+    result = nl_parser.parse(text)
+    if result.get('success'):
+        return jsonify({'success': True, 'suggestion': {
+            'ticker': result['ticker'],
+            'alert_type': result['alert_type'],
+            'params': result['params'],
+            'summary': result['readable_summary']
+        }})
+    return jsonify({'success': False, 'error': result.get('error')}), 400
+
+@app.route('/api/alerts/create-from-suggestion', methods=['POST'])
+@login_required
+def create_alert_from_suggestion():
+    data = request.json
+    ticker = data['ticker'].upper()
+    params = data['params']
+    
+    current_price = price_checker.get_price(ticker)
+    if not current_price:
+        return jsonify({'success': False, 'error': 'Invalid ticker'}), 400
+    
+    alert_id = Alert.create(
+        current_user.id, ticker, params['target_price'], 
+        current_price, params['direction'], alert_type='price'
+    )
+    return jsonify({'success': True, 'alert_id': alert_id})
+
+@app.route('/api/radar', methods=['GET'])
+@login_required
+def get_market_radar():
+    from models import Anomaly
+    anomalies = Anomaly.get_user_anomalies(current_user.id)
+    return jsonify({'success': True, 'anomalies': [
+        {
+            'id': a['id'], 'ticker': a['ticker'], 'anomaly_type': a['anomaly_type'],
+            'metrics': a['metrics_json'], 'severity': a.get('severity'),
+            'detected_at': a['detected_at'].isoformat() if a['detected_at'] else None
+        } for a in anomalies
+    ]})
+
+@app.route('/alerts/history')
+@login_required
+def alert_history_page():
+    # Copy dashboard HTML structure
+    # Replace body with: <div id="historyList"></div>
+    # Add JS: fetch('/api/alerts/history') and render cards
+    # Include explanation in card: <div class="explanation">{explanation}</div>
+    return render_template_string(html)  # See Part 2 for full HTML
+
+@app.route('/radar')
+@login_required
+def radar_page():
+    # Similar to history page
+    # Fetch from /api/radar
+    # Render anomaly cards with severity colors
+    return render_template_string(html)  # See Part 2 for full HTML
+
 
 # Gunicorn will run the app, this is only for local testing
 if __name__ == '__main__':
