@@ -151,7 +151,7 @@ class AlertProcessor:
             
             # Trigger handling
             if triggered:
-                from services.ai_explanations import              
+                from services.ai_explanations import explanation_generator
                 from models import AlertTrigger
     
                 alert_description = f"MA{alert['ma_period']}" if alert_type == 'ma' else f"${target_price:.2f}"
