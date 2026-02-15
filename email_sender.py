@@ -42,7 +42,7 @@ class EmailSender:
             logger.error(f"❌ Email sender initialization failed: {e}")
             self.enabled = False
     
-    def send_alert_email(self, to_email, ticker, target_price, triggered_price, direction):
+    def send_alert_email(self, to_email, ticker, target_price, triggered_price, direction, explanation=None):
         """Send stock alert notification email"""
         if not self.enabled:
             logger.error("=" * 60)
@@ -93,6 +93,7 @@ class EmailSender:
                             <p><strong>Target Price:</strong> <span class="price">${target_price:.2f}</span></p>
                             <p><strong>Triggered At:</strong> <span class="price">${triggered_price:.2f}</span></p>
                             <p><strong>Direction:</strong> {direction.upper()}</p>
+                            {f'<div style="background: #e3f2fd; padding: 15px; margin-top: 15px; border-left: 4px solid #2196F3; border-radius: 5px;"><strong>🤖 AI Insight:</strong> {explanation}</div>' if explanation else ''}
                         </div>
                         <p>Your alert has been automatically deleted.</p>
                     </div>
