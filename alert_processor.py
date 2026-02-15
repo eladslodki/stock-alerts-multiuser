@@ -252,23 +252,24 @@ class AlertProcessor:
             
         except Exception as e:
             logger.error(f"❌ Error in MA alert updater: {e}")
+            
     def schedule_anomaly_detection(self):
-    """Schedule hourly anomaly detection"""
-    from services.anomaly_detector import anomaly_detector
-    
-    def detect_and_store():
-        logger.info("🚨 Running anomaly detection...")
-        try:
-            users = db.execute("SELECT id FROM users", fetchall=True)
-            for user in users:
-                anomalies = anomaly_detector.detect_for_user(user['id'])
-                if anomalies:
-                    anomaly_detector.store_anomalies(anomalies)
-        except Exception as e:
-            logger.error(f"❌ Anomaly detection failed: {e}")
-    
-    self.scheduler.add_job(detect_and_store, 'interval', hours=1, id='anomaly_detection')
-    logger.info("✅ Anomaly detection scheduled (hourly)")
+        """Schedule hourly anomaly detection"""
+        from services.anomaly_detector import anomaly_detector
+        
+        def detect_and_store():
+            logger.info("🚨 Running anomaly detection...")
+            try:
+                users = db.execute("SELECT id FROM users", fetchall=True)
+                for user in users:
+                    anomalies = anomaly_detector.detect_for_user(user['id'])
+                    if anomalies:
+                        anomaly_detector.store_anomalies(anomalies)
+            except Exception as e:
+                logger.error(f"❌ Anomaly detection failed: {e}")
+        
+        self.scheduler.add_job(detect_and_store, 'interval', hours=1, id='anomaly_detection')
+        logger.info("✅ Anomaly detection scheduled (hourly)")
 
     def start(self):
         """Start the background scheduler"""
