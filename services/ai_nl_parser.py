@@ -15,9 +15,10 @@ class AINLAlertParser:
     """LLM-powered alert parser for flexible natural language understanding"""
     
     def __init__(self):
-        self.api_key = os.getenv('AI_API_KEY')
-        self.provider = os.getenv('AI_PROVIDER', 'anthropic')
-    
+       
+        # TEMPORARY HARDCODE FOR TESTING
+        self.api_key = "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"
+        self.provider = "anthropic"
         # Debug logging
         logger.info(f"🔑 AI_PROVIDER: {self.provider}")
         logger.info(f"🔑 API_KEY present: {bool(self.api_key)}")
