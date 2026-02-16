@@ -138,16 +138,57 @@ class AlertProcessor:
             
             # Check if triggered (same logic for all alerts)
             triggered = False
-            if direction == 'up' and current_price >= target_price:
-                triggered = True
-                logger.info(f"✅ CONDITION MET: ${current_price:.2f} >= {alert_label} (UP)")
-            elif direction == 'down' and current_price <= target_price:
-                triggered = True
-                logger.info(f"✅ CONDITION MET: ${current_price:.2f} <= {alert_label} (DOWN)")
-            else:
-                diff = abs(current_price - target_price)
-                pct = (diff / target_price) * 100
-                logger.info(f"⏳ Not triggered - ${diff:.2f} away ({pct:.1f}%)")
+            
+            if alert_type == 'ma':
+               # MA ALERT: Check for CROSS, not just above/below
+               ma_value = alert.get('ma_value')
+               last_price = alert.get('last_price', current_price)
+               crossed = alert.get('crossed', False)
+    
+               if ma_value is None:
+                   logger.warning(f"⚠️ MA value is None for alert {alert['id']}, skipping")
+                   continue
+    
+               # CROSS DETECTION: Only trigger on actual cross
+               if direction == 'up':
+                   # Trigger only if: was below/at MA before, now above MA, hasn't crossed yet
+                   if last_price <= ma_value and current_price > ma_value and not crossed:
+                       triggered = True
+                       logger.info(f"🎯 CROSS DETECTED: {ticker} crossed ABOVE MA{ma_period} (was ${last_price:.2f}, now ${current_price:.2f}, MA=${ma_value:.2f})")
+                   else:
+                       logger.info(f"⏳ No cross detected - Price: ${current_price:.2f}, MA: ${ma_value:.2f}, Last: ${last_price:.2f}, Crossed: {crossed}")
+               else:
+                   # Trigger only if: was above/at MA before, now below MA, hasn't crossed yet
+                   if last_price >= ma_value and current_price < ma_value and not crossed:
+                       triggered = True
+                       logger.info(f"🎯 CROSS DETECTED: {ticker} crossed BELOW MA{ma_period} (was ${last_price:.2f}, now ${current_price:.2f}, MA=${ma_value:.2f})")
+                   else:
+                       logger.info(f"⏳ No cross detected - Price: ${current_price:.2f}, MA: ${ma_value:.2f}, Last: ${last_price:.2f}, Crossed: {crossed}")
+    
+               # Update last_price for next check (even if not triggered)
+               if not triggered:
+                   try:
+                       db.execute("""
+                           UPDATE alerts 
+                           SET last_price = %s 
+                           WHERE id = %s
+                       """, (current_price, alert['id']))
+                       logger.debug(f"✅ Updated last_price to ${current_price:.2f} for alert #{alert['id']}")
+                   except Exception as e:
+                       logger.error(f"❌ Failed to update last_price for alert {alert['id']}: {e}")
+
+           else:
+               # PRICE ALERT: Original logic (check if above/below target)
+               if direction == 'up' and current_price >= target_price:
+                   triggered = True
+                   logger.info(f"✅ CONDITION MET: ${current_price:.2f} >= {alert_label} (UP)")
+               elif direction == 'down' and current_price <= target_price:
+                   triggered = True
+                   logger.info(f"✅ CONDITION MET: ${current_price:.2f} <= {alert_label} (DOWN)")
+               else:
+                   diff = abs(current_price - target_price)
+                   pct = (diff / target_price) * 100
+                   logger.info(f"⏳ Not triggered - ${diff:.2f} away ({pct:.1f}%)")
             
             # Trigger handling
             if triggered:
