@@ -202,7 +202,13 @@ JSON:"""
             return None
     
         except anthropic.APIStatusError as e:
-            logger.error(f"❌ Anthropic API status error: {e.status_code} - {e.response}")
+            logger.error(f"❌ Anthropic API status error: {e.status_code}")
+            logger.error(f"❌ Response: {e.response}")
+            try:
+                error_body = e.response.json()
+                logger.error(f"❌ Error details: {error_body}")
+            except:
+                logger.error(f"❌ Response text: {e.response.text}")
             return None
     
         except Exception as e:
