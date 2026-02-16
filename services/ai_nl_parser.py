@@ -17,7 +17,14 @@ class AINLAlertParser:
     def __init__(self):
         self.api_key = os.getenv('AI_API_KEY')
         self.provider = os.getenv('AI_PROVIDER', 'anthropic')
-        
+    
+        # Debug logging
+        logger.info(f"🔑 AI_PROVIDER: {self.provider}")
+        logger.info(f"🔑 API_KEY present: {bool(self.api_key)}")
+        if self.api_key:
+            logger.info(f"🔑 API_KEY length: {len(self.api_key)}")
+            logger.info(f"🔑 API_KEY starts with: {self.api_key[:15]}...")
+    
         if not self.api_key and self.provider != 'mock':
             logger.warning("⚠️ AI_API_KEY not set for NL parser")
     
