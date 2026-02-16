@@ -66,11 +66,11 @@ class Alert:
         """Create alert for user"""
         result = db.execute(
             """
-            INSERT INTO alerts (user_id, ticker, target_price, current_price, direction, alert_type, ma_period)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO alerts (user_id, ticker, target_price, current_price, direction, alert_type, ma_period, last_price, crossed)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
-            (user_id, ticker, target_price, current_price, direction, alert_type, ma_period),
+            (user_id, ticker, target_price, current_price, direction, alert_type, ma_period, current_price, False),
             fetchone=True
         )
 
