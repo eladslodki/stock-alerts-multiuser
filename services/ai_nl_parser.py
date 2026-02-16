@@ -3,6 +3,8 @@ AI-powered natural language alert parser using Anthropic Claude
 """
 
 import logging
+import json
+import re
 from typing import Dict, Optional
 from services.ai_explanations import AIClient
 
@@ -31,16 +33,24 @@ class AINLAlertParser:
         }
         """
         try:
+            logger.info(f"🔍 Parsing: {text}")
+            
             prompt = self._build_prompt(text)
             response = self.ai_client.generate_explanation(prompt, max_tokens=300)
             
+            logger.info(f"🤖 LLM Response: {response[:200] if response else 'None'}...")
+            
             if not response:
+                logger.error("❌ No response from AI")
                 return self._fallback_error("AI service unavailable")
             
             # Parse JSON response
             parsed = self._parse_llm_response(response)
             
+            logger.info(f"📊 Parsed result: {parsed}")
+            
             if not parsed:
+                logger.error("❌ Failed to parse LLM response")
                 return self._fallback_error("Could not understand request")
             
             # Validate ticker exists
@@ -62,7 +72,7 @@ class AINLAlertParser:
             
             return {
                 'success': True,
-                'ticker': validation['ticker'],  # Use validated ticker
+                'ticker': validation['ticker'],
                 'alert_type': mapped['alert_type'],
                 'parameters': mapped['parameters'],
                 'confidence': parsed.get('confidence', 0.8),
@@ -76,42 +86,54 @@ class AINLAlertParser:
     def _build_prompt(self, user_text: str) -> str:
         """Build LLM prompt for alert parsing"""
         
-        prompt = f"""You are a stock alert parser. Extract structured alert information from user requests.
+        prompt = f"""You are a stock alert parser. Extract structured information from user requests.
 
 User request: "{user_text}"
 
-Analyze the request and extract:
-1. TICKER - Stock/crypto symbol (e.g., AAPL, BTC-USD, NVDA, SPY)
-2. INTENT - What type of alert:
-   - PRICE_TARGET: Specific price level (above/below)
-   - PRICE_NEAR: Near a price level
-   - PERCENT_CHANGE: Large % move up/down
-   - MA_CONDITION: Moving average cross
-   - VOLATILITY: High volatility/unusual activity
-   - BIG_MOVE: Any significant price change
-3. PARAMETERS - Specific values (price, %, direction)
-4. CONFIDENCE - How confident are you (0.0-1.0)
+Your task: Extract the ticker symbol, alert intent, and parameters.
 
-CRITICAL RULES:
-- Extract only factual information, NO trading advice
-- If no clear ticker, set ticker to null
-- If multiple tickers, choose the primary one
-- If request is too vague, set confidence < 0.5
-- Direction: "up", "down", or "both"
+EXAMPLES:
+"AAPL above 200" → ticker: AAPL, intent: PRICE_TARGET, price: 200, direction: up
+"Tell me when bitcoin drops below 40000" → ticker: BTC-USD, intent: PRICE_TARGET, price: 40000, direction: down
+"NVDA crosses MA50" → ticker: NVDA, intent: MA_CONDITION, ma_period: 50
+"Alert when TSLA is near 250" → ticker: TSLA, intent: PRICE_NEAR, price: 250
+"SPY shows big moves" → ticker: SPY, intent: BIG_MOVE
+"ETH pumps 5%" → ticker: ETH-USD, intent: PERCENT_CHANGE, percent: 5, direction: up
 
-Return ONLY valid JSON (no markdown, no explanation):
+INTENT TYPES:
+- PRICE_TARGET: specific price level with direction (above/below)
+- PRICE_NEAR: near a price level
+- PERCENT_CHANGE: percentage move (pump/dump/rise/fall)
+- MA_CONDITION: moving average cross (MA20, MA50, MA150)
+- BIG_MOVE: any significant move
+- VOLATILITY: high volatility or unusual activity
+
+TICKER RULES:
+- Stocks: use symbol as-is (AAPL, NVDA, TSLA, SPY, etc.)
+- Crypto: add -USD (BTC-USD, ETH-USD)
+- If unclear, use most likely ticker
+- Common names: "bitcoin"→BTC-USD, "ethereum"→ETH-USD, "apple"→AAPL
+
+CRITICAL:
+- Be generous with confidence (0.7+ if you can extract ticker and intent)
+- Extract ticker even from short phrases like "AAPL above 200"
+- Default direction: "up" for above/breaks/crosses, "down" for below/drops
+- If multiple tickers mentioned, use first one only
+- NO trading advice, only parse the request
+
+Return ONLY this JSON (no markdown, no explanation):
 {{
-  "ticker": "SYMBOL or null",
-  "intent": "PRICE_TARGET|PRICE_NEAR|PERCENT_CHANGE|MA_CONDITION|VOLATILITY|BIG_MOVE",
+  "ticker": "SYMBOL",
+  "intent": "PRICE_TARGET",
   "parameters": {{
-    "price": number or null,
-    "percent": number or null,
-    "direction": "up|down|both",
-    "ma_period": number or null,
-    "threshold": string or null
+    "price": 200,
+    "percent": null,
+    "direction": "up",
+    "ma_period": null,
+    "threshold": null
   }},
-  "confidence": 0.0-1.0,
-  "interpretation": "Brief explanation of what user wants"
+  "confidence": 0.9,
+  "interpretation": "Alert when AAPL goes above $200"
 }}
 
 JSON:"""
@@ -119,28 +141,58 @@ JSON:"""
         return prompt
     
     def _parse_llm_response(self, response: str) -> Optional[Dict]:
-        """Parse LLM JSON response"""
-        import json
-        
+        """Parse LLM JSON response with robust error handling"""
         try:
-            # Clean response (remove markdown if present)
+            # Clean response aggressively
             clean = response.strip()
-            if clean.startswith('```'):
-                clean = clean.split('```')[1]
-                if clean.startswith('json'):
-                    clean = clean[4:]
+            
+            # Remove markdown code blocks
+            if '```' in clean:
+                parts = clean.split('```')
+                if len(parts) >= 3:
+                    clean = parts[1]
+                    if clean.startswith('json'):
+                        clean = clean[4:]
+            
+            # Find JSON object using regex as fallback
+            if not clean.startswith('{'):
+                json_match = re.search(r'\{.*\}', clean, re.DOTALL)
+                if json_match:
+                    clean = json_match.group(0)
+            
             clean = clean.strip()
             
+            logger.info(f"🧹 Cleaned JSON: {clean[:100]}...")
+            
+            # Parse JSON
             parsed = json.loads(clean)
             
-            # Validate required fields
-            if not parsed.get('ticker') or parsed['confidence'] < 0.5:
+            # Validate structure
+            if not isinstance(parsed, dict):
+                logger.error(f"❌ Parsed result is not a dict: {type(parsed)}")
                 return None
             
+            # Check required fields
+            if not parsed.get('ticker'):
+                logger.error("❌ No ticker in parsed result")
+                return None
+            
+            # Lower confidence threshold
+            confidence = parsed.get('confidence', 0)
+            if confidence < 0.3:
+                logger.warning(f"⚠️ Low confidence: {confidence}")
+                return None
+            
+            logger.info(f"✅ Successfully parsed: ticker={parsed['ticker']}, confidence={confidence}")
             return parsed
         
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON decode error: {e}")
+            logger.error(f"❌ Response was: {response[:200]}...")
+            return None
+        
         except Exception as e:
-            logger.error(f"JSON parse error: {e}")
+            logger.error(f"❌ Parse error: {e}")
             return None
     
     def _validate_ticker(self, ticker: str) -> Dict:
@@ -161,8 +213,8 @@ JSON:"""
                 # Try common variations
                 variations = [
                     ticker,
-                    f"{ticker}-USD",  # Crypto
-                    ticker.replace('-USD', ''),  # Strip -USD
+                    f"{ticker}-USD",
+                    ticker.replace('-USD', ''),
                 ]
                 
                 for variant in variations:
