@@ -6,7 +6,7 @@ import logging
 import json
 import re
 from typing import Dict, Optional
-from services.ai_explanations import AIClient
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -15,10 +15,9 @@ class AINLAlertParser:
     """LLM-powered alert parser for flexible natural language understanding"""
     
     def __init__(self):
-        import os
         self.api_key = os.getenv('AI_API_KEY')
         self.provider = os.getenv('AI_PROVIDER', 'anthropic')
-    
+        
         if not self.api_key and self.provider != 'mock':
             logger.warning("⚠️ AI_API_KEY not set for NL parser")
     
@@ -41,7 +40,7 @@ class AINLAlertParser:
             logger.info(f"🔍 Parsing: {text}")
             
             prompt = self._build_prompt(text)
-            response = self.ai_client.generate_explanation(prompt, max_tokens=300)
+            response = self._call_anthropic(prompt)
             
             logger.info(f"🤖 LLM Response: {response[:200] if response else 'None'}...")
             
@@ -144,58 +143,54 @@ Return ONLY this JSON (no markdown, no explanation):
 JSON:"""
         
         return prompt
-
-        def _call_anthropic(self, prompt: str) -> Optional[str]:
-                """Call Anthropic API directly for parsing"""
-                if self.provider == 'mock':
-                    # Mock response for testing
-                    return '''
-        {
-          "ticker": "AAPL",
-          "intent": "PRICE_TARGET",
-          "parameters": {
-           "price": 200,
-           "percent": null,
-           "direction": "up",
-           "ma_period": null,
-           "threshold": null
-         },
-         "confidence": 0.9,
-         "interpretation": "Alert when AAPL goes above $200"
-       }
-       '''
+    
+    def _call_anthropic(self, prompt: str) -> Optional[str]:
+        """Call Anthropic API directly for parsing"""
+        if self.provider == 'mock':
+            mock_json = {
+                "ticker": "AAPL",
+                "intent": "PRICE_TARGET",
+                "parameters": {
+                    "price": 200,
+                    "percent": None,
+                    "direction": "up",
+                    "ma_period": None,
+                    "threshold": None
+                },
+                "confidence": 0.9,
+                "interpretation": "Alert when AAPL goes above $200"
+            }
+            return json.dumps(mock_json)
         
-               try:
-                   import anthropic
+        try:
+            import anthropic
             
-                   client = anthropic.Anthropic(api_key=self.api_key)
+            client = anthropic.Anthropic(api_key=self.api_key)
             
-                   message = client.messages.create(
-                       model="claude-3-haiku-20240307",
-                       max_tokens=400,
-                       temperature=0.3,
-                       messages=[{
-                           "role": "user",
-                           "content": prompt
-                     }],
-                     timeout=15.0
-                )
+            message = client.messages.create(
+                model="claude-3-haiku-20240307",
+                max_tokens=400,
+                temperature=0.3,
+                messages=[{
+                    "role": "user",
+                    "content": prompt
+                }],
+                timeout=15.0
+            )
             
-                response_text = message.content[0].text.strip()
-                logger.info(f"✅ Anthropic API call successful")
-                return response_text
+            response_text = message.content[0].text.strip()
+            logger.info("✅ Anthropic API call successful")
+            return response_text
         
-            except Exception as e:
-                logger.error(f"❌ Anthropic API error: {e}")
-                return None
-
+        except Exception as e:
+            logger.error(f"❌ Anthropic API error: {e}")
+            return None
+    
     def _parse_llm_response(self, response: str) -> Optional[Dict]:
         """Parse LLM JSON response with robust error handling"""
         try:
-            # Clean response aggressively
             clean = response.strip()
             
-            # Remove markdown code blocks
             if '```' in clean:
                 parts = clean.split('```')
                 if len(parts) >= 3:
@@ -203,7 +198,6 @@ JSON:"""
                     if clean.startswith('json'):
                         clean = clean[4:]
             
-            # Find JSON object using regex as fallback
             if not clean.startswith('{'):
                 json_match = re.search(r'\{.*\}', clean, re.DOTALL)
                 if json_match:
@@ -213,20 +207,16 @@ JSON:"""
             
             logger.info(f"🧹 Cleaned JSON: {clean[:100]}...")
             
-            # Parse JSON
             parsed = json.loads(clean)
             
-            # Validate structure
             if not isinstance(parsed, dict):
                 logger.error(f"❌ Parsed result is not a dict: {type(parsed)}")
                 return None
             
-            # Check required fields
             if not parsed.get('ticker'):
                 logger.error("❌ No ticker in parsed result")
                 return None
             
-            # Lower confidence threshold
             confidence = parsed.get('confidence', 0)
             if confidence < 0.3:
                 logger.warning(f"⚠️ Low confidence: {confidence}")
@@ -252,14 +242,11 @@ JSON:"""
         try:
             from price_checker import price_checker
             
-            # Normalize ticker
             ticker = ticker.upper().strip()
             
-            # Try to get price (validates ticker exists)
             price = price_checker.get_price(ticker)
             
             if price is None:
-                # Try common variations
                 variations = [
                     ticker,
                     f"{ticker}-USD",
@@ -287,7 +274,6 @@ JSON:"""
         intent = parsed.get('intent')
         params = parsed.get('parameters', {})
         
-        # PRICE_TARGET
         if intent == 'PRICE_TARGET' and params.get('price'):
             return {
                 'supported': True,
@@ -298,7 +284,6 @@ JSON:"""
                 }
             }
         
-        # PRICE_NEAR
         if intent == 'PRICE_NEAR' and params.get('price'):
             return {
                 'supported': True,
@@ -310,7 +295,6 @@ JSON:"""
                 }
             }
         
-        # PERCENT_CHANGE
         if intent == 'PERCENT_CHANGE':
             threshold = params.get('percent', 5.0)
             return {
@@ -323,7 +307,6 @@ JSON:"""
                 }
             }
         
-        # MA_CONDITION
         if intent == 'MA_CONDITION':
             ma_period = params.get('ma_period', 50)
             return {
@@ -335,7 +318,6 @@ JSON:"""
                 }
             }
         
-        # VOLATILITY or BIG_MOVE - map to percent_change
         if intent in ['VOLATILITY', 'BIG_MOVE']:
             return {
                 'supported': True,
@@ -347,7 +329,6 @@ JSON:"""
                 }
             }
         
-        # Unsupported or ambiguous
         return {
             'supported': False,
             'message': f'Cannot create alert for "{intent}". Try: "Alert when {parsed.get("ticker")} goes above [price]"'
@@ -361,5 +342,4 @@ JSON:"""
         }
 
 
-# Global instance
 ai_nl_parser = AINLAlertParser()
