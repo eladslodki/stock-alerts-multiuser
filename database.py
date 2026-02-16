@@ -61,6 +61,12 @@ class Database:
             ALTER TABLE trades ADD COLUMN IF NOT EXISTS is_closed BOOLEAN DEFAULT FALSE;
             """,
             """
+            ALTER TABLE alerts ADD COLUMN IF NOT EXISTS last_price DECIMAL(10, 2);
+            """,
+            """
+            ALTER TABLE alerts ADD COLUMN IF NOT EXISTS crossed BOOLEAN DEFAULT FALSE;
+            """,
+            """
             ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_price DECIMAL(10, 2);
             """,
             """
