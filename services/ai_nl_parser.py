@@ -15,7 +15,12 @@ class AINLAlertParser:
     """LLM-powered alert parser for flexible natural language understanding"""
     
     def __init__(self):
-        self.ai_client = AIClient()
+        import os
+        self.api_key = os.getenv('AI_API_KEY')
+        self.provider = os.getenv('AI_PROVIDER', 'anthropic')
+    
+        if not self.api_key and self.provider != 'mock':
+            logger.warning("⚠️ AI_API_KEY not set for NL parser")
     
     def parse(self, text: str) -> Dict:
         """
@@ -139,6 +144,51 @@ Return ONLY this JSON (no markdown, no explanation):
 JSON:"""
         
         return prompt
+
+    def _call_anthropic(self, prompt: str) -> Optional[str]:
+    """Call Anthropic API directly for parsing"""
+    if self.provider == 'mock':
+        # Mock response for testing
+        return '''
+{
+  "ticker": "AAPL",
+  "intent": "PRICE_TARGET",
+  "parameters": {
+    "price": 200,
+    "percent": null,
+    "direction": "up",
+    "ma_period": null,
+    "threshold": null
+  },
+  "confidence": 0.9,
+  "interpretation": "Alert when AAPL goes above $200"
+}
+'''
+    
+    try:
+        import anthropic
+        
+        client = anthropic.Anthropic(api_key=self.api_key)
+        
+        message = client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=400,
+            temperature=0.3,
+            messages=[{
+                "role": "user",
+                "content": prompt
+            }],
+            timeout=15.0
+        )
+        
+        response_text = message.content[0].text.strip()
+        logger.info(f"✅ Anthropic API call successful")
+        return response_text
+    
+    except Exception as e:
+        logger.error(f"❌ Anthropic API error: {e}")
+        return None
+
     
     def _parse_llm_response(self, response: str) -> Optional[Dict]:
         """Parse LLM JSON response with robust error handling"""
