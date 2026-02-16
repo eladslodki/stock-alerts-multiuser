@@ -180,13 +180,14 @@ JSON:"""
         
             # Make API call
             message = client.messages.create(
-                model="claude-3-haiku-20240307",
-                max_tokens=400,
-                temperature=0.3,
-                messages=[{
-                    "role": "user",
-                    "content": prompt
-                }]
+                model="claude-3-5-haiku-20241022",
+                max_tokens=1024,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+               ]
             )
         
             response_text = message.content[0].text.strip()
