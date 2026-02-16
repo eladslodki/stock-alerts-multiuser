@@ -136,127 +136,133 @@ class AlertProcessor:
                 f"User: {alert['user_email']}"
             )
             
-            # Check if triggered (same logic for all alerts)
+            # Check if triggered - DIFFERENT LOGIC FOR MA vs PRICE ALERTS
             triggered = False
             
             if alert_type == 'ma':
-               # MA ALERT: Check for CROSS, not just above/below
-               ma_value = alert.get('ma_value')
-               last_price = alert.get('last_price', current_price)
-               crossed = alert.get('crossed', False)
-    
-               if ma_value is None:
-                   logger.warning(f"⚠️ MA value is None for alert {alert['id']}, skipping")
-                   continue
-    
-               # CROSS DETECTION: Only trigger on actual cross
-               if direction == 'up':
-                   # Trigger only if: was below/at MA before, now above MA, hasn't crossed yet
-                   if last_price <= ma_value and current_price > ma_value and not crossed:
-                       triggered = True
-                       logger.info(f"🎯 CROSS DETECTED: {ticker} crossed ABOVE MA{ma_period} (was ${last_price:.2f}, now ${current_price:.2f}, MA=${ma_value:.2f})")
-                   else:
-                       logger.info(f"⏳ No cross detected - Price: ${current_price:.2f}, MA: ${ma_value:.2f}, Last: ${last_price:.2f}, Crossed: {crossed}")
-               else:
-                   # Trigger only if: was above/at MA before, now below MA, hasn't crossed yet
-                   if last_price >= ma_value and current_price < ma_value and not crossed:
-                       triggered = True
-                       logger.info(f"🎯 CROSS DETECTED: {ticker} crossed BELOW MA{ma_period} (was ${last_price:.2f}, now ${current_price:.2f}, MA=${ma_value:.2f})")
-                   else:
-                       logger.info(f"⏳ No cross detected - Price: ${current_price:.2f}, MA: ${ma_value:.2f}, Last: ${last_price:.2f}, Crossed: {crossed}")
-    
-               # Update last_price for next check (even if not triggered)
-               if not triggered:
-                   try:
-                       db.execute("""
-                           UPDATE alerts 
-                           SET last_price = %s 
-                           WHERE id = %s
-                       """, (current_price, alert['id']))
-                       logger.debug(f"✅ Updated last_price to ${current_price:.2f} for alert #{alert['id']}")
-                   except Exception as e:
-                       logger.error(f"❌ Failed to update last_price for alert {alert['id']}: {e}")
-
-           else:
-               # PRICE ALERT: Original logic (check if above/below target)
-               if direction == 'up' and current_price >= target_price:
-                   triggered = True
-                   logger.info(f"✅ CONDITION MET: ${current_price:.2f} >= {alert_label} (UP)")
-               elif direction == 'down' and current_price <= target_price:
-                   triggered = True
-                   logger.info(f"✅ CONDITION MET: ${current_price:.2f} <= {alert_label} (DOWN)")
-               else:
-                   diff = abs(current_price - target_price)
-                   pct = (diff / target_price) * 100
-                   logger.info(f"⏳ Not triggered - ${diff:.2f} away ({pct:.1f}%)")
+                # MA ALERT: Check for CROSS, not just above/below
+                ma_value = alert.get('ma_value')
+                last_price = alert.get('last_price', current_price)
+                crossed = alert.get('crossed', False)
+                
+                if ma_value is None:
+                    logger.warning(f"⚠️ MA value is None for alert {alert['id']}, skipping")
+                    continue
+                
+                # CROSS DETECTION: Only trigger on actual cross
+                if direction == 'up':
+                    # Trigger only if: was below/at MA before, now above MA, hasn't crossed yet
+                    if last_price <= ma_value and current_price > ma_value and not crossed:
+                        triggered = True
+                        logger.info(f"🎯 CROSS DETECTED: {ticker} crossed ABOVE MA{ma_period} (was ${last_price:.2f}, now ${current_price:.2f}, MA=${ma_value:.2f})")
+                    else:
+                        logger.info(f"⏳ No cross detected - Price: ${current_price:.2f}, MA: ${ma_value:.2f}, Last: ${last_price:.2f}, Crossed: {crossed}")
+                else:
+                    # Trigger only if: was above/at MA before, now below MA, hasn't crossed yet
+                    if last_price >= ma_value and current_price < ma_value and not crossed:
+                        triggered = True
+                        logger.info(f"🎯 CROSS DETECTED: {ticker} crossed BELOW MA{ma_period} (was ${last_price:.2f}, now ${current_price:.2f}, MA=${ma_value:.2f})")
+                    else:
+                        logger.info(f"⏳ No cross detected - Price: ${current_price:.2f}, MA: ${ma_value:.2f}, Last: ${last_price:.2f}, Crossed: {crossed}")
+                
+                # Update last_price for next check (even if not triggered)
+                if not triggered:
+                    try:
+                        db.execute("""
+                            UPDATE alerts 
+                            SET last_price = %s 
+                            WHERE id = %s
+                        """, (current_price, alert['id']))
+                        logger.debug(f"✅ Updated last_price to ${current_price:.2f} for alert #{alert['id']}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to update last_price for alert {alert['id']}: {e}")
+            
+            else:
+                # PRICE ALERT: Original logic (check if above/below target)
+                if direction == 'up' and current_price >= target_price:
+                    triggered = True
+                    logger.info(f"✅ CONDITION MET: ${current_price:.2f} >= {alert_label} (UP)")
+                elif direction == 'down' and current_price <= target_price:
+                    triggered = True
+                    logger.info(f"✅ CONDITION MET: ${current_price:.2f} <= {alert_label} (DOWN)")
+                else:
+                    diff = abs(current_price - target_price)
+                    pct = (diff / target_price) * 100
+                    logger.info(f"⏳ Not triggered - ${diff:.2f} away ({pct:.1f}%)")
             
             # Trigger handling
             if triggered:
-                        from services.ai_explanations import explanation_generator
-                        from models import AlertTrigger
-            
-                        alert_description = f"MA{alert['ma_period']}" if alert_type == 'ma' else f"${target_price:.2f}"
-            
-                        logger.info(
-                            f"🔔 ALERT TRIGGERED! {ticker} for user {alert['user_email']} | "
-                            f"Target: {alert_description} | Triggered at: ${current_price:.2f}"
-                        )
-            
+                from services.ai_explanations import explanation_generator
+                from models import AlertTrigger
+                
+                alert_description = f"MA{alert['ma_period']}" if alert_type == 'ma' else f"${target_price:.2f}"
+                
+                logger.info(
+                    f"🔔 ALERT TRIGGERED! {ticker} for user {alert['user_email']} | "
+                    f"Target: {alert_description} | Triggered at: ${current_price:.2f}"
+                )
+                
+                try:
+                    # Generate AI explanation
+                    alert_data = {
+                        'ticker': ticker,
+                        'alert_type': alert_type,
+                        'price_at_trigger': current_price,
+                        'target_price': target_price,
+                        'direction': direction,
+                        'ma_period': alert.get('ma_period'),
+                        'ma_value': alert.get('ma_value')
+                    }
+                    
+                    explanation = explanation_generator.generate(alert_data)
+                    logger.info(f"🤖 AI Explanation: {explanation}")
+                    
+                    # Record trigger history
+                    AlertTrigger.create(
+                        user_id=alert['user_id'],
+                        ticker=ticker,
+                        alert_type=alert_type,
+                        alert_params={'target_price': target_price, 'direction': direction},
+                        price_at_trigger=current_price,
+                        explanation=explanation,
+                        metrics={'alert_id': alert['id']}
+                    )
+                    
+                    # Send email with explanation
+                    email_sent = email_sender.send_alert_email(
+                        to_email=alert['user_email'],
+                        ticker=ticker,
+                        target_price=target_price,
+                        triggered_price=current_price,
+                        direction=direction,
+                        explanation=explanation
+                    )
+                    
+                    if email_sent:
+                        logger.info(f"📧 Email sent successfully to {alert['user_email']}")
+                    else:
+                        logger.error(f"📧 Email failed to send to {alert['user_email']}")
+                    
+                    Alert.delete_by_id(alert['id'])
+                    logger.info(f"🗑️ Alert #{alert['id']} deleted after trigger")
+                    
+                    # Mark MA alert as crossed to prevent re-triggering
+                    if alert_type == 'ma':
                         try:
-                            # Generate AI explanation
-                            alert_data = {
-                                'ticker': ticker,
-                                'alert_type': alert_type,
-                                'price_at_trigger': current_price,
-                                'target_price': target_price,
-                                'direction': direction,
-                                'ma_period': alert.get('ma_period'),
-                                'ma_value': alert.get('ma_value')
-                            }
-                
-                            explanation = explanation_generator.generate(alert_data)
-                            logger.info(f"🤖 AI Explanation: {explanation}")
-                
-                            # Record trigger history
-                            AlertTrigger.create(
-                                user_id=alert['user_id'],
-                                ticker=ticker,
-                                alert_type=alert_type,
-                                alert_params={'target_price': target_price, 'direction': direction},
-                                price_at_trigger=current_price,
-                                explanation=explanation,
-                                metrics={'alert_id': alert['id']}
-                            )
-                
-                            # Send email with explanation
-                            email_sent = email_sender.send_alert_email(
-                                to_email=alert['user_email'],
-                                ticker=ticker,
-                                target_price=target_price,
-                                triggered_price=current_price,
-                                direction=direction,
-                                explanation=explanation
-                            )
-                
-                            if email_sent:
-                                logger.info(f"📧 Email sent successfully to {alert['user_email']}")
-                            else:
-                                logger.error(f"📧 Email failed to send to {alert['user_email']}")
-                
-                            Alert.delete_by_id(alert['id'])
-                            logger.info(f"🗑️ Alert #{alert['id']} deleted after trigger")
-                            # Mark MA alert as crossed to prevent re-triggering
-                            if alert_type == 'ma':
-                                try:
-                                    db.execute("""
-                                        UPDATE alerts 
-                                        SET crossed = TRUE 
-                                        WHERE id = %s
-                                    """, (alert['id'],))
-                                    logger.info(f"✓ Marked MA alert #{alert['id']} as crossed")
-                                except Exception as e:
-                                    logger.error(f"❌ Failed to mark alert as crossed: {e}")
-
+                            db.execute("""
+                                UPDATE alerts 
+                                SET crossed = TRUE 
+                                WHERE id = %s
+                            """, (alert['id'],))
+                            logger.info(f"✓ Marked MA alert #{alert['id']} as crossed")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to mark alert as crossed: {e}")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error processing triggered alert {alert['id']}: {e}")
+        
+        logger.info("✅ Alert processing complete")
+    
     def update_ma_alerts(self):
         """
         Daily job to update target_price for all MA alerts to current MA value
@@ -265,10 +271,8 @@ class AlertProcessor:
         logger.info("=" * 60)
         logger.info("🔄 UPDATING MA ALERTS")
         logger.info("=" * 60)
-    
+        
         try:
-            # get_moving_average is a method, use it from price_checker instance
-            
             # Get all active MA alerts
             all_alerts = Alert.get_all_active()
             ma_alerts = [a for a in all_alerts if a.get('alert_type') == 'ma']
@@ -284,12 +288,12 @@ class AlertProcessor:
                     ma_value = price_checker.get_moving_average(ticker, ma_period)
                     
                     if ma_value is not None:
-                       # Update the alert's target price to new MA value AND reset cross detection
-                       db.execute(
-                           "UPDATE alerts SET target_price = %s, current_price = %s, crossed = %s, last_price = %s WHERE id = %s",
-                           (ma_value, alert['current_price'], False, alert['current_price'], alert['id'])
-                       )
-
+                        # Update the alert's target price to new MA value AND reset cross detection
+                        db.execute(
+                            "UPDATE alerts SET target_price = %s, current_price = %s, crossed = %s, last_price = %s WHERE id = %s",
+                            (ma_value, alert['current_price'], False, alert['current_price'], alert['id'])
+                        )
+                        
                         logger.info(f"✅ Updated alert #{alert['id']} - {ticker} MA{ma_period} = ${ma_value:.2f}")
                     else:
                         logger.warning(f"⚠️ Could not calculate MA{ma_period} for {ticker}")
@@ -301,7 +305,7 @@ class AlertProcessor:
             
         except Exception as e:
             logger.error(f"❌ Error in MA alert updater: {e}")
-            
+    
     def schedule_anomaly_detection(self):
         """Schedule hourly anomaly detection"""
         from services.anomaly_detector import anomaly_detector
@@ -319,7 +323,7 @@ class AlertProcessor:
         
         self.scheduler.add_job(detect_and_store, 'interval', hours=1, id='anomaly_detection')
         logger.info("✅ Anomaly detection scheduled (hourly)")
-
+    
     def start(self):
         """Start the background scheduler"""
         # Check alerts every minute
@@ -329,17 +333,19 @@ class AlertProcessor:
             minutes=1,
             id='process_alerts'
         )
-    
+        
         # Update MA alerts daily at 4 AM ET
         self.scheduler.add_job(
             self.update_ma_alerts,
             'cron',
             hour=4,
             minute=0,
+            timezone='America/New_York',
             id='update_ma_alerts'
         )
-
+        
         self.schedule_anomaly_detection()
+        
         self.scheduler.start()
         logger.info("✅ Alert processor started - checking every 60 seconds")
         logger.info("✅ MA alert updater scheduled - daily at 4 AM ET")
