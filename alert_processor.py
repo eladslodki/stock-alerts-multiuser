@@ -284,11 +284,12 @@ class AlertProcessor:
                     ma_value = price_checker.get_moving_average(ticker, ma_period)
                     
                     if ma_value is not None:
-                        # Update the alert's target price to new MA value
-                        db.execute(
-                            "UPDATE alerts SET target_price = %s, current_price = %s WHERE id = %s",
-                            (ma_value, alert['current_price'], alert['id'])
-                        )
+                       # Update the alert's target price to new MA value AND reset cross detection
+                       db.execute(
+                           "UPDATE alerts SET target_price = %s, current_price = %s, crossed = %s, last_price = %s WHERE id = %s",
+                           (ma_value, alert['current_price'], False, alert['current_price'], alert['id'])
+                       )
+
                         logger.info(f"✅ Updated alert #{alert['id']} - {ticker} MA{ma_period} = ${ma_value:.2f}")
                     else:
                         logger.warning(f"⚠️ Could not calculate MA{ma_period} for {ticker}")
