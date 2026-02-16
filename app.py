@@ -1714,11 +1714,30 @@ async function parseNLAlert() {
         const data = await res.json();
         
         if (data.success) {
-            nlSuggestion = data.suggestion;
-            document.getElementById('nlSummary').textContent = nlSuggestion.summary;
-            document.getElementById('nlPreview').style.display = 'block';
-            msgEl.innerHTML = '';
-        } else {
+    nlSuggestion = data.suggestion;
+    
+    // Show confidence level
+    const confidence = (nlSuggestion.confidence * 100).toFixed(0);
+    const confidenceColor = confidence >= 80 ? '#00FFA3' : confidence >= 50 ? '#FFB800' : '#FF6B6B';
+    
+    // Build enhanced preview with interpretation
+    document.getElementById('nlSummary').innerHTML = `
+        <div style="margin-bottom: 8px; font-size: 15px; font-weight: 600;">
+            ${nlSuggestion.summary}
+        </div>
+        ${nlSuggestion.interpretation ? `
+        <div style="font-size: 13px; color: #8B92A8; margin-bottom: 8px;">
+            📝 ${nlSuggestion.interpretation}
+        </div>
+        ` : ''}
+        <div style="margin-top: 8px; font-size: 11px; color: ${confidenceColor};">
+            ✓ Confidence: ${confidence}%
+        </div>
+    `;
+    
+    document.getElementById('nlPreview').style.display = 'block';
+    msgEl.innerHTML = '';
+    } else {
             msgEl.innerHTML = `<div class="message error">${data.error}</div>`;
         }
     } catch (error) {
@@ -4371,34 +4390,172 @@ def get_alert_history():
 @app.route('/api/alerts/parse-text', methods=['POST'])
 @login_required
 def parse_alert_text():
-    from services.nl_alert_parser import nl_parser
-    text = request.json.get('text', '').strip()
-    result = nl_parser.parse(text)
-    if result.get('success'):
-        return jsonify({'success': True, 'suggestion': {
-            'ticker': result['ticker'],
-            'alert_type': result['alert_type'],
-            'params': result['params'],
-            'summary': result['readable_summary']
-        }})
-    return jsonify({'success': False, 'error': result.get('error')}), 400
+    """Parse natural language text using AI"""
+    try:
+        from services.ai_nl_parser import ai_nl_parser
+        
+        data = request.json
+        text = data.get('text', '').strip()
+        
+        if not text:
+            return jsonify({'success': False, 'error': 'No text provided'}), 400
+        
+        # Use AI parser
+        result = ai_nl_parser.parse(text)
+        
+        if not result.get('success'):
+            return jsonify(result), 400
+        
+        # Build readable summary
+        ticker = result['ticker']
+        alert_type = result['alert_type']
+        params = result['parameters']
+        
+        # Create human-readable summary
+        if alert_type == 'price':
+            direction = 'above' if params.get('direction') == 'up' else 'below' if params.get('direction') == 'down' else 'near'
+            summary = f"Alert when {ticker} goes {direction} ${params['target_price']:.2f}"
+        elif alert_type == 'ma':
+            summary = f"Alert when {ticker} crosses MA{params['ma_period']}"
+        elif alert_type == 'percent_change':
+            direction = params.get('direction', 'both')
+            threshold = params['threshold_pct']
+            if direction == 'up':
+                summary = f"Alert when {ticker} rises {threshold}%+ in 24h"
+            elif direction == 'down':
+                summary = f"Alert when {ticker} falls {threshold}%+ in 24h"
+            else:
+                summary = f"Alert when {ticker} moves {threshold}%+ (either direction) in 24h"
+        else:
+            summary = f"Alert for {ticker}"
+        
+        return jsonify({
+            'success': True,
+            'suggestion': {
+                'ticker': result['ticker'],
+                'alert_type': result['alert_type'],
+                'params': result['parameters'],
+                'summary': summary,
+                'confidence': result.get('confidence', 0.8),
+                'interpretation': result.get('interpretation', '')
+            }
+        })
+    
+    except Exception as e:
+        logger.error(f"Error parsing alert text: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/alerts/create-from-suggestion', methods=['POST'])
 @login_required
 def create_alert_from_suggestion():
-    data = request.json
-    ticker = data['ticker'].upper()
-    params = data['params']
+    """Create alert from AI NL parser suggestion (after user confirms)"""
+    try:
+        data = request.json
+        ticker = data['ticker'].upper()
+        alert_type = data['alert_type']
+        params = data['params']
+        
+        logger.info(f"Creating alert from AI suggestion: {ticker} | Type: {alert_type}")
+        
+        # Validate alert type is supported
+        if alert_type not in ['price', 'ma']:
+            return jsonify({
+                'success': False, 
+                'error': f'Alert type "{alert_type}" not yet supported via AI parsing. Try price or MA alerts.'
+            }), 400
+        
+        # Get current price (validates ticker exists)
+        current_price = price_checker.get_price(ticker)
+        if current_price is None:
+            return jsonify({'success': False, 'error': f'Could not get price for {ticker}. Invalid ticker?'}), 400
+        
+        logger.info(f"Current price for {ticker}: ${current_price:.2f}")
+        
+        # Create alert based on type
+        alert_id = None
+        
+        if alert_type == 'price':
+            # PRICE ALERT
+            target_price = float(params['target_price'])
+            direction = params.get('direction', 'both')
+            
+            # Validate price
+            if target_price <= 0:
+                return jsonify({'success': False, 'error': 'Price must be greater than 0'}), 400
+            
+            # Determine direction if "both"
+            if direction == 'both':
+                # Default: if target > current, direction is up; otherwise down
+                direction = 'up' if target_price > current_price else 'down'
+            
+            alert_id = Alert.create(
+                user_id=current_user.id,
+                ticker=ticker,
+                target_price=target_price,
+                current_price=current_price,
+                direction=direction,
+                alert_type='price'
+            )
+            
+            logger.info(f"Created price alert #{alert_id}: {ticker} @ ${target_price:.2f} ({direction})")
+        
+        elif alert_type == 'ma':
+            # MA ALERT
+            ma_period = int(params.get('ma_period', 50))
+            
+            # Validate MA period
+            if ma_period not in [20, 50, 150]:
+                return jsonify({'success': False, 'error': 'MA period must be 20, 50, or 150'}), 400
+            
+            # Calculate current MA value
+            ma_value = price_checker.get_moving_average(ticker, ma_period)
+            
+            if ma_value is None:
+                return jsonify({
+                    'success': False, 
+                    'error': f'Could not calculate MA{ma_period} for {ticker}. Not enough historical data.'
+                }), 400
+            
+            # Direction for MA alerts (default: up = cross above)
+            direction = params.get('direction', 'up')
+            
+            alert_id = Alert.create(
+                user_id=current_user.id,
+                ticker=ticker,
+                target_price=ma_value,
+                current_price=current_price,
+                direction=direction,
+                alert_type='ma',
+                ma_period=ma_period
+            )
+            
+            logger.info(f"Created MA alert #{alert_id}: {ticker} MA{ma_period} @ ${ma_value:.2f}")
+        
+        # Return success
+        return jsonify({
+            'success': True,
+            'alert': {
+                'id': alert_id,
+                'ticker': ticker,
+                'alert_type': alert_type,
+                'target_price': target_price if alert_type == 'price' else ma_value,
+                'current_price': current_price,
+                'direction': direction
+            },
+            'message': f'✓ Alert created for {ticker}'
+        })
     
-    current_price = price_checker.get_price(ticker)
-    if not current_price:
-        return jsonify({'success': False, 'error': 'Invalid ticker'}), 400
+    except KeyError as e:
+        logger.error(f"Missing parameter: {e}")
+        return jsonify({'success': False, 'error': f'Missing required parameter: {e}'}), 400
     
-    alert_id = Alert.create(
-        current_user.id, ticker, params['target_price'], 
-        current_price, params['direction'], alert_type='price'
-    )
-    return jsonify({'success': True, 'alert_id': alert_id})
+    except ValueError as e:
+        logger.error(f"Invalid value: {e}")
+        return jsonify({'success': False, 'error': f'Invalid value: {e}'}), 400
+    
+    except Exception as e:
+        logger.error(f"Error creating alert from suggestion: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/radar', methods=['GET'])
 @login_required
