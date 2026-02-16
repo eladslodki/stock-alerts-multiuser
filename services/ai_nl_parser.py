@@ -161,12 +161,16 @@ JSON:"""
                 "interpretation": "Alert when AAPL goes above $200"
             }
             return json.dumps(mock_json)
-        
+    
         try:
             import anthropic
-            
-            client = anthropic.Anthropic(api_key=self.api_key)
-            
+        
+            # Create client without extra kwargs
+            client = anthropic.Anthropic(
+                api_key=self.api_key
+            )
+        
+            # Make API call
             message = client.messages.create(
                 model="claude-3-haiku-20240307",
                 max_tokens=400,
@@ -174,18 +178,30 @@ JSON:"""
                 messages=[{
                     "role": "user",
                     "content": prompt
-                }],
-                timeout=15.0
+                }]
             )
-            
+        
             response_text = message.content[0].text.strip()
             logger.info("✅ Anthropic API call successful")
             return response_text
-        
-        except Exception as e:
-            logger.error(f"❌ Anthropic API error: {e}")
+    
+        except anthropic.APIConnectionError as e:
+            logger.error(f"❌ Anthropic connection error: {e}")
             return None
     
+        except anthropic.RateLimitError as e:
+            logger.error(f"❌ Anthropic rate limit: {e}")
+            return None
+    
+        except anthropic.APIStatusError as e:
+            logger.error(f"❌ Anthropic API status error: {e.status_code} - {e.response}")
+            return None
+    
+        except Exception as e:
+            logger.error(f"❌ Anthropic API error: {e}")
+            logger.error(f"❌ Error type: {type(e).__name__}")
+            return None
+        
     def _parse_llm_response(self, response: str) -> Optional[Dict]:
         """Parse LLM JSON response with robust error handling"""
         try:
