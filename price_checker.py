@@ -81,7 +81,6 @@ class PriceChecker:
                 'period2': end_time,
                 'interval': '1d',
                 'includePrePost': 'false'
-                'events': 'history'
             }
             
             headers = {
