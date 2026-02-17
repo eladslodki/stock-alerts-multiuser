@@ -117,8 +117,61 @@ class Database:
             is_read BOOLEAN DEFAULT FALSE
             );
             CREATE INDEX IF NOT EXISTS idx_anomalies_user_time ON market_anomalies(user_id, detected_at DESC);
+            """,
             """
-
+            CREATE TABLE IF NOT EXISTS forex_amd_alerts (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                symbol VARCHAR(20) NOT NULL,
+                direction VARCHAR(10) NOT NULL,
+                session VARCHAR(20) NOT NULL,
+                accumulation_start TIMESTAMP NOT NULL,
+                accumulation_end TIMESTAMP NOT NULL,
+                accumulation_range DECIMAL(10, 5) NOT NULL,
+                sweep_time TIMESTAMP NOT NULL,
+                sweep_level DECIMAL(10, 5) NOT NULL,
+                sweep_strength DECIMAL(5, 2) NOT NULL,
+                displacement_time TIMESTAMP NOT NULL,
+                displacement_candle_body DECIMAL(10, 5) NOT NULL,
+                displacement_vs_avg DECIMAL(5, 2) NOT NULL,
+                ifvg_time TIMESTAMP NOT NULL,
+                ifvg_high DECIMAL(10, 5) NOT NULL,
+                ifvg_low DECIMAL(10, 5) NOT NULL,
+                atr_at_setup DECIMAL(10, 5) NOT NULL,
+                volatility_score DECIMAL(5, 2) NOT NULL,
+                setup_quality INTEGER NOT NULL,
+                detected_at TIMESTAMP DEFAULT NOW(),
+                is_read BOOLEAN DEFAULT FALSE
+            );
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_forex_amd_user_symbol ON forex_amd_alerts(user_id, symbol);
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_forex_amd_detected ON forex_amd_alerts(detected_at);
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS forex_watchlist (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                symbol VARCHAR(20) NOT NULL,
+                added_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(user_id, symbol)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS forex_amd_state (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                symbol VARCHAR(20) NOT NULL,
+                current_state INTEGER DEFAULT 0,
+                accumulation_data TEXT,
+                sweep_data TEXT,
+                displacement_data TEXT,
+                last_update TIMESTAMP DEFAULT NOW(),
+                UNIQUE(user_id, symbol)
+            );
+            """,
         ]
         
         try:
@@ -207,6 +260,7 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_trades_user ON trades(user_id);
             CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(trade_date DESC);
             """
+            
             
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
