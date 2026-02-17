@@ -1261,6 +1261,7 @@ def dashboard():
             <a href="/alerts/history">📜 History</a>
             <a href="/radar">🚨 Radar</a>
             <a href="/bitcoin-scanner">₿ Bitcoin Scanner</a>
+            <a href="/forex-amd">🌐 Forex AMD</a>
             <a href="/portfolio">💼 Portfolio</a>
             <a href="#" onclick="logout()">Logout</a>
         </div>
@@ -4828,6 +4829,278 @@ def radar_page():
     """
     return render_template_string(html)
 
+# ============================================
+# FOREX AMD ROUTES
+# ============================================
+
+@app.route('/forex-amd')
+@login_required
+def forex_amd_page():
+    """Forex AMD detection page"""
+    html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Forex AMD Scanner</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+            background: #0A0E1A;
+            background-image: radial-gradient(circle at 50% 0%, #1a1f2e 0%, #0a0e1a 50%);
+            color: #FFFFFF;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .nav {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            padding: 15px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+        }
+        .nav a {
+            color: #8B92A8;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .nav a:hover { color: #5B7CFF; }
+        .section {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .amd-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .amd-card.bullish { border-left: 4px solid #00FFA3; }
+        .amd-card.bearish { border-left: 4px solid #FF6B6B; }
+        .quality-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .quality-high { background: rgba(0,255,163,0.2); color: #00FFA3; }
+        .quality-medium { background: rgba(255,184,0,0.2); color: #FFB800; }
+        input {
+            padding: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.05);
+            color: white;
+            font-size: 14px;
+        }
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        button:hover { opacity: 0.9; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="/dashboard">📊 Dashboard</a>
+            <a href="/alerts/history">📜 History</a>
+            <a href="/radar">🚨 Radar</a>
+            <a href="/forex-amd">🌐 Forex AMD</a>
+            <a href="/portfolio">💼 Portfolio</a>
+            <a href="#" onclick="logout()">Logout</a>
+        </div>
+        
+        <h1 style="font-size: 32px; font-weight: 700; margin-bottom: 8px;">Forex AMD Scanner</h1>
+        <p style="color: #8B92A8; font-size: 14px; margin-bottom: 24px;">
+            Institutional-grade AMD detection: Accumulation → Manipulation → Displacement → IFVG
+        </p>
+        
+        <div class="section">
+            <h2 style="margin-bottom: 16px;">Watchlist</h2>
+            <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                <input type="text" id="symbolInput" placeholder="Add symbol (e.g., EURUSD)" style="flex: 1;">
+                <button onclick="addSymbol()">Add to Watchlist</button>
+            </div>
+            <div id="watchlistContainer"></div>
+        </div>
+        
+        <div class="section">
+            <h2 style="margin-bottom: 16px;">AMD Setups</h2>
+            <div id="alertsContainer">
+                <div style="text-align: center; padding: 40px; color: #8B92A8;">
+                    Loading...
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        async function loadWatchlist() {
+            const res = await fetch('/api/forex-amd/watchlist');
+            const data = await res.json();
+            
+            const container = document.getElementById('watchlistContainer');
+            if (data.symbols.length === 0) {
+                container.innerHTML = '<p style="color: #8B92A8;">No symbols in watchlist. Add some above.</p>';
+                return;
+            }
+            
+            container.innerHTML = data.symbols.map(s => `
+                <span style="display: inline-block; margin: 4px; padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 8px;">
+                    ${s}
+                </span>
+            `).join('');
+        }
+        
+        async function addSymbol() {
+            const input = document.getElementById('symbolInput');
+            const symbol = input.value.trim().toUpperCase();
+            
+            if (!symbol) return;
+            
+            await fetch('/api/forex-amd/watchlist', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({symbol})
+            });
+            
+            input.value = '';
+            loadWatchlist();
+        }
+        
+        async function loadAlerts() {
+            const res = await fetch('/api/forex-amd/alerts');
+            const data = await res.json();
+            
+            const container = document.getElementById('alertsContainer');
+            
+            if (data.alerts.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 40px; color: #8B92A8;">No AMD setups detected yet</div>';
+                return;
+            }
+            
+            container.innerHTML = data.alerts.map(alert => {
+                const qualityClass = alert.setup_quality >= 8 ? 'quality-high' : 'quality-medium';
+                const dirClass = alert.direction === 'bullish' ? 'bullish' : 'bearish';
+                const date = new Date(alert.detected_at).toLocaleString();
+                
+                return `
+                    <div class="amd-card ${dirClass}">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                            <span style="font-size: 20px; font-weight: 700;">${alert.symbol}</span>
+                            <span class="quality-badge ${qualityClass}">Quality: ${alert.setup_quality}/10</span>
+                        </div>
+                        
+                        <div style="margin-bottom: 8px;">
+                            <strong style="color: ${alert.direction === 'bullish' ? '#00FFA3' : '#FF6B6B'};">
+                                ${alert.direction.toUpperCase()}
+                            </strong> setup detected during ${alert.session} session
+                        </div>
+                        
+                        <div style="font-size: 13px; color: #8B92A8;">
+                            Sweep: ${alert.sweep_level} | IFVG: ${alert.ifvg_low} - ${alert.ifvg_high}
+                        </div>
+                        
+                        <div style="font-size: 12px; color: #666; margin-top: 8px;">
+                            ${date}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        async function logout() {
+            await fetch('/api/logout');
+            window.location.href = '/login';
+        }
+        
+        loadWatchlist();
+        loadAlerts();
+        setInterval(loadAlerts, 60000);
+    </script>
+</body>
+</html>
+    """
+    return render_template_string(html)
+
+
+@app.route('/api/forex-amd/watchlist', methods=['GET', 'POST', 'DELETE'])
+@login_required
+def manage_forex_watchlist():
+    """Manage user's forex watchlist"""
+    if request.method == 'POST':
+        symbol = request.json.get('symbol', '').upper().strip()
+        
+        if not symbol:
+            return jsonify({'success': False, 'error': 'Symbol required'}), 400
+        
+        try:
+            db.execute("""
+                INSERT INTO forex_watchlist (user_id, symbol)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id, symbol) DO NOTHING
+            """, (current_user.id, symbol))
+            
+            return jsonify({'success': True})
+        except Exception as e:
+            logger.error(f"Error adding to watchlist: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+    
+    elif request.method == 'DELETE':
+        symbol = request.json.get('symbol')
+        db.execute("""
+            DELETE FROM forex_watchlist
+            WHERE user_id = %s AND symbol = %s
+        """, (current_user.id, symbol))
+        return jsonify({'success': True})
+    
+    else:  # GET
+        watchlist = db.execute("""
+            SELECT symbol FROM forex_watchlist
+            WHERE user_id = %s
+            ORDER BY added_at DESC
+        """, (current_user.id,), fetchall=True)
+        
+        return jsonify({
+            'success': True,
+            'symbols': [w['symbol'] for w in watchlist] if watchlist else []
+        })
+
+
+@app.route('/api/forex-amd/alerts')
+@login_required
+def get_forex_amd_alerts():
+    """Get user's AMD alerts"""
+    try:
+        alerts = db.execute("""
+            SELECT * FROM forex_amd_alerts
+            WHERE user_id = %s
+            ORDER BY detected_at DESC
+            LIMIT 50
+        """, (current_user.id,), fetchall=True)
+        
+        return jsonify({
+            'success': True,
+            'alerts': alerts if alerts else []
+        })
+    except Exception as e:
+        logger.error(f"Error fetching AMD alerts: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # Gunicorn will run the app, this is only for local testing
 if __name__ == '__main__':
