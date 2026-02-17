@@ -6,6 +6,7 @@ from database import db
 from models import Alert
 from price_checker import price_checker
 from email_sender import email_sender
+from services.forex_amd_detector import forex_amd_detector
 
 logger = logging.getLogger(__name__)
 
@@ -323,7 +324,41 @@ class AlertProcessor:
         
         self.scheduler.add_job(detect_and_store, 'interval', hours=1, id='anomaly_detection')
         logger.info("✅ Anomaly detection scheduled (hourly)")
+
+    def schedule_forex_amd_detection(self):
+         """Schedule forex AMD detection every 15 minutes"""
     
+         def detect_and_alert():
+             logger.info("🔍 Running Forex AMD detection...")
+             try:
+                 users = db.execute("""
+                     SELECT DISTINCT user_id 
+                     FROM forex_watchlist
+                 """, fetchall=True)
+            
+                 if not users:
+                     logger.info("No users with forex watchlist")
+                     return
+            
+                 for user in users:
+                     try:
+                         alerts = forex_amd_detector.detect_for_user(user['user_id'])
+                         if alerts:
+                             logger.info(f"✅ Detected {len(alerts)} AMD setups for user {user['user_id']}")
+                     except Exception as e:
+                         logger.error(f"Error detecting AMD for user {user['user_id']}: {e}")
+        
+             except Exception as e:
+                 logger.error(f"❌ Forex AMD detection failed: {e}")
+    
+         self.scheduler.add_job(
+             detect_and_alert, 
+             'interval', 
+             minutes=15,
+             id='forex_amd_detection'
+         )
+         logger.info("✅ Forex AMD detection scheduled (every 15 min)")
+
     def start(self):
         """Start the background scheduler"""
         # Check alerts every minute
@@ -345,7 +380,8 @@ class AlertProcessor:
         )
         
         self.schedule_anomaly_detection()
-        
+        self.schedule_forex_amd_detection()
+
         self.scheduler.start()
         logger.info("✅ Alert processor started - checking every 60 seconds")
         logger.info("✅ MA alert updater scheduled - daily at 4 AM ET")
