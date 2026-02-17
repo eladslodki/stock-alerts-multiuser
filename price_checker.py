@@ -70,7 +70,7 @@ class PriceChecker:
             from datetime import datetime, timedelta
             
             # Get data for last (period * 2) days to ensure we have enough
-            days_to_fetch = period * 2
+            days_to_fetch = period * 3
             end_time = int(time.time())
             start_time = int((datetime.now() - timedelta(days=days_to_fetch)).timestamp())
             
@@ -81,6 +81,7 @@ class PriceChecker:
                 'period2': end_time,
                 'interval': '1d',
                 'includePrePost': 'false'
+                'events': 'history'
             }
             
             headers = {
@@ -119,10 +120,14 @@ class PriceChecker:
             
             # Filter out None values
             valid_prices = [p for p in close_prices if p is not None]
+
+            logger.info(f"📊 Got {len(valid_prices)} valid prices for {ticker} MA{period} calculation")
             
             if len(valid_prices) < period:
-                logger.warning(f"Not enough data for MA{period} on {ticker} (got {len(valid_prices)} days, need {period})")
-                return None
+                logger.warning(f"⚠️ Not enough data for MA{period} on {ticker} (got {len(valid_prices)} days, need {period})")
+                # Try fallback method
+                logger.info(f"🔄 Trying fallback MA calculation for {ticker} MA{period}")
+                return PriceChecker._fallback_ma_calculation(ticker, period)
             
             # Calculate MA from last N valid prices
             recent_prices = valid_prices[-period:]
@@ -153,13 +158,17 @@ class PriceChecker:
         """
         try:
             # Calculate how many days of data we need
-            days_needed = period + 30  # Extra buffer
+            days_needed = period + 100  # Extra buffer for weekends/holidays
+
             
             # Yahoo Finance Chart API
             url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+            # Yahoo Finance range param maxes out at certain values
+            # Use '1y' for periods up to 150, '2y' for longer
+            range_str = '2y' if period >= 100 else '1y'
             params = {
                 'interval': '1d',
-                'range': f'{days_needed}d'
+                'range': range_str
             }
             
             headers = {
