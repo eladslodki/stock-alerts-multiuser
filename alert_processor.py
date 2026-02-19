@@ -402,9 +402,14 @@ class AlertProcessor:
 
                 for user in users:
                     try:
-                        alerts = forex_amd_detector.detect_for_user(
+                        user_result = forex_amd_detector.detect_for_user(
                             user['user_id'], run_id=run_id
                         )
+                        m['symbols']        += user_result.get('symbols', 0)
+                        m['candles_fetched'] += user_result.get('candles_fetched', 0)
+                        m['symbols_skipped'] += user_result.get('symbols_skipped', 0)
+                        m['states_advanced'] += user_result.get('states_advanced', 0)
+                        alerts = user_result.get('alerts', [])
                         if alerts:
                             m['triggers'] += len(alerts)
                             logger.info(
