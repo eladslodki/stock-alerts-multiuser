@@ -4961,12 +4961,22 @@ def forex_amd_page():
             }
             
             container.innerHTML = data.symbols.map(s => `
-                <span style="display: inline-block; margin: 4px; padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 8px;">
+                <span style="display: inline-flex; align-items: center; gap: 8px; margin: 4px; padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 8px;">
                     ${s}
+                    <button onclick="removeSymbol('${s}')" style="padding: 2px 8px; font-size: 12px; background: rgba(255,107,107,0.3); border-radius: 4px; cursor: pointer;" title="Remove">&#x2715;</button>
                 </span>
             `).join('');
         }
-        
+
+        async function removeSymbol(symbol) {
+            await fetch('/api/forex-amd/watchlist', {
+                method: 'DELETE',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({symbol})
+            });
+            loadWatchlist();
+        }
+
         async function addSymbol() {
             const input = document.getElementById('symbolInput');
             const symbol = input.value.trim().toUpperCase();
