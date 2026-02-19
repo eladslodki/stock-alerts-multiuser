@@ -4921,10 +4921,11 @@ def forex_amd_page():
             <a href="/alerts/history">📜 History</a>
             <a href="/radar">🚨 Radar</a>
             <a href="/forex-amd">🌐 Forex AMD</a>
+            <a href="/forex-amd/debug">🔬 AMD Debug</a>
             <a href="/portfolio">💼 Portfolio</a>
             <a href="#" onclick="logout()">Logout</a>
         </div>
-        
+
         <h1 style="font-size: 32px; font-weight: 700; margin-bottom: 8px;">Forex AMD Scanner</h1>
         <p style="color: #8B92A8; font-size: 14px; margin-bottom: 24px;">
             Institutional-grade AMD detection: Accumulation → Manipulation → Displacement → IFVG
@@ -5111,6 +5112,237 @@ def get_forex_amd_alerts():
     except Exception as e:
         logger.error(f"Error fetching AMD alerts: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/forex-amd/health')
+@login_required
+def forex_amd_health():
+    """AMD scanner health — last run timestamps + error info."""
+    try:
+        row = db.execute(
+            "SELECT * FROM forex_amd_health WHERE id = 1",
+            fetchone=True,
+        )
+        from services.forex_amd_detector import AMDConfig
+        from datetime import datetime, timezone
+        threshold_min = AMDConfig.UNHEALTHY_THRESHOLD_MINUTES
+        healthy = False
+        age_min = None
+        if row and row.get('last_ok_at'):
+            last_ok = row['last_ok_at']
+            if last_ok.tzinfo is None:
+                last_ok = last_ok.replace(tzinfo=timezone.utc)
+            age_min = (datetime.now(timezone.utc) - last_ok).total_seconds() / 60
+            healthy = age_min <= threshold_min
+        return jsonify({
+            'success': True,
+            'healthy': healthy,
+            'threshold_minutes': threshold_min,
+            'age_minutes': round(age_min, 1) if age_min is not None else None,
+            'last_run_at':    row['last_run_at'].isoformat()    if row and row['last_run_at']    else None,
+            'last_ok_at':     row['last_ok_at'].isoformat()     if row and row['last_ok_at']     else None,
+            'last_error_at':  row['last_error_at'].isoformat()  if row and row['last_error_at']  else None,
+            'last_error_msg': row['last_error_msg']             if row else None,
+            'last_symbols_count': row['last_symbols_count']     if row else 0,
+        })
+    except Exception as e:
+        logger.error(f"[AMD_FOREX] health endpoint error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/forex-amd/state')
+@login_required
+def forex_amd_state_snapshot():
+    """Current state-machine snapshot per symbol for the logged-in user."""
+    try:
+        STATE_NAMES = {
+            0: 'IDLE', 1: 'ACCUMULATION', 2: 'SWEEP_DETECTED',
+            3: 'DISPLACEMENT_CONFIRMED', 4: 'WAIT_IFVG',
+        }
+        rows = db.execute("""
+            SELECT symbol, current_state, last_update
+            FROM forex_amd_state
+            WHERE user_id = %s
+            ORDER BY symbol
+        """, (current_user.id,), fetchall=True)
+        states = [
+            {
+                'symbol':      r['symbol'],
+                'state_id':    r['current_state'],
+                'state_name':  STATE_NAMES.get(r['current_state'], 'UNKNOWN'),
+                'last_update': r['last_update'].isoformat() if r['last_update'] else None,
+            }
+            for r in (rows or [])
+        ]
+        return jsonify({'success': True, 'states': states, 'count': len(states)})
+    except Exception as e:
+        logger.error(f"[AMD_FOREX] state endpoint error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/forex-amd/recent-events')
+@login_required
+def forex_amd_recent_events():
+    """Last 20 AMD alerts/triggers for the logged-in user (read-only history)."""
+    try:
+        rows = db.execute("""
+            SELECT symbol, direction, session, setup_quality,
+                   sweep_level, ifvg_high, ifvg_low, detected_at
+            FROM forex_amd_alerts
+            WHERE user_id = %s
+            ORDER BY detected_at DESC
+            LIMIT 20
+        """, (current_user.id,), fetchall=True)
+        events = [dict(r) for r in (rows or [])]
+        for ev in events:
+            if ev.get('detected_at'):
+                ev['detected_at'] = ev['detected_at'].isoformat()
+        return jsonify({'success': True, 'events': events})
+    except Exception as e:
+        logger.error(f"[AMD_FOREX] recent-events endpoint error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/forex-amd/debug')
+@login_required
+def forex_amd_debug_page():
+    """Read-only AMD debug/monitoring page."""
+    html = """<!DOCTYPE html>
+<html>
+<head>
+  <title>AMD Debug</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: monospace; background:#0A0E1A; color:#ccc; padding:20px; }
+    h2   { color:#5B7CFF; margin-bottom:16px; }
+    h3   { color:#8B92A8; font-size:14px; margin-bottom:10px; }
+    .card{ background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1);
+           border-radius:10px; padding:16px; margin-bottom:16px; }
+    .ok   { color:#00FFA3; }
+    .err  { color:#FF6B6B; }
+    .warn { color:#FFB800; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th,td { text-align:left; padding:6px 10px;
+            border-bottom:1px solid rgba(255,255,255,.07); }
+    th    { color:#5B7CFF; }
+    pre   { white-space:pre-wrap; font-size:12px; color:#aaa; }
+    .nav  { display:flex; gap:20px; margin-bottom:24px;
+            padding:12px; background:rgba(255,255,255,.05); border-radius:10px; }
+    .nav a{ color:#8B92A8; text-decoration:none; font-weight:600; font-size:14px; }
+    .nav a:hover { color:#5B7CFF; }
+    .badge{ display:inline-block; padding:3px 10px; border-radius:8px;
+            font-size:12px; font-weight:700; }
+    .badge-ok  { background:rgba(0,255,163,.15); color:#00FFA3; }
+    .badge-err { background:rgba(255,107,107,.15); color:#FF6B6B; }
+    .refresh-note { font-size:11px; color:#555; margin-left:auto; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/forex-amd">&larr; Forex AMD</a>
+    <a href="/dashboard">Dashboard</a>
+    <span class="refresh-note" id="last-refresh"></span>
+  </div>
+
+  <h2>AMD Debug Dashboard</h2>
+
+  <div class="card" id="health-card">
+    <h3>Scanner Health <span id="health-badge"></span></h3>
+    <pre id="health-data">Loading...</pre>
+  </div>
+
+  <div class="card">
+    <h3>State Machine Snapshot</h3>
+    <table>
+      <thead><tr><th>Symbol</th><th>State</th><th>Last Update</th></tr></thead>
+      <tbody id="state-rows"><tr><td colspan="3">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Recent Triggers (last 20)</h3>
+    <table>
+      <thead><tr>
+        <th>Symbol</th><th>Direction</th><th>Quality</th>
+        <th>Session</th><th>Detected At</th>
+      </tr></thead>
+      <tbody id="event-rows"><tr><td colspan="5">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+<script>
+const STATE_COLOR = {
+  IDLE: '#8B92A8',
+  ACCUMULATION: '#FFB800',
+  SWEEP_DETECTED: '#5B7CFF',
+  DISPLACEMENT_CONFIRMED: '#00FFA3',
+  WAIT_IFVG: '#FF6B6B'
+};
+
+async function load() {
+  try {
+    const h = await fetch('/api/forex-amd/health').then(r => r.json());
+    const badge = document.getElementById('health-badge');
+    badge.innerHTML = h.healthy
+      ? '<span class="badge badge-ok">HEALTHY</span>'
+      : '<span class="badge badge-err">UNHEALTHY</span>';
+    document.getElementById('health-data').textContent = JSON.stringify({
+      healthy:            h.healthy,
+      age_minutes:        h.age_minutes,
+      threshold_minutes:  h.threshold_minutes,
+      last_run_at:        h.last_run_at,
+      last_ok_at:         h.last_ok_at,
+      last_error_at:      h.last_error_at,
+      last_error_msg:     h.last_error_msg,
+      last_symbols_count: h.last_symbols_count
+    }, null, 2);
+  } catch(e) {
+    document.getElementById('health-data').textContent = 'Error: ' + e;
+  }
+
+  try {
+    const s = await fetch('/api/forex-amd/state').then(r => r.json());
+    document.getElementById('state-rows').innerHTML =
+      (s.states && s.states.length)
+        ? s.states.map(r =>
+            '<tr><td>' + r.symbol + '</td>' +
+            '<td style="color:' + (STATE_COLOR[r.state_name] || '#ccc') + '">' + r.state_name + '</td>' +
+            '<td>' + (r.last_update || '-') + '</td></tr>'
+          ).join('')
+        : '<tr><td colspan="3" style="color:#555">No symbols in watchlist</td></tr>';
+  } catch(e) {
+    document.getElementById('state-rows').innerHTML =
+      '<tr><td colspan="3" class="err">Error: ' + e + '</td></tr>';
+  }
+
+  try {
+    const ev = await fetch('/api/forex-amd/recent-events').then(r => r.json());
+    document.getElementById('event-rows').innerHTML =
+      (ev.events && ev.events.length)
+        ? ev.events.map(e =>
+            '<tr><td>' + e.symbol + '</td>' +
+            '<td class="' + (e.direction === 'bullish' ? 'ok' : 'err') + '">' + e.direction + '</td>' +
+            '<td>' + e.setup_quality + '/10</td>' +
+            '<td>' + e.session + '</td>' +
+            '<td>' + e.detected_at + '</td></tr>'
+          ).join('')
+        : '<tr><td colspan="5" style="color:#555">No triggers yet</td></tr>';
+  } catch(e) {
+    document.getElementById('event-rows').innerHTML =
+      '<tr><td colspan="5" class="err">Error: ' + e + '</td></tr>';
+  }
+
+  document.getElementById('last-refresh').textContent =
+    'Auto-refreshes every 30s — Last: ' + new Date().toLocaleTimeString();
+}
+
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>"""
+    return html
+
 
 # Gunicorn will run the app, this is only for local testing
 if __name__ == '__main__':

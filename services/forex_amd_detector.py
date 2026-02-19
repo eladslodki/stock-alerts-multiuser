@@ -3,6 +3,8 @@ Institutional-grade Forex AMD detector with ICT-style logic
 """
 
 import logging
+import uuid
+import time as _time
 from datetime import datetime, time, timedelta
 from typing import Dict, List, Optional, Tuple
 from database import db
@@ -54,6 +56,10 @@ class AMDConfig:
     # Quality Scoring
     MIN_QUALITY_SCORE = 6  # Out of 10
 
+    # ── Observability ──────────────────────────────────────────────
+    LOG_PREFIX = "[AMD_FOREX]"
+    UNHEALTHY_THRESHOLD_MINUTES = 30   # flag stuck if no ok run in X min
+
 
 # ============================================
 # STATE DEFINITIONS
@@ -81,10 +87,10 @@ class ForexAMDDetector:
     # PUBLIC METHODS
     # ========================================
     
-    def detect_for_user(self, user_id: int) -> List[Dict]:
+    def detect_for_user(self, user_id: int, run_id: str = "") -> List[Dict]:
         """
         Main detection loop for user's watchlist
-        
+
         Returns: List of new AMD setups detected
         """
         # Get user watchlist
@@ -437,8 +443,9 @@ class ForexAMDDetector:
     # STATE MACHINE
     # ========================================
     
-    def process_state_machine(self, user_id: int, symbol: str, 
-                              candles: List[Dict]) -> Optional[Dict]:
+    def process_state_machine(self, user_id: int, symbol: str,
+                              candles: List[Dict],
+                              run_id: str = "") -> Optional[Dict]:
         """
         Main state machine processor
         
@@ -459,8 +466,13 @@ class ForexAMDDetector:
         if current_state == AMDState.IDLE:
             # Check volatility first
             if not self.check_volatility(candles):
+                logger.debug(
+                    "[AMD_FOREX][STATE] run_id=%s user=%s symbol=%s state=IDLE "
+                    "skip=low_volatility",
+                    run_id, user_id, symbol,
+                )
                 return None
-            
+
             # Look for accumulation
             accum = self.detect_accumulation(candles)
             if accum:
@@ -469,14 +481,31 @@ class ForexAMDDetector:
                     'accumulation': accum,
                     'timestamp': candles[-1]['timestamp']
                 })
-                logger.info(f"✅ {symbol}: ACCUMULATION detected")
-            
+                logger.info(
+                    "[AMD_FOREX][ACCUM] run_id=%s user=%s symbol=%s "
+                    "range_high=%.5f range_low=%.5f range_pts=%.5f "
+                    "window_candles=%d quality=%.1f state=IDLE->ACCUMULATION",
+                    run_id, user_id, symbol,
+                    accum['high'], accum['low'], accum['range'],
+                    accum['end_idx'] - accum['start_idx'] + 1, accum['quality_score'],
+                )
+            else:
+                logger.debug(
+                    "[AMD_FOREX][STATE] run_id=%s user=%s symbol=%s state=IDLE no_accum",
+                    run_id, user_id, symbol,
+                )
+
             return None
         
         # State 1: ACCUMULATION
         if current_state == AMDState.ACCUMULATION:
             accum_data = state_data.get('data', {}).get('accumulation')
-            
+
+            logger.debug(
+                "[AMD_FOREX][STATE] run_id=%s user=%s symbol=%s state=ACCUMULATION",
+                run_id, user_id, symbol,
+            )
+
             # Look for sweep
             sweep = self.detect_sweep(candles, accum_data['high'], accum_data['low'])
             if sweep:
@@ -486,27 +515,51 @@ class ForexAMDDetector:
                     'sweep': sweep,
                     'sweep_candle_idx': len(candles) - 1
                 })
-                logger.info(f"✅ {symbol}: SWEEP detected ({sweep['direction']})")
-            
+                logger.info(
+                    "[AMD_FOREX][SWEEP] run_id=%s user=%s symbol=%s "
+                    "direction=%s level_type=%s level_taken=%.5f "
+                    "wick_pct=%.1f strength=%.1f state=ACCUMULATION->SWEEP_DETECTED",
+                    run_id, user_id, symbol,
+                    sweep['direction'],
+                    'accum_low' if sweep['direction'] == 'bullish' else 'accum_high',
+                    sweep['level'], sweep['wick_pct'], sweep['strength'],
+                )
+
             # Reset if accumulation invalidated (strong breakout)
             if self._is_accumulation_broken(candles, accum_data):
                 self._reset_state(user_id, symbol)
-                logger.info(f"❌ {symbol}: Accumulation broken, reset")
-            
+                logger.info(
+                    "[AMD_FOREX][RESET] run_id=%s user=%s symbol=%s "
+                    "reason=accumulation_broken",
+                    run_id, user_id, symbol,
+                )
+
             return None
         
         # State 2: SWEEP_DETECTED
         if current_state == AMDState.SWEEP_DETECTED:
             sweep_data = state_data.get('data', {}).get('sweep')
             sweep_idx = state_data.get('data', {}).get('sweep_candle_idx')
-            
+
             # Check timeout
             candles_since_sweep = len(candles) - 1 - sweep_idx
+
+            logger.debug(
+                "[AMD_FOREX][STATE] run_id=%s user=%s symbol=%s state=SWEEP_DETECTED "
+                "candles_since_sweep=%d max=%d",
+                run_id, user_id, symbol,
+                candles_since_sweep, self.config.MAX_SWEEP_TO_DISPLACEMENT_CANDLES,
+            )
+
             if candles_since_sweep > self.config.MAX_SWEEP_TO_DISPLACEMENT_CANDLES:
                 self._reset_state(user_id, symbol)
-                logger.info(f"❌ {symbol}: Displacement timeout, reset")
+                logger.info(
+                    "[AMD_FOREX][RESET] run_id=%s user=%s symbol=%s "
+                    "reason=displacement_timeout candles_waited=%d",
+                    run_id, user_id, symbol, candles_since_sweep,
+                )
                 return None
-            
+
             # Look for displacement
             displacement = self.detect_displacement(candles, sweep_data['direction'])
             if displacement:
@@ -514,8 +567,17 @@ class ForexAMDDetector:
                 full_data = state_data.get('data', {})
                 full_data['displacement'] = displacement
                 self._save_state(user_id, symbol, AMDState.DISPLACEMENT_CONFIRMED, full_data)
-                logger.info(f"✅ {symbol}: DISPLACEMENT confirmed")
-            
+                logger.info(
+                    "[AMD_FOREX][DISP] run_id=%s user=%s symbol=%s "
+                    "body_size=%.5f vs_avg_body=%.2f vs_atr=%.2f quality=%.1f "
+                    "passes_body=%s passes_atr=%s state=SWEEP->DISPLACEMENT_CONFIRMED",
+                    run_id, user_id, symbol,
+                    displacement['body_size'], displacement['vs_avg_body'],
+                    displacement['vs_atr'], displacement['quality'],
+                    displacement['vs_avg_body'] >= self.config.DISPLACEMENT_BODY_MULTIPLIER,
+                    displacement['vs_atr'] >= self.config.DISPLACEMENT_ATR_MULTIPLIER,
+                )
+
             return None
         
         # State 3: DISPLACEMENT_CONFIRMED
@@ -523,29 +585,54 @@ class ForexAMDDetector:
             displacement_data = state_data.get('data', {}).get('displacement')
             displacement_idx = displacement_data['candle_idx']
             direction = state_data.get('data', {}).get('sweep', {}).get('direction')
-            
+
             # Check timeout
             candles_since_displacement = len(candles) - 1 - displacement_idx
+
+            logger.debug(
+                "[AMD_FOREX][STATE] run_id=%s user=%s symbol=%s "
+                "state=DISPLACEMENT_CONFIRMED candles_since_displacement=%d max=%d",
+                run_id, user_id, symbol,
+                candles_since_displacement, self.config.MAX_DISPLACEMENT_TO_IFVG_CANDLES,
+            )
+
             if candles_since_displacement > self.config.MAX_DISPLACEMENT_TO_IFVG_CANDLES:
                 self._reset_state(user_id, symbol)
-                logger.info(f"❌ {symbol}: IFVG timeout, reset")
+                logger.info(
+                    "[AMD_FOREX][RESET] run_id=%s user=%s symbol=%s "
+                    "reason=ifvg_timeout candles_waited=%d",
+                    run_id, user_id, symbol, candles_since_displacement,
+                )
                 return None
-            
+
             # Look for IFVG
             ifvg = self.detect_ifvg(candles, displacement_idx, direction)
             if ifvg:
+                logger.info(
+                    "[AMD_FOREX][IFVG] run_id=%s user=%s symbol=%s "
+                    "gap_high=%.5f gap_low=%.5f gap_size=%.5f retest_idx=%s "
+                    "inversion_confirmed=True",
+                    run_id, user_id, symbol,
+                    ifvg['gap_high'], ifvg['gap_low'], ifvg['gap_size'], ifvg['retest_idx'],
+                )
+
                 # Complete setup! Generate alert
                 full_data = state_data.get('data', {})
                 full_data['ifvg'] = ifvg
-                
+
                 alert = self._generate_alert(user_id, symbol, full_data, candles)
-                
+
                 # Reset state after alert
                 self._reset_state(user_id, symbol)
-                
-                logger.info(f"🎯 {symbol}: COMPLETE AMD SETUP DETECTED!")
+
+                logger.info(
+                    "[AMD_FOREX][TRIGGER] run_id=%s user=%s symbol=%s "
+                    "direction=%s quality=%s history_written=True email_queued=True",
+                    run_id, user_id, symbol,
+                    alert.get('direction'), alert.get('quality_score'),
+                )
                 return alert
-            
+
             return None
         
         return None
