@@ -87,20 +87,80 @@ class ForexAMDDetector:
     # PUBLIC METHODS
     # ========================================
     
-    def detect_for_user(self, user_id: int, run_id: str = "") -> List[Dict]:
+    def detect_for_user(self, user_id: int, run_id: str = "") -> Dict:
         """
-        Main detection loop for user's watchlist
+        Main detection loop for user's watchlist.
 
-        Returns: List of new AMD setups detected
+        Returns: {
+            'alerts': List[Dict],
+            'symbols': int,
+            'candles_fetched': int,
+            'symbols_skipped': int,
+            'states_advanced': int,
+        }
         """
-        # Get user watchlist
-        # For each symbol:
-        #   - Fetch recent candles
-        #   - Check session filter
-        #   - Load/update state machine
-        #   - Run detection logic
-        #   - Return alerts
-        pass
+        from services.forex_data_provider import forex_data_provider
+
+        result: Dict = {
+            'alerts': [],
+            'symbols': 0,
+            'candles_fetched': 0,
+            'symbols_skipped': 0,
+            'states_advanced': 0,
+        }
+
+        watchlist = db.execute("""
+            SELECT symbol FROM forex_watchlist
+            WHERE user_id = %s
+            ORDER BY added_at
+        """, (user_id,), fetchall=True)
+
+        if not watchlist:
+            return result
+
+        symbols = [row['symbol'] for row in watchlist]
+        result['symbols'] = len(symbols)
+
+        for symbol in symbols:
+            try:
+                candles = forex_data_provider.get_recent_candles(
+                    symbol, timeframe='15m', count=100
+                )
+
+                if not candles:
+                    logger.warning(
+                        "[AMD_FOREX][SKIP] run_id=%s user=%s symbol=%s reason=no_candles",
+                        run_id, user_id, symbol,
+                    )
+                    result['symbols_skipped'] += 1
+                    continue
+
+                result['candles_fetched'] += len(candles)
+
+                state_before = self._load_state(user_id, symbol).get(
+                    'current_state', AMDState.IDLE
+                )
+
+                alert = self.process_state_machine(
+                    user_id, symbol, candles, run_id=run_id
+                )
+
+                state_after = self._load_state(user_id, symbol).get(
+                    'current_state', AMDState.IDLE
+                )
+                if state_after != state_before or alert:
+                    result['states_advanced'] += 1
+
+                if alert:
+                    result['alerts'].append(alert)
+
+            except Exception as exc:
+                logger.error(
+                    "[AMD_FOREX][SYMBOL_ERROR] run_id=%s user=%s symbol=%s err=%s",
+                    run_id, user_id, symbol, exc, exc_info=True,
+                )
+
+        return result
     
     # ========================================
     # SESSION FILTERS
