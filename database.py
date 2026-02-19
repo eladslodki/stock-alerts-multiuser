@@ -172,6 +172,21 @@ class Database:
                 UNIQUE(user_id, symbol)
             );
             """,
+            """
+            CREATE TABLE IF NOT EXISTS forex_amd_health (
+                id              INTEGER PRIMARY KEY DEFAULT 1,
+                last_run_at     TIMESTAMP,
+                last_ok_at      TIMESTAMP,
+                last_error_at   TIMESTAMP,
+                last_error_msg  TEXT,
+                last_symbols_count INTEGER DEFAULT 0
+            );
+            INSERT INTO forex_amd_health (id) VALUES (1) ON CONFLICT DO NOTHING;
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_forex_amd_state_user
+                ON forex_amd_state(user_id);
+            """,
         ]
         
         try:

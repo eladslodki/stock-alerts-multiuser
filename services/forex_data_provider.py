@@ -8,6 +8,7 @@ Yahoo Finance unchanged.
 import os
 import requests
 import logging
+import time as _time
 from datetime import datetime
 from typing import List, Dict, Optional
 
@@ -122,43 +123,53 @@ class ForexDataProvider:
             "order":      "ASC",   # oldest first
         }
 
+        _log_ctx = f"[AMD_FOREX][TD] symbol={td_symbol} interval={interval} count={count}"
+        logger.debug("%s request_start", _log_ctx)
+        _t0 = _time.monotonic()
+
         try:
             resp = requests.get(
                 self.BASE_URL,
                 params=params,
                 timeout=15,
             )
+            _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
             resp.raise_for_status()
             payload = resp.json()
 
             if payload.get("status") == "error":
-                logger.error(
-                    "Twelve Data API error for %s/%s: %s",
-                    td_symbol,
-                    interval,
-                    payload.get("message", "unknown"),
-                )
+                msg = payload.get("message", "unknown")
+                _is_rate_limit = "rate" in msg.lower() or "limit" in msg.lower() or "credit" in msg.lower()
+                _is_invalid    = "invalid" in msg.lower() or "not found" in msg.lower()
+                if _is_rate_limit:
+                    logger.warning("%s rate_limit msg=%s elapsed_ms=%d", _log_ctx, msg, _elapsed_ms)
+                elif _is_invalid:
+                    logger.warning("%s invalid_symbol msg=%s elapsed_ms=%d", _log_ctx, msg, _elapsed_ms)
+                else:
+                    logger.error("%s api_error msg=%s elapsed_ms=%d", _log_ctx, msg, _elapsed_ms)
                 return []
 
             values = payload.get("values", [])
             if not values:
-                logger.warning(
-                    "Twelve Data returned no candles for %s/%s",
-                    td_symbol,
-                    interval,
-                )
+                logger.warning("%s no_candles elapsed_ms=%d", _log_ctx, _elapsed_ms)
                 return []
 
+            logger.debug(
+                "%s response_ok candles=%d elapsed_ms=%d",
+                _log_ctx, len(values), _elapsed_ms,
+            )
             return [self._parse_candle(c) for c in values]
 
         except requests.exceptions.Timeout:
-            logger.error("Timeout fetching Twelve Data candles for %s", td_symbol)
+            _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
+            logger.error("%s timeout elapsed_ms=%d", _log_ctx, _elapsed_ms)
             return []
         except requests.exceptions.RequestException as exc:
-            logger.error("HTTP error fetching Twelve Data candles for %s: %s", td_symbol, exc)
+            _elapsed_ms = int((_time.monotonic() - _t0) * 1000)
+            logger.error("%s http_error err=%s elapsed_ms=%d", _log_ctx, exc, _elapsed_ms)
             return []
         except Exception as exc:
-            logger.error("Unexpected error fetching candles for %s: %s", td_symbol, exc)
+            logger.error("%s unexpected_error err=%s", _log_ctx, exc)
             return []
 
     # ------------------------------------------------------------------

@@ -1,7 +1,9 @@
 from apscheduler.schedulers.background import BackgroundScheduler
-from datetime import datetime
+from datetime import datetime, timezone
 import pytz
 import logging
+import uuid
+import time as _time
 from database import db
 from models import Alert
 from price_checker import price_checker
@@ -325,39 +327,146 @@ class AlertProcessor:
         self.scheduler.add_job(detect_and_store, 'interval', hours=1, id='anomaly_detection')
         logger.info("✅ Anomaly detection scheduled (hourly)")
 
+    def _check_amd_health(self, run_id: str):
+        """Log a warning if the AMD scanner has been silent too long."""
+        try:
+            from services.forex_amd_detector import AMDConfig
+            threshold_min = AMDConfig.UNHEALTHY_THRESHOLD_MINUTES
+            row = db.execute(
+                "SELECT last_ok_at, last_error_at, last_error_msg FROM forex_amd_health WHERE id=1",
+                fetchone=True,
+            )
+            if not row or row['last_ok_at'] is None:
+                logger.warning(
+                    "[AMD_FOREX][UNHEALTHY] run_id=%s last_ok_at=None "
+                    "threshold_min=%d action=never_ran",
+                    run_id, threshold_min,
+                )
+                return
+            last_ok = row['last_ok_at']
+            if last_ok.tzinfo is None:
+                last_ok = last_ok.replace(tzinfo=timezone.utc)
+            age_min = (datetime.now(timezone.utc) - last_ok).total_seconds() / 60
+            if age_min > threshold_min:
+                logger.warning(
+                    "[AMD_FOREX][UNHEALTHY] run_id=%s last_ok_at=%s age_min=%.1f "
+                    "threshold_min=%d last_error=%s action=investigate",
+                    run_id, last_ok.isoformat(), age_min,
+                    threshold_min, row.get('last_error_msg') or '',
+                )
+        except Exception as exc:
+            logger.warning("[AMD_FOREX] health_check_failed err=%s", exc)
+
     def schedule_forex_amd_detection(self):
-         """Schedule forex AMD detection every 15 minutes"""
-    
-         def detect_and_alert():
-             logger.info("🔍 Running Forex AMD detection...")
-             try:
-                 users = db.execute("""
-                     SELECT DISTINCT user_id 
-                     FROM forex_watchlist
-                 """, fetchall=True)
-            
-                 if not users:
-                     logger.info("No users with forex watchlist")
-                     return
-            
-                 for user in users:
-                     try:
-                         alerts = forex_amd_detector.detect_for_user(user['user_id'])
-                         if alerts:
-                             logger.info(f"✅ Detected {len(alerts)} AMD setups for user {user['user_id']}")
-                     except Exception as e:
-                         logger.error(f"Error detecting AMD for user {user['user_id']}: {e}")
-        
-             except Exception as e:
-                 logger.error(f"❌ Forex AMD detection failed: {e}")
-    
-         self.scheduler.add_job(
-             detect_and_alert, 
-             'interval', 
-             minutes=15,
-             id='forex_amd_detection'
-         )
-         logger.info("✅ Forex AMD detection scheduled (every 15 min)")
+        """Schedule forex AMD detection every 15 minutes"""
+
+        def detect_and_alert():
+            run_id = uuid.uuid4().hex[:12]
+            run_start = _time.monotonic()
+
+            # per-run metrics
+            m = {
+                'users': 0, 'symbols': 0,
+                'candles_fetched': 0, 'symbols_skipped': 0,
+                'states_advanced': 0, 'triggers': 0, 'errors': 0,
+            }
+
+            logger.info(
+                "[AMD_FOREX][RUN_START] run_id=%s ts=%s",
+                run_id, datetime.now(timezone.utc).isoformat(),
+            )
+
+            # mark run start in health table
+            try:
+                db.execute(
+                    "UPDATE forex_amd_health SET last_run_at = NOW() WHERE id = 1"
+                )
+            except Exception as _he:
+                logger.warning("[AMD_FOREX] health_update_failed err=%s", _he)
+
+            try:
+                users = db.execute("""
+                    SELECT DISTINCT user_id
+                    FROM forex_watchlist
+                """, fetchall=True)
+
+                if not users:
+                    duration_ms = int((_time.monotonic() - run_start) * 1000)
+                    logger.info(
+                        "[AMD_FOREX][RUN_END] run_id=%s no_users duration_ms=%d",
+                        run_id, duration_ms,
+                    )
+                    return
+
+                m['users'] = len(users)
+
+                for user in users:
+                    try:
+                        alerts = forex_amd_detector.detect_for_user(
+                            user['user_id'], run_id=run_id
+                        )
+                        if alerts:
+                            m['triggers'] += len(alerts)
+                            logger.info(
+                                "[AMD_FOREX][USER_DONE] run_id=%s user=%s alerts=%d",
+                                run_id, user['user_id'], len(alerts),
+                            )
+                    except Exception as e:
+                        m['errors'] += 1
+                        logger.error(
+                            "[AMD_FOREX][USER_ERROR] run_id=%s user=%s err=%s",
+                            run_id, user['user_id'], e, exc_info=True,
+                        )
+
+                duration_ms = int((_time.monotonic() - run_start) * 1000)
+
+                # heartbeat log
+                logger.info(
+                    "[AMD_FOREX][HEARTBEAT] run_id=%s users=%d symbols=%d "
+                    "triggers=%d errors=%d candles_fetched=%d "
+                    "symbols_skipped=%d states_advanced=%d "
+                    "duration_ms=%d ok=true",
+                    run_id, m['users'], m['symbols'],
+                    m['triggers'], m['errors'], m['candles_fetched'],
+                    m['symbols_skipped'], m['states_advanced'], duration_ms,
+                )
+
+                # write ok timestamp to health table
+                try:
+                    db.execute("""
+                        UPDATE forex_amd_health
+                        SET last_ok_at = NOW(),
+                            last_symbols_count = %s
+                        WHERE id = 1
+                    """, (m['symbols'],))
+                except Exception as _he:
+                    logger.warning("[AMD_FOREX] health_ok_update_failed err=%s", _he)
+
+                # stuck / unhealthy detection
+                self._check_amd_health(run_id)
+
+            except Exception as e:
+                m['errors'] += 1
+                logger.error(
+                    "[AMD_FOREX][RUN_ERROR] run_id=%s err=%s",
+                    run_id, e, exc_info=True,
+                )
+                try:
+                    db.execute("""
+                        UPDATE forex_amd_health
+                        SET last_error_at = NOW(), last_error_msg = %s
+                        WHERE id = 1
+                    """, (str(e)[:500],))
+                except Exception:
+                    pass
+
+        self.scheduler.add_job(
+            detect_and_alert,
+            'interval',
+            minutes=15,
+            id='forex_amd_detection'
+        )
+        logger.info("✅ Forex AMD detection scheduled (every 15 min)")
 
     def start(self):
         """Start the background scheduler"""
