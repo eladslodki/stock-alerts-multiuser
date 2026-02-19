@@ -175,9 +175,14 @@ class PriceChecker:
             }
             
             response = requests.get(url, params=params, headers=headers, timeout=10)
+
+            if response.status_code == 429:
+                logger.warning(f"Rate limited (fallback MA) for {ticker}")
+                return None
+
             response.raise_for_status()
             data = response.json()
-            
+
             # Extract close prices
             result = data['chart']['result'][0]
             close_prices = result['indicators']['quote'][0]['close']
