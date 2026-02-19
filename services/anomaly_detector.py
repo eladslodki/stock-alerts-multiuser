@@ -5,6 +5,7 @@ Scans user's watchlist for unusual activity
 
 import logging
 import json
+import requests
 from typing import List, Dict, Optional
 from datetime import datetime
 from database import db
@@ -69,24 +70,55 @@ class AnomalyDetector:
         logger.info(f"🚨 Found {len(anomalies)} anomalies for user {user_id}")
         return anomalies
     
+    # Direct Yahoo Finance Chart API endpoint (same as price_checker.py uses)
+    _YF_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+    _YF_HEADERS = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+
     def _check_big_move(self, ticker: str, current_price: float) -> Optional[Dict]:
-        """Detect large price moves (>5% in 24h)"""
+        """Detect large price moves (>5% in 24h) using direct Yahoo Chart API.
+
+        Replaces yfinance library call which triggered cookie/crumb spin cycles
+        and logged misleading 'symbol may be delisted' errors on HTTP 429.
+        """
         try:
-            import yfinance as yf
-            
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="2d")
-            
-            if len(hist) < 2:
+            url = self._YF_CHART_URL.format(ticker=ticker)
+            params = {'interval': '1d', 'range': '2d', 'includePrePost': 'false'}
+
+            response = requests.get(
+                url, params=params, headers=self._YF_HEADERS, timeout=10
+            )
+
+            if response.status_code == 429:
+                logger.warning(f"Rate limited fetching history for {ticker}, skipping big-move check")
                 return None
-            
-            prev_close = hist['Close'].iloc[-2]
+
+            response.raise_for_status()
+            data = response.json()
+
+            result = data.get('chart', {}).get('result', [None])[0]
+            if not result:
+                logger.warning(f"No chart result for {ticker}")
+                return None
+
+            close_prices = (
+                result.get('indicators', {})
+                      .get('quote', [{}])[0]
+                      .get('close', [])
+            )
+            valid = [p for p in close_prices if p is not None]
+
+            if len(valid) < 2:
+                return None
+
+            prev_close = valid[-2]
             pct_change = ((current_price - prev_close) / prev_close) * 100
-            
+
             if abs(pct_change) >= self.BIG_MOVE_THRESHOLD:
                 direction = 'up' if pct_change > 0 else 'down'
                 severity = 'high' if abs(pct_change) >= 10 else 'medium'
-                
+
                 return {
                     'ticker': ticker,
                     'anomaly_type': 'BIG_MOVE',
@@ -99,10 +131,14 @@ class AnomalyDetector:
                     'severity': severity,
                     'detected_at': datetime.now()
                 }
-        
-        except Exception as e:
-            logger.error(f"❌ Big move check failed for {ticker}: {e}")
-        
+
+        except requests.exceptions.Timeout:
+            logger.warning(f"Timeout fetching history for {ticker}")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Network error fetching history for {ticker}: {e}")
+        except (KeyError, IndexError, ValueError) as e:
+            logger.error(f"Parse error in big-move check for {ticker}: {e}")
+
         return None
     
     def store_anomalies(self, anomalies: List[Dict]):
