@@ -222,10 +222,13 @@ class TestDetectAccumulation:
         assert result["quality_score"] >= 6
 
     def test_range_too_wide_returns_none(self, detector):
-        """Range = 200% of ATR → should NOT detect accumulation."""
-        bg = background_candles(20, range_size=0.0010)  # ATR ≈ 0.0010
-        # Add candles with range = 0.0040 >> 0.0010 * 0.5
-        wide = [make_candle(20 + i, 1.0800, 1.0840, 1.0800, 1.0820)
+        """Range > ACCUM_MAX_RANGE_POINTS (5200 pts = 0.52 price units) → None.
+
+        6000 pts (0.60 price units) is clearly above the 5200-pt threshold.
+        """
+        bg = background_candles(20)
+        # range = 1.6200 - 1.0800 = 0.6000 = 6000 pts >> 5200-pt threshold
+        wide = [make_candle(20 + i, 1.0800, 1.6200, 1.0800, 1.3000)
                 for i in range(8)]
         result = detector.detect_accumulation(bg + wide)
         assert result is None
@@ -243,7 +246,7 @@ class TestDetectAccumulation:
         assert result is None
 
     def test_too_few_candles_returns_none(self, detector):
-        """Fewer than ACCUM_MIN_CANDLES (5) candles → None."""
+        """Fewer than ACCUM_FIXED_WINDOW (8) candles → None."""
         result = detector.detect_accumulation(background_candles(3))
         assert result is None
 

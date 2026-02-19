@@ -43,8 +43,12 @@ class AMDConfig:
     # Accumulation Quality
     ACCUM_MIN_CANDLES = 5
     ACCUM_MAX_CANDLES = 20
-    ACCUM_RANGE_THRESHOLD = 0.5  # Max 50% of recent ATR
+    ACCUM_RANGE_THRESHOLD = 0.5  # Max 50% of recent ATR (legacy, no longer used)
     ACCUM_DIRECTIONAL_THRESHOLD = 0.3  # Max 30% directional bias
+
+    # Accumulation – fixed window spec (2 hours of 15-min candles)
+    ACCUM_FIXED_WINDOW = 8         # candles in the look-back window
+    ACCUM_MAX_RANGE_POINTS = 5200  # max range in points (1 pt = 0.0001 price units)
     
     # IFVG Quality
     IFVG_MIN_GAP_PIPS = 3
@@ -205,71 +209,70 @@ class ForexAMDDetector:
     
     def detect_accumulation(self, candles: List[Dict]) -> Optional[Dict]:
         """
-        Detect quality accumulation phase
-        
+        Detect quality accumulation phase using a fixed 8-candle (2-hour) window.
+
         Requirements:
-        - Range compression (< 50% of ATR)
-        - No strong directional bias
-        - Multiple touches of boundaries
-        - Duration: 5-20 candles
-        
+        - Fixed window: ACCUM_FIXED_WINDOW (8) candles
+        - Range compression: range_pts <= ACCUM_MAX_RANGE_POINTS (5200 pts)
+          where 1 pt = 0.0001 price units (e.g. 5200 pts = $0.52 for XAU/USD)
+        - No strong directional bias (< 30%)
+        - Multiple touches of boundaries (≥ 2 each side)
+
         Returns: {
             'start_idx': int,
             'end_idx': int,
             'high': float,
             'low': float,
-            'range': float,
-            'quality_score': float (0-10)
+            'range': float,          # in price units
+            'quality_score': float   # 0-10
         }
         """
-        if len(candles) < self.config.ACCUM_MIN_CANDLES:
+        _POINT = 0.0001
+        window_size = self.config.ACCUM_FIXED_WINDOW
+
+        if len(candles) < window_size:
             return None
-        
-        # Calculate ATR for context
+
+        window = candles[-window_size:]
         atr = self._calculate_atr(candles[-self.config.ATR_PERIOD:])
-        
-        # Scan for accumulation windows
-        for window_size in range(self.config.ACCUM_MIN_CANDLES, 
-                                 self.config.ACCUM_MAX_CANDLES + 1):
-            
-            window = candles[-window_size:]
-            
-            # 1. Range compression check
-            high = max(c['high'] for c in window)
-            low = min(c['low'] for c in window)
-            range_pips = high - low
-            
-            if range_pips > (atr * self.config.ACCUM_RANGE_THRESHOLD):
-                continue  # Too wide
-            
-            # 2. Directional bias check
-            net_movement = window[-1]['close'] - window[0]['close']
-            directional_pct = abs(net_movement) / range_pips if range_pips > 0 else 1
-            
-            if directional_pct > self.config.ACCUM_DIRECTIONAL_THRESHOLD:
-                continue  # Too directional
-            
-            # 3. Boundary touches check
-            touches_high = sum(1 for c in window if abs(c['high'] - high) < range_pips * 0.1)
-            touches_low = sum(1 for c in window if abs(c['low'] - low) < range_pips * 0.1)
-            
-            if touches_high < 2 or touches_low < 2:
-                continue  # Not enough consolidation
-            
-            # Calculate quality score
-            quality = self._score_accumulation(window, atr, range_pips, directional_pct)
-            
-            if quality >= 6:  # Minimum quality threshold
-                return {
-                    'start_idx': len(candles) - window_size,
-                    'end_idx': len(candles) - 1,
-                    'high': high,
-                    'low': low,
-                    'range': range_pips,
-                    'quality_score': quality
-                }
-        
-        return None
+
+        # 1. Range compression check (fixed point threshold)
+        high = max(c['high'] for c in window)
+        low  = min(c['low']  for c in window)
+        range_price = high - low
+        range_pts   = range_price / _POINT
+
+        if range_pts > self.config.ACCUM_MAX_RANGE_POINTS:
+            return None  # Too wide
+
+        # 2. Directional bias check
+        net_movement    = window[-1]['close'] - window[0]['close']
+        directional_pct = abs(net_movement) / range_price if range_price > 0 else 1.0
+
+        if directional_pct > self.config.ACCUM_DIRECTIONAL_THRESHOLD:
+            return None  # Too directional
+
+        # 3. Boundary touches check
+        touches_high = sum(1 for c in window if abs(c['high'] - high) < range_price * 0.1)
+        touches_low  = sum(1 for c in window if abs(c['low']  - low)  < range_price * 0.1)
+
+        if touches_high < 2 or touches_low < 2:
+            return None  # Not enough consolidation
+
+        # 4. Quality score
+        quality = self._score_accumulation(window, atr, range_price, directional_pct)
+
+        if quality < self.config.MIN_QUALITY_SCORE:
+            return None
+
+        return {
+            'start_idx':    len(candles) - window_size,
+            'end_idx':      len(candles) - 1,
+            'high':         high,
+            'low':          low,
+            'range':        range_price,
+            'quality_score': quality,
+        }
     
     # ========================================
     # SWEEP DETECTION
@@ -570,13 +573,13 @@ class ForexAMDDetector:
                 })
                 logger.info(
                     "[AMD_FOREX][ACCUM] run_id=%s user=%s symbol=%s "
-                    "range_high=%.5f range_low=%.5f range_pts=%.1f "
-                    "range_threshold_pts=%.1f atr_pts=%.1f "
+                    "range_high=%.5f range_low=%.5f "
+                    "range_price=%.5f range_pts=%.1f multiplier=0.0001 threshold_pts=%d "
                     "window_candles=%d quality=%.1f state=IDLE->ACCUMULATION",
                     run_id, user_id, symbol,
-                    accum['high'], accum['low'], accum['range'] / _PIP,
-                    atr * self.config.ACCUM_RANGE_THRESHOLD / _PIP,
-                    atr / _PIP,
+                    accum['high'], accum['low'],
+                    accum['range'], accum['range'] / _PIP,
+                    self.config.ACCUM_MAX_RANGE_POINTS,
                     accum['end_idx'] - accum['start_idx'] + 1, accum['quality_score'],
                 )
             else:
@@ -825,98 +828,68 @@ class ForexAMDDetector:
         """
         Emit ONE INFO log line explaining why detect_accumulation() returned None.
 
-        Scans all window sizes (same as detect_accumulation) and finds the
-        "best" candidate — the window that passed the most checks before being
-        rejected.  The rejection priority is:
-
-          range_too_wide (0) < too_directional (1) < insufficient_touches (2)
-            < quality_too_low (3)
+        Uses the same fixed 8-candle window and 5200-point threshold as
+        detect_accumulation() so the log is always directly comparable.
 
         Log format:
-          [AMD_FOREX][NO_ACCUM] … atr_pts=NNN range_threshold_pts=NNN
-            best_window_n=N best_range_pts=NNN reject=REASON <extra>
+          [AMD_FOREX][NO_ACCUM] … range_price=X.XXXXX range_pts=XXXX
+            multiplier=0.0001 threshold_pts=5200 window_n=8 reject=REASON <extra>
         """
-        _PIP = 0.0001
-        threshold_price = atr * self.config.ACCUM_RANGE_THRESHOLD
+        _POINT = 0.0001
+        window_size   = self.config.ACCUM_FIXED_WINDOW
+        threshold_pts = self.config.ACCUM_MAX_RANGE_POINTS
 
-        best: Dict = {
-            'prio': -1,
-            'reject': 'no_windows_checked',
-            'window_size': 0,
-            'range_pts': 0.0,
-        }
+        if len(candles) < window_size:
+            logger.info(
+                "[AMD_FOREX][NO_ACCUM] run_id=%s user=%s symbol=%s "
+                "reject=insufficient_candles have=%d need=%d",
+                run_id, user_id, symbol, len(candles), window_size,
+            )
+            return
 
-        for window_size in range(self.config.ACCUM_MIN_CANDLES,
-                                 self.config.ACCUM_MAX_CANDLES + 1):
-            window = candles[-window_size:]
-            high = max(c['high'] for c in window)
-            low  = min(c['low']  for c in window)
-            range_price = high - low
+        window      = candles[-window_size:]
+        high        = max(c['high'] for c in window)
+        low         = min(c['low']  for c in window)
+        range_price = high - low
+        range_pts   = range_price / _POINT
 
-            cand: Dict = {
-                'window_size': window_size,
-                'range_pts':   round(range_price / _PIP, 1),
-            }
-
-            if range_price > threshold_price:
-                cand['prio']   = 0
-                cand['reject'] = 'range_too_wide'
-            else:
-                net_movement    = window[-1]['close'] - window[0]['close']
-                directional_pct = (abs(net_movement) / range_price
-                                   if range_price > 0 else 1.0)
-
-                if directional_pct > self.config.ACCUM_DIRECTIONAL_THRESHOLD:
-                    cand['prio']             = 1
-                    cand['reject']           = 'too_directional'
-                    cand['directional_pct']  = round(directional_pct, 3)
-                else:
-                    touches_high = sum(
-                        1 for c in window
-                        if abs(c['high'] - high) < range_price * 0.1
-                    )
-                    touches_low = sum(
-                        1 for c in window
-                        if abs(c['low']  - low)  < range_price * 0.1
-                    )
-                    if touches_high < 2 or touches_low < 2:
-                        cand['prio']         = 2
-                        cand['reject']       = 'insufficient_touches'
-                        cand['touches_high'] = touches_high
-                        cand['touches_low']  = touches_low
-                    else:
-                        quality = self._score_accumulation(
-                            window, atr, range_price, directional_pct
-                        )
-                        cand['prio']    = 3
-                        cand['reject']  = 'quality_too_low'
-                        cand['quality'] = quality
-
-            if cand['prio'] > best['prio']:
-                best = cand
-
-        # Build per-rejection-type extra context
-        rej = best.get('reject', '')
-        if rej == 'too_directional':
-            extra = (f"directional_pct={best.get('directional_pct','?')} "
-                     f"max={self.config.ACCUM_DIRECTIONAL_THRESHOLD}")
-        elif rej == 'insufficient_touches':
-            extra = (f"touches_h={best.get('touches_high','?')} "
-                     f"touches_l={best.get('touches_low','?')} need=2each")
-        elif rej == 'quality_too_low':
-            extra = f"quality={best.get('quality','?')} min_quality=6"
+        # Determine rejection reason (same order as detect_accumulation)
+        if range_pts > threshold_pts:
+            reject = 'range_too_wide'
+            extra  = ""
         else:
-            extra = ""
+            net_movement    = window[-1]['close'] - window[0]['close']
+            directional_pct = abs(net_movement) / range_price if range_price > 0 else 1.0
+
+            if directional_pct > self.config.ACCUM_DIRECTIONAL_THRESHOLD:
+                reject = 'too_directional'
+                extra  = (f"directional_pct={round(directional_pct, 3)} "
+                          f"max={self.config.ACCUM_DIRECTIONAL_THRESHOLD}")
+            else:
+                touches_high = sum(
+                    1 for c in window if abs(c['high'] - high) < range_price * 0.1
+                )
+                touches_low = sum(
+                    1 for c in window if abs(c['low']  - low)  < range_price * 0.1
+                )
+                if touches_high < 2 or touches_low < 2:
+                    reject = 'insufficient_touches'
+                    extra  = (f"touches_h={touches_high} "
+                              f"touches_l={touches_low} need=2each")
+                else:
+                    quality = self._score_accumulation(
+                        window, atr, range_price, directional_pct
+                    )
+                    reject = 'quality_too_low'
+                    extra  = f"quality={quality} min_quality={self.config.MIN_QUALITY_SCORE}"
 
         logger.info(
             "[AMD_FOREX][NO_ACCUM] run_id=%s user=%s symbol=%s "
-            "atr_pts=%.1f range_threshold_pts=%.1f "
-            "best_window_n=%d best_range_pts=%.1f reject=%s %s",
+            "range_price=%.5f range_pts=%.1f multiplier=0.0001 threshold_pts=%d "
+            "window_n=%d reject=%s %s",
             run_id, user_id, symbol,
-            atr / _PIP,
-            threshold_price / _PIP,
-            best['window_size'], best['range_pts'],
-            rej, extra,
+            range_price, range_pts, threshold_pts,
+            window_size, reject, extra,
         )
 
     def _is_accumulation_broken(self, candles: List[Dict], accum_data: Dict) -> bool:
@@ -1168,8 +1141,11 @@ class ForexAMDDetector:
                     "result": "NOT_FOUND",
                     "details": {
                         "reason": (
-                            "No window of 5-20 candles had range < 50% ATR, "
-                            "directional bias < 30%, and 2+ boundary touches each side"
+                            f"Last {self.config.ACCUM_FIXED_WINDOW} candles did not pass: "
+                            f"range_pts <= {self.config.ACCUM_MAX_RANGE_POINTS} pts "
+                            f"(1 pt = 0.0001 price units), "
+                            f"directional bias < {self.config.ACCUM_DIRECTIONAL_THRESHOLD*100:.0f}%, "
+                            "and 2+ boundary touches each side"
                         ),
                     },
                 })
