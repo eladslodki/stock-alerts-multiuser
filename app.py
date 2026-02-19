@@ -13,6 +13,7 @@ from models import Portfolio, Trade
 from portfolio_calculator import portfolio_calculator
 from price_checker import price_checker
 import time
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -4843,6 +4844,7 @@ def forex_amd_page():
 <head>
     <title>Forex AMD Scanner</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -4912,6 +4914,19 @@ def forex_amd_page():
             cursor: pointer;
         }
         button:hover { opacity: 0.9; }
+        .tf-btn { padding: 8px 18px; font-size: 13px; }
+        .tf-btn.active { background: linear-gradient(135deg, #00FFA3, #00B37A); }
+        select.chart-select {
+            padding: 8px 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.05);
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        #amd-chart { border-radius: 8px; overflow: hidden; }
+        #chart-error { color: #FF6B6B; font-size: 13px; margin-top: 8px; display: none; }
     </style>
 </head>
 <body>
@@ -4948,25 +4963,51 @@ def forex_amd_page():
                 </div>
             </div>
         </div>
+
+        <!-- ── Candlestick Chart ─────────────────────────────────────────── -->
+        <div class="section">
+            <div style="display:flex; align-items:center; gap:16px; margin-bottom:16px; flex-wrap:wrap;">
+                <h2>Chart</h2>
+                <select id="chartSymbolSelect" class="chart-select" onchange="loadChart()">
+                    <option value="">-- Select symbol --</option>
+                </select>
+                <div style="display:flex; gap:8px;">
+                    <button id="tf-5min"  class="tf-btn" onclick="setTf('5min')">5M</button>
+                    <button id="tf-15min" class="tf-btn active" onclick="setTf('15min')">15M</button>
+                    <button id="tf-1h"    class="tf-btn" onclick="setTf('1h')">1H</button>
+                </div>
+                <span id="chart-state-badge" style="font-size:12px; color:#8B92A8;"></span>
+            </div>
+            <div id="amd-chart" style="height:420px; width:100%;"></div>
+            <div id="chart-error"></div>
+            <div style="margin-top:10px; font-size:12px; color:#555; line-height:1.6;">
+                <span style="color:#FFB800;">&#9472;&#9472;</span> Accum box &nbsp;
+                <span style="color:#00FFA3;">&#9472;&#9472;</span> Sweep (bull) &nbsp;
+                <span style="color:#FF6B6B;">&#9472;&#9472;</span> Sweep (bear) &nbsp;
+                <span style="color:#5B7CFF;">&#9472;&#9472;</span> IFVG zone &nbsp;
+                &#9650; Trigger
+            </div>
+        </div>
     </div>
     
     <script>
+        // ── Watchlist ────────────────────────────────────────────────────────
         async function loadWatchlist() {
             const res = await fetch('/api/forex-amd/watchlist');
             const data = await res.json();
-            
+
             const container = document.getElementById('watchlistContainer');
             if (data.symbols.length === 0) {
                 container.innerHTML = '<p style="color: #8B92A8;">No symbols in watchlist. Add some above.</p>';
-                return;
+            } else {
+                container.innerHTML = data.symbols.map(s => `
+                    <span style="display:inline-flex;align-items:center;gap:8px;margin:4px;padding:8px 16px;background:rgba(255,255,255,0.1);border-radius:8px;">
+                        ${s}
+                        <button onclick="removeSymbol('${s}')" style="padding:2px 8px;font-size:12px;background:rgba(255,107,107,0.3);border-radius:4px;cursor:pointer;" title="Remove">&#x2715;</button>
+                    </span>
+                `).join('');
             }
-            
-            container.innerHTML = data.symbols.map(s => `
-                <span style="display: inline-flex; align-items: center; gap: 8px; margin: 4px; padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 8px;">
-                    ${s}
-                    <button onclick="removeSymbol('${s}')" style="padding: 2px 8px; font-size: 12px; background: rgba(255,107,107,0.3); border-radius: 4px; cursor: pointer;" title="Remove">&#x2715;</button>
-                </span>
-            `).join('');
+            updateChartSymbolSelect(data.symbols || []);
         }
 
         async function removeSymbol(symbol) {
@@ -4981,65 +5022,218 @@ def forex_amd_page():
         async function addSymbol() {
             const input = document.getElementById('symbolInput');
             const symbol = input.value.trim().toUpperCase();
-            
             if (!symbol) return;
-            
             await fetch('/api/forex-amd/watchlist', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({symbol})
             });
-            
             input.value = '';
             loadWatchlist();
         }
-        
+
+        // ── AMD Setups ───────────────────────────────────────────────────────
         async function loadAlerts() {
             const res = await fetch('/api/forex-amd/alerts');
             const data = await res.json();
-            
             const container = document.getElementById('alertsContainer');
-            
             if (data.alerts.length === 0) {
-                container.innerHTML = '<div style="text-align: center; padding: 40px; color: #8B92A8;">No AMD setups detected yet</div>';
+                container.innerHTML = '<div style="text-align:center;padding:40px;color:#8B92A8;">No AMD setups detected yet</div>';
                 return;
             }
-            
             container.innerHTML = data.alerts.map(alert => {
                 const qualityClass = alert.setup_quality >= 8 ? 'quality-high' : 'quality-medium';
                 const dirClass = alert.direction === 'bullish' ? 'bullish' : 'bearish';
                 const date = new Date(alert.detected_at).toLocaleString();
-                
                 return `
                     <div class="amd-card ${dirClass}">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                            <span style="font-size: 20px; font-weight: 700;">${alert.symbol}</span>
+                        <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
+                            <span style="font-size:20px;font-weight:700;">${alert.symbol}</span>
                             <span class="quality-badge ${qualityClass}">Quality: ${alert.setup_quality}/10</span>
                         </div>
-                        
-                        <div style="margin-bottom: 8px;">
-                            <strong style="color: ${alert.direction === 'bullish' ? '#00FFA3' : '#FF6B6B'};">
+                        <div style="margin-bottom:8px;">
+                            <strong style="color:${alert.direction==='bullish'?'#00FFA3':'#FF6B6B'};">
                                 ${alert.direction.toUpperCase()}
                             </strong> setup detected during ${alert.session} session
                         </div>
-                        
-                        <div style="font-size: 13px; color: #8B92A8;">
+                        <div style="font-size:13px;color:#8B92A8;">
                             Sweep: ${alert.sweep_level} | IFVG: ${alert.ifvg_low} - ${alert.ifvg_high}
                         </div>
-                        
-                        <div style="font-size: 12px; color: #666; margin-top: 8px;">
-                            ${date}
-                        </div>
+                        <div style="font-size:12px;color:#666;margin-top:8px;">${date}</div>
                     </div>
                 `;
             }).join('');
         }
-        
+
         async function logout() {
             await fetch('/api/logout');
             window.location.href = '/login';
         }
-        
+
+        // ── Candlestick Chart ────────────────────────────────────────────────
+        let _chart = null;
+        let _candleSeries = null;
+        let _currentTf = '15min';
+        let _priceLines = [];
+
+        function initChart() {
+            const el = document.getElementById('amd-chart');
+            if (!el || typeof LightweightCharts === 'undefined') return;
+            _chart = LightweightCharts.createChart(el, {
+                width: el.clientWidth,
+                height: 420,
+                layout: {
+                    background: { color: '#0d1117' },
+                    textColor: '#8B92A8',
+                },
+                grid: {
+                    vertLines: { color: 'rgba(255,255,255,0.04)' },
+                    horzLines: { color: 'rgba(255,255,255,0.04)' },
+                },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+                rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
+                timeScale: {
+                    borderColor: 'rgba(255,255,255,0.1)',
+                    timeVisible: true,
+                    secondsVisible: false,
+                },
+            });
+            _candleSeries = _chart.addCandlestickSeries({
+                upColor:        '#00FFA3',
+                downColor:      '#FF6B6B',
+                borderUpColor:  '#00FFA3',
+                borderDownColor:'#FF6B6B',
+                wickUpColor:    '#00FFA3',
+                wickDownColor:  '#FF6B6B',
+            });
+            new ResizeObserver(() => {
+                if (_chart) _chart.applyOptions({ width: el.clientWidth });
+            }).observe(el);
+        }
+
+        function setTf(tf) {
+            _currentTf = tf;
+            ['5min','15min','1h'].forEach(t => {
+                const b = document.getElementById('tf-' + t);
+                if (b) b.className = 'tf-btn' + (t === tf ? ' active' : '');
+            });
+            loadChart();
+        }
+
+        function updateChartSymbolSelect(symbols) {
+            const sel = document.getElementById('chartSymbolSelect');
+            const prev = sel.value;
+            sel.innerHTML = '<option value="">-- Select symbol --</option>';
+            symbols.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s; opt.textContent = s;
+                if (s === prev) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            if (!sel.value && symbols.length) {
+                sel.value = symbols[0];
+                loadChart();
+            }
+        }
+
+        async function loadChart() {
+            const sym = document.getElementById('chartSymbolSelect').value;
+            const errEl = document.getElementById('chart-error');
+            errEl.style.display = 'none';
+            if (!sym) return;
+            if (!_chart) initChart();
+            if (!_chart) {
+                errEl.textContent = 'LightweightCharts library not loaded.';
+                errEl.style.display = 'block';
+                return;
+            }
+            try {
+                const res = await fetch(
+                    '/api/forex-amd/candles?symbol=' + encodeURIComponent(sym) +
+                    '&interval=' + _currentTf + '&limit=200'
+                );
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                _candleSeries.setData(data);
+                _chart.timeScale().fitContent();
+                await loadOverlays(sym);
+            } catch(e) {
+                errEl.textContent = 'Chart error: ' + e.message;
+                errEl.style.display = 'block';
+            }
+        }
+
+        async function loadOverlays(sym) {
+            // Remove old price lines
+            _priceLines.forEach(pl => { try { _candleSeries.removePriceLine(pl); } catch(_) {} });
+            _priceLines = [];
+            _candleSeries.setMarkers([]);
+
+            const badge = document.getElementById('chart-state-badge');
+            if (badge) badge.textContent = '';
+
+            try {
+                const res = await fetch('/api/forex-amd/overlay?symbol=' + encodeURIComponent(sym));
+                const data = await res.json();
+                if (!data.success) return;
+                const ov = data.overlay;
+
+                if (badge && ov.state) badge.textContent = 'State: ' + ov.state;
+
+                // Accumulation box – two dotted lines
+                if (ov.accumulation && ov.accumulation.high != null) {
+                    _priceLines.push(_candleSeries.createPriceLine({
+                        price: ov.accumulation.high, color: '#FFB800', lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dotted,
+                        axisLabelVisible: true, title: 'Accum H',
+                    }));
+                    _priceLines.push(_candleSeries.createPriceLine({
+                        price: ov.accumulation.low, color: '#FFB800', lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dotted,
+                        axisLabelVisible: true, title: 'Accum L',
+                    }));
+                }
+
+                // Sweep level – dashed line
+                if (ov.sweep && ov.sweep.level != null) {
+                    const sweepColor = ov.sweep.direction === 'bullish' ? '#00FFA3' : '#FF6B6B';
+                    _priceLines.push(_candleSeries.createPriceLine({
+                        price: ov.sweep.level, color: sweepColor, lineWidth: 2,
+                        lineStyle: LightweightCharts.LineStyle.Dashed,
+                        axisLabelVisible: true,
+                        title: 'Sweep (' + (ov.sweep.direction || '') + ')',
+                    }));
+                }
+
+                // IFVG zone – two dashed blue lines
+                if (ov.ifvg && ov.ifvg.high != null) {
+                    _priceLines.push(_candleSeries.createPriceLine({
+                        price: ov.ifvg.high, color: '#5B7CFF', lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dashed,
+                        axisLabelVisible: true, title: 'IFVG H',
+                    }));
+                    _priceLines.push(_candleSeries.createPriceLine({
+                        price: ov.ifvg.low, color: '#5B7CFF', lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dashed,
+                        axisLabelVisible: true, title: 'IFVG L',
+                    }));
+                }
+
+                // Trigger marker
+                if (ov.trigger && ov.trigger.time) {
+                    const ts = Math.floor(new Date(ov.trigger.time).getTime() / 1000);
+                    _candleSeries.setMarkers([{
+                        time:     ts,
+                        position: ov.trigger.direction === 'bullish' ? 'belowBar' : 'aboveBar',
+                        color:    ov.trigger.direction === 'bullish' ? '#00FFA3' : '#FF6B6B',
+                        shape:    ov.trigger.direction === 'bullish' ? 'arrowUp' : 'arrowDown',
+                        text:     'AMD',
+                    }]);
+                }
+            } catch(_) { /* overlay errors are non-fatal */ }
+        }
+
+        // ── Boot ─────────────────────────────────────────────────────────────
         loadWatchlist();
         loadAlerts();
         setInterval(loadAlerts, 60000);
@@ -5199,6 +5393,143 @@ def forex_amd_recent_events():
         return jsonify({'success': True, 'events': events})
     except Exception as e:
         logger.error(f"[AMD_FOREX] recent-events endpoint error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# In-memory candle cache: cache_key -> (monotonic_timestamp, data_list)
+# ---------------------------------------------------------------------------
+_candle_cache: dict = {}
+_CANDLE_CACHE_TTL = 60  # seconds – refresh at most once per minute per symbol+tf
+
+
+@app.route('/api/forex-amd/candles')
+@login_required
+def forex_amd_candles():
+    """OHLC candles for LightweightCharts.
+    GET /api/forex-amd/candles?symbol=EURUSD&interval=15min&limit=200
+    Returns [{time, open, high, low, close}, …] sorted ascending by time.
+    """
+    from services.forex_data_provider import forex_data_provider
+
+    symbol = request.args.get('symbol', '').strip().upper()
+    interval = request.args.get('interval', '15min').strip().lower()
+    try:
+        limit = min(int(request.args.get('limit', 200)), 500)
+    except ValueError:
+        limit = 200
+
+    if not symbol:
+        return jsonify({'error': 'symbol required'}), 400
+
+    _IV = {
+        '5m': '5m', '5min': '5m',
+        '15m': '15m', '15min': '15m',
+        '1h': '1h', '1hour': '1h',
+    }
+    tf = _IV.get(interval, '15m')
+
+    cache_key = f"{symbol}:{tf}"
+    now_mono = time.monotonic()
+    cached = _candle_cache.get(cache_key)
+    if cached and (now_mono - cached[0]) < _CANDLE_CACHE_TTL:
+        return jsonify(cached[1])
+
+    candles = forex_data_provider.get_recent_candles(symbol, timeframe=tf, count=limit)
+    if not candles:
+        return jsonify({'error': f'No candle data available for {symbol}'}), 404
+
+    result = sorted(
+        [
+            {
+                'time':  int(c['timestamp'].timestamp()),
+                'open':  c['open'],
+                'high':  c['high'],
+                'low':   c['low'],
+                'close': c['close'],
+            }
+            for c in candles
+        ],
+        key=lambda x: x['time'],
+    )
+
+    _candle_cache[cache_key] = (now_mono, result)
+    return jsonify(result)
+
+
+@app.route('/api/forex-amd/overlay')
+@login_required
+def forex_amd_overlay():
+    """Current state-machine overlay data for drawing on the chart.
+    Returns accumulation box, sweep level, IFVG zone, and trigger marker.
+    GET /api/forex-amd/overlay?symbol=EURUSD
+    """
+    symbol = request.args.get('symbol', '').strip().upper()
+    if not symbol:
+        return jsonify({'error': 'symbol required'}), 400
+
+    try:
+        state_row = db.execute(
+            """SELECT current_state, accumulation_data, sweep_data, last_update
+               FROM forex_amd_state
+               WHERE user_id = %s AND symbol = %s""",
+            (current_user.id, symbol), fetchone=True,
+        )
+        alert_row = db.execute(
+            """SELECT sweep_level, sweep_time, ifvg_high, ifvg_low, ifvg_time,
+                      direction, detected_at
+               FROM forex_amd_alerts
+               WHERE user_id = %s AND symbol = %s
+               ORDER BY detected_at DESC LIMIT 1""",
+            (current_user.id, symbol), fetchone=True,
+        )
+
+        STATE_NAMES = {
+            0: 'IDLE', 1: 'ACCUMULATION', 2: 'SWEEP_DETECTED',
+            3: 'DISPLACEMENT_CONFIRMED', 4: 'WAIT_IFVG',
+        }
+
+        overlay = {'state': None, 'accumulation': None, 'sweep': None,
+                   'ifvg': None, 'trigger': None}
+
+        if state_row:
+            overlay['state'] = STATE_NAMES.get(state_row['current_state'], 'UNKNOWN')
+
+            if state_row['accumulation_data']:
+                raw = state_row['accumulation_data']
+                accum = json.loads(raw) if isinstance(raw, str) else raw
+                overlay['accumulation'] = {
+                    'high': accum.get('high'),
+                    'low':  accum.get('low'),
+                }
+
+            if state_row['sweep_data']:
+                raw = state_row['sweep_data']
+                sweep = json.loads(raw) if isinstance(raw, str) else raw
+                overlay['sweep'] = {
+                    'level':     sweep.get('level'),
+                    'direction': sweep.get('direction'),
+                }
+
+        if alert_row:
+            overlay['ifvg'] = {
+                'high': float(alert_row['ifvg_high']) if alert_row.get('ifvg_high') else None,
+                'low':  float(alert_row['ifvg_low'])  if alert_row.get('ifvg_low')  else None,
+                'time': alert_row['ifvg_time'].isoformat() if alert_row.get('ifvg_time') else None,
+            }
+            overlay['trigger'] = {
+                'time':      alert_row['detected_at'].isoformat() if alert_row.get('detected_at') else None,
+                'direction': alert_row.get('direction'),
+            }
+            if alert_row.get('sweep_level') and not overlay['sweep']:
+                overlay['sweep'] = {
+                    'level':     float(alert_row['sweep_level']),
+                    'direction': alert_row.get('direction'),
+                }
+
+        return jsonify({'success': True, 'symbol': symbol, 'overlay': overlay})
+    except Exception as e:
+        logger.error(f"[AMD_FOREX] overlay endpoint error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
