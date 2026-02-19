@@ -3,6 +3,7 @@ Institutional-grade Forex AMD detector with ICT-style logic
 """
 
 import logging
+import os
 import uuid
 import time as _time
 from datetime import datetime, time, timedelta
@@ -118,10 +119,22 @@ class ForexAMDDetector:
         if not watchlist:
             return result
 
-        symbols = [row['symbol'] for row in watchlist]
-        result['symbols'] = len(symbols)
+        from services.forex_data_provider import normalize_symbol as _norm_sym
 
-        for symbol in symbols:
+        result['symbols'] = len(watchlist)
+
+        for row in watchlist:
+            symbol_raw = row['symbol']
+            # Normalize to canonical form (e.g. XAUUSD → XAU/USD) so that
+            # all DB state keys are consistent regardless of how the symbol
+            # was stored when it was first added to the watchlist.
+            _norm, _err = _norm_sym(symbol_raw)
+            symbol = _norm if _norm else symbol_raw
+            if symbol != symbol_raw:
+                logger.info(
+                    "[AMD_FOREX][NORM] run_id=%s user=%s symbol_raw=%s normalized=%s",
+                    run_id, user_id, symbol_raw, symbol,
+                )
             try:
                 candles = forex_data_provider.get_recent_candles(
                     symbol, timeframe='15m', count=100
@@ -524,16 +537,30 @@ class ForexAMDDetector:
         
         # State 0: IDLE
         if current_state == AMDState.IDLE:
-            # Check volatility first
-            if not self.check_volatility(candles):
-                logger.debug(
-                    "[AMD_FOREX][STATE] run_id=%s user=%s symbol=%s state=IDLE "
-                    "skip=low_volatility",
-                    run_id, user_id, symbol,
-                )
+            # ── Volatility check ────────────────────────────────────────────
+            # Compute ATR once; reuse for the accumulation-miss log below.
+            _PIP = 0.0001
+            atr = self._calculate_atr(candles[-self.config.ATR_PERIOD:])
+            vol_ok = atr >= self.config.MIN_ATR_THRESHOLD
+            # Set AMD_BYPASS_VOLATILITY=1 in env to skip this gate for one-shot
+            # debugging (e.g. validate the rest of the pipeline on a slow pair).
+            _bypass_vol = os.getenv("AMD_BYPASS_VOLATILITY", "").lower() in (
+                "1", "true", "yes"
+            )
+            logger.info(
+                "[AMD_FOREX][VOL] run_id=%s user=%s symbol=%s "
+                "atr=%.6f atr_pts=%.1f threshold=%.4f threshold_pts=%.1f "
+                "pass=%s bypass=%s",
+                run_id, user_id, symbol,
+                atr, atr / _PIP,
+                self.config.MIN_ATR_THRESHOLD,
+                self.config.MIN_ATR_THRESHOLD / _PIP,
+                vol_ok, _bypass_vol,
+            )
+            if not vol_ok and not _bypass_vol:
                 return None
 
-            # Look for accumulation
+            # ── Accumulation scan ────────────────────────────────────────────
             accum = self.detect_accumulation(candles)
             if accum:
                 # Transition to ACCUMULATION
@@ -543,17 +570,17 @@ class ForexAMDDetector:
                 })
                 logger.info(
                     "[AMD_FOREX][ACCUM] run_id=%s user=%s symbol=%s "
-                    "range_high=%.5f range_low=%.5f range_pts=%.5f "
+                    "range_high=%.5f range_low=%.5f range_pts=%.1f "
+                    "range_threshold_pts=%.1f atr_pts=%.1f "
                     "window_candles=%d quality=%.1f state=IDLE->ACCUMULATION",
                     run_id, user_id, symbol,
-                    accum['high'], accum['low'], accum['range'],
+                    accum['high'], accum['low'], accum['range'] / _PIP,
+                    atr * self.config.ACCUM_RANGE_THRESHOLD / _PIP,
+                    atr / _PIP,
                     accum['end_idx'] - accum['start_idx'] + 1, accum['quality_score'],
                 )
             else:
-                logger.debug(
-                    "[AMD_FOREX][STATE] run_id=%s user=%s symbol=%s state=IDLE no_accum",
-                    run_id, user_id, symbol,
-                )
+                self._log_accumulation_miss(candles, atr, run_id, user_id, symbol)
 
             return None
         
@@ -793,6 +820,105 @@ class ForexAMDDetector:
                     return i
         return None
     
+    def _log_accumulation_miss(self, candles: List[Dict], atr: float,
+                               run_id: str, user_id: int, symbol: str) -> None:
+        """
+        Emit ONE INFO log line explaining why detect_accumulation() returned None.
+
+        Scans all window sizes (same as detect_accumulation) and finds the
+        "best" candidate — the window that passed the most checks before being
+        rejected.  The rejection priority is:
+
+          range_too_wide (0) < too_directional (1) < insufficient_touches (2)
+            < quality_too_low (3)
+
+        Log format:
+          [AMD_FOREX][NO_ACCUM] … atr_pts=NNN range_threshold_pts=NNN
+            best_window_n=N best_range_pts=NNN reject=REASON <extra>
+        """
+        _PIP = 0.0001
+        threshold_price = atr * self.config.ACCUM_RANGE_THRESHOLD
+
+        best: Dict = {
+            'prio': -1,
+            'reject': 'no_windows_checked',
+            'window_size': 0,
+            'range_pts': 0.0,
+        }
+
+        for window_size in range(self.config.ACCUM_MIN_CANDLES,
+                                 self.config.ACCUM_MAX_CANDLES + 1):
+            window = candles[-window_size:]
+            high = max(c['high'] for c in window)
+            low  = min(c['low']  for c in window)
+            range_price = high - low
+
+            cand: Dict = {
+                'window_size': window_size,
+                'range_pts':   round(range_price / _PIP, 1),
+            }
+
+            if range_price > threshold_price:
+                cand['prio']   = 0
+                cand['reject'] = 'range_too_wide'
+            else:
+                net_movement    = window[-1]['close'] - window[0]['close']
+                directional_pct = (abs(net_movement) / range_price
+                                   if range_price > 0 else 1.0)
+
+                if directional_pct > self.config.ACCUM_DIRECTIONAL_THRESHOLD:
+                    cand['prio']             = 1
+                    cand['reject']           = 'too_directional'
+                    cand['directional_pct']  = round(directional_pct, 3)
+                else:
+                    touches_high = sum(
+                        1 for c in window
+                        if abs(c['high'] - high) < range_price * 0.1
+                    )
+                    touches_low = sum(
+                        1 for c in window
+                        if abs(c['low']  - low)  < range_price * 0.1
+                    )
+                    if touches_high < 2 or touches_low < 2:
+                        cand['prio']         = 2
+                        cand['reject']       = 'insufficient_touches'
+                        cand['touches_high'] = touches_high
+                        cand['touches_low']  = touches_low
+                    else:
+                        quality = self._score_accumulation(
+                            window, atr, range_price, directional_pct
+                        )
+                        cand['prio']    = 3
+                        cand['reject']  = 'quality_too_low'
+                        cand['quality'] = quality
+
+            if cand['prio'] > best['prio']:
+                best = cand
+
+        # Build per-rejection-type extra context
+        rej = best.get('reject', '')
+        if rej == 'too_directional':
+            extra = (f"directional_pct={best.get('directional_pct','?')} "
+                     f"max={self.config.ACCUM_DIRECTIONAL_THRESHOLD}")
+        elif rej == 'insufficient_touches':
+            extra = (f"touches_h={best.get('touches_high','?')} "
+                     f"touches_l={best.get('touches_low','?')} need=2each")
+        elif rej == 'quality_too_low':
+            extra = f"quality={best.get('quality','?')} min_quality=6"
+        else:
+            extra = ""
+
+        logger.info(
+            "[AMD_FOREX][NO_ACCUM] run_id=%s user=%s symbol=%s "
+            "atr_pts=%.1f range_threshold_pts=%.1f "
+            "best_window_n=%d best_range_pts=%.1f reject=%s %s",
+            run_id, user_id, symbol,
+            atr / _PIP,
+            threshold_price / _PIP,
+            best['window_size'], best['range_pts'],
+            rej, extra,
+        )
+
     def _is_accumulation_broken(self, candles: List[Dict], accum_data: Dict) -> bool:
         """Check if accumulation is invalidated"""
         last_candle = candles[-1]
