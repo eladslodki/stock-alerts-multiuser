@@ -5249,19 +5249,24 @@ def forex_amd_page():
 def manage_forex_watchlist():
     """Manage user's forex watchlist"""
     if request.method == 'POST':
-        symbol = request.json.get('symbol', '').upper().strip()
-        
-        if not symbol:
+        raw_symbol = request.json.get('symbol', '').strip()
+
+        if not raw_symbol:
             return jsonify({'success': False, 'error': 'Symbol required'}), 400
-        
+
+        from services.forex_data_provider import normalize_symbol
+        symbol, norm_err = normalize_symbol(raw_symbol)
+        if norm_err:
+            return jsonify({'success': False, 'error': norm_err}), 400
+
         try:
             db.execute("""
                 INSERT INTO forex_watchlist (user_id, symbol)
                 VALUES (%s, %s)
                 ON CONFLICT (user_id, symbol) DO NOTHING
             """, (current_user.id, symbol))
-            
-            return jsonify({'success': True})
+
+            return jsonify({'success': True, 'symbol': symbol})
         except Exception as e:
             logger.error(f"Error adding to watchlist: {e}")
             return jsonify({'success': False, 'error': str(e)}), 500
@@ -5306,6 +5311,37 @@ def get_forex_amd_alerts():
     except Exception as e:
         logger.error(f"Error fetching AMD alerts: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/forex-amd/debug-run')
+@login_required
+def forex_amd_debug_run():
+    """
+    Dry-run the AMD state machine for the current user + symbol.
+
+    Query params
+    ------------
+    symbol : str   Required. Accepts any normalized format (EURUSD, EUR/USD, …)
+
+    Returns a JSON debug report with current state, computed metrics, and
+    per-step decisions — without modifying any DB state.
+    """
+    raw_symbol = request.args.get('symbol', '').strip()
+    if not raw_symbol:
+        return jsonify({'error': 'symbol query parameter is required'}), 400
+
+    from services.forex_data_provider import normalize_symbol
+    symbol, norm_err = normalize_symbol(raw_symbol)
+    if norm_err:
+        return jsonify({'error': norm_err}), 400
+
+    try:
+        from services.forex_amd_detector import forex_amd_detector
+        report = forex_amd_detector.debug_run(current_user.id, symbol)
+        return jsonify(report)
+    except Exception as exc:
+        logger.error(f"[AMD_FOREX][DEBUG_RUN] symbol={symbol} user={current_user.id} err={exc}", exc_info=True)
+        return jsonify({'error': str(exc)}), 500
+
 
 @app.route('/api/forex-amd/health')
 @login_required

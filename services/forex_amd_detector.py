@@ -570,10 +570,11 @@ class ForexAMDDetector:
             sweep = self.detect_sweep(candles, accum_data['high'], accum_data['low'])
             if sweep:
                 # Transition to SWEEP_DETECTED
+                # sweep_candle_idx is embedded inside the sweep dict so it
+                # survives the DB serialisation round-trip via sweep_data JSON.
                 self._save_state(user_id, symbol, AMDState.SWEEP_DETECTED, {
                     'accumulation': accum_data,
-                    'sweep': sweep,
-                    'sweep_candle_idx': len(candles) - 1
+                    'sweep': {**sweep, 'sweep_candle_idx': len(candles) - 1},
                 })
                 logger.info(
                     "[AMD_FOREX][SWEEP] run_id=%s user=%s symbol=%s "
@@ -598,8 +599,8 @@ class ForexAMDDetector:
         
         # State 2: SWEEP_DETECTED
         if current_state == AMDState.SWEEP_DETECTED:
-            sweep_data = state_data.get('data', {}).get('sweep')
-            sweep_idx = state_data.get('data', {}).get('sweep_candle_idx')
+            sweep_data = state_data.get('data', {}).get('sweep') or {}
+            sweep_idx = sweep_data.get('sweep_candle_idx')
 
             # Check timeout
             candles_since_sweep = len(candles) - 1 - sweep_idx
@@ -922,6 +923,312 @@ class ForexAMDDetector:
             'ifvg_range': f"{ifvg['gap_low']:.5f} - {ifvg['gap_high']:.5f}",
             'quality_score': int(quality_score)
         }
+
+    # ========================================
+    # DRY-RUN / DEBUG MODE
+    # ========================================
+
+    def debug_run(self, user_id: int, symbol: str) -> Dict:
+        """
+        Run the AMD state machine in read-only dry-run mode.
+
+        Fetches fresh candles from Twelve Data and evaluates every detection
+        step (volatility, accumulation, sweep, displacement, IFVG) without
+        writing anything to the database.
+
+        Returns a structured JSON-serialisable report::
+
+            {
+                "symbol": "EUR/USD",
+                "user_id": 42,
+                "run_at": "2024-06-10T09:00:00",
+                "candles_fetched": 100,
+                "current_state": 0,
+                "current_state_name": "IDLE",
+                "metrics": {
+                    "atr": 0.00480,
+                    "atr_pips": 48.0,
+                    "volatility_ok": true
+                },
+                "decisions": [
+                    {"check": "volatility", "result": "PASS", "details": {...}},
+                    {"check": "accumulation", "result": "FOUND", "details": {...}},
+                    ...
+                ],
+                "would_advance_to": "ACCUMULATION",   # or null
+                "error": null
+            }
+        """
+        from services.forex_data_provider import forex_data_provider
+
+        _STATE_NAMES = {
+            AMDState.IDLE: "IDLE",
+            AMDState.ACCUMULATION: "ACCUMULATION",
+            AMDState.SWEEP_DETECTED: "SWEEP_DETECTED",
+            AMDState.DISPLACEMENT_CONFIRMED: "DISPLACEMENT_CONFIRMED",
+            AMDState.WAIT_IFVG: "WAIT_IFVG",
+        }
+
+        report: Dict = {
+            "symbol": symbol,
+            "user_id": user_id,
+            "run_at": datetime.utcnow().isoformat(),
+            "candles_fetched": 0,
+            "current_state": None,
+            "current_state_name": None,
+            "metrics": {},
+            "decisions": [],
+            "would_advance_to": None,
+            "error": None,
+        }
+
+        # -- fetch candles -------------------------------------------------
+        candles = forex_data_provider.get_recent_candles(symbol, "15m", 100)
+        report["candles_fetched"] = len(candles)
+
+        if not candles:
+            report["error"] = "No candles available from Twelve Data"
+            return report
+
+        # -- load current DB state (read-only) -----------------------------
+        state_data = self._load_state(user_id, symbol)
+        current_state = state_data.get("current_state", AMDState.IDLE)
+        report["current_state"] = current_state
+        report["current_state_name"] = _STATE_NAMES.get(current_state, str(current_state))
+
+        # -- compute shared metrics ----------------------------------------
+        atr = self._calculate_atr(candles[-self.config.ATR_PERIOD:])
+        volatility_ok = atr >= self.config.MIN_ATR_THRESHOLD
+        report["metrics"] = {
+            "atr": round(atr, 6),
+            "atr_pips": round(atr / 0.0001, 1),
+            "volatility_ok": volatility_ok,
+            "last_close": candles[-1]["close"],
+            "last_ts": candles[-1]["timestamp"].isoformat(),
+        }
+
+        # -- state-specific analysis (no DB writes) ------------------------
+        if current_state == AMDState.IDLE:
+            report["decisions"].append({
+                "check": "volatility",
+                "result": "PASS" if volatility_ok else "FAIL",
+                "details": {
+                    "atr": round(atr, 6),
+                    "threshold": self.config.MIN_ATR_THRESHOLD,
+                },
+            })
+            if not volatility_ok:
+                return report
+
+            accum = self.detect_accumulation(candles)
+            if accum:
+                report["decisions"].append({
+                    "check": "accumulation",
+                    "result": "FOUND",
+                    "details": {
+                        "range_pts": round(accum["range"], 6),
+                        "range_pips": round(accum["range"] / 0.0001, 1),
+                        "high": round(accum["high"], 6),
+                        "low": round(accum["low"], 6),
+                        "quality_score": accum["quality_score"],
+                        "window_candles": accum["end_idx"] - accum["start_idx"] + 1,
+                        "atr_ratio": round(accum["range"] / atr, 3) if atr else None,
+                    },
+                })
+                report["would_advance_to"] = "ACCUMULATION"
+            else:
+                report["decisions"].append({
+                    "check": "accumulation",
+                    "result": "NOT_FOUND",
+                    "details": {
+                        "reason": (
+                            "No window of 5-20 candles had range < 50% ATR, "
+                            "directional bias < 30%, and 2+ boundary touches each side"
+                        ),
+                    },
+                })
+
+        elif current_state == AMDState.ACCUMULATION:
+            accum_data = state_data.get("data", {}).get("accumulation", {})
+            report["metrics"]["saved_accum_high"] = accum_data.get("high")
+            report["metrics"]["saved_accum_low"] = accum_data.get("low")
+
+            if not accum_data:
+                report["error"] = "State is ACCUMULATION but saved accumulation data is missing"
+                return report
+
+            broken = self._is_accumulation_broken(candles, accum_data)
+            report["decisions"].append({
+                "check": "accumulation_still_valid",
+                "result": "FAIL" if broken else "PASS",
+                "details": {
+                    "last_close": candles[-1]["close"],
+                    "accum_high": accum_data.get("high"),
+                    "accum_low": accum_data.get("low"),
+                },
+            })
+            if broken:
+                report["would_advance_to"] = "RESET (accumulation broken)"
+                return report
+
+            sweep = self.detect_sweep(candles, accum_data["high"], accum_data["low"])
+            if sweep:
+                report["decisions"].append({
+                    "check": "sweep",
+                    "result": "FOUND",
+                    "details": {
+                        "direction": sweep["direction"],
+                        "level": round(sweep["level"], 6),
+                        "wick_pct": round(sweep["wick_pct"], 1),
+                        "strength": round(sweep["strength"], 1),
+                        "min_wick_threshold_pct": self.config.MIN_WICK_PERCENTAGE,
+                    },
+                })
+                report["would_advance_to"] = "SWEEP_DETECTED"
+            else:
+                last = candles[-1]
+                report["decisions"].append({
+                    "check": "sweep",
+                    "result": "NOT_FOUND",
+                    "details": {
+                        "last_high": last["high"],
+                        "last_low": last["low"],
+                        "last_close": last["close"],
+                        "accum_high": accum_data.get("high"),
+                        "accum_low": accum_data.get("low"),
+                        "reason": "Last candle did not break accum range with wick >= 40%",
+                    },
+                })
+
+        elif current_state == AMDState.SWEEP_DETECTED:
+            saved = state_data.get("data", {})
+            sweep_data = saved.get("sweep", {})
+            sweep_idx = saved.get("sweep_candle_idx", 0)
+            candles_since_sweep = len(candles) - 1 - sweep_idx
+
+            report["metrics"]["candles_since_sweep"] = candles_since_sweep
+            report["metrics"]["sweep_timeout"] = self.config.MAX_SWEEP_TO_DISPLACEMENT_CANDLES
+
+            if candles_since_sweep > self.config.MAX_SWEEP_TO_DISPLACEMENT_CANDLES:
+                report["decisions"].append({
+                    "check": "sweep_timeout",
+                    "result": "TIMED_OUT",
+                    "details": {
+                        "candles_since_sweep": candles_since_sweep,
+                        "max_allowed": self.config.MAX_SWEEP_TO_DISPLACEMENT_CANDLES,
+                    },
+                })
+                report["would_advance_to"] = "RESET (displacement timeout)"
+                return report
+
+            disp = self.detect_displacement(candles, sweep_data.get("direction", "bullish"))
+            if disp:
+                avg_body = sum(
+                    abs(c["close"] - c["open"])
+                    for c in candles[-(self.config.BODY_LOOKBACK + 1):-1]
+                ) / self.config.BODY_LOOKBACK
+                report["decisions"].append({
+                    "check": "displacement",
+                    "result": "FOUND",
+                    "details": {
+                        "body_size": round(disp["body_size"], 6),
+                        "body_pips": round(disp["body_size"] / 0.0001, 1),
+                        "vs_avg_body": round(disp["vs_avg_body"], 2),
+                        "vs_atr": round(disp["vs_atr"], 2),
+                        "quality": round(disp["quality"], 1),
+                        "avg_body_reference": round(avg_body, 6),
+                        "threshold_body": self.config.DISPLACEMENT_BODY_MULTIPLIER,
+                        "threshold_atr": self.config.DISPLACEMENT_ATR_MULTIPLIER,
+                    },
+                })
+                report["would_advance_to"] = "DISPLACEMENT_CONFIRMED"
+            else:
+                last = candles[-1]
+                body = abs(last["close"] - last["open"])
+                avg_body = sum(
+                    abs(c["close"] - c["open"])
+                    for c in candles[-(self.config.BODY_LOOKBACK + 1):-1]
+                ) / self.config.BODY_LOOKBACK
+                report["decisions"].append({
+                    "check": "displacement",
+                    "result": "NOT_FOUND",
+                    "details": {
+                        "last_body_pips": round(body / 0.0001, 1),
+                        "avg_body_pips": round(avg_body / 0.0001, 1),
+                        "body_ratio": round(body / avg_body, 2) if avg_body else None,
+                        "need_body_ratio_gte": self.config.DISPLACEMENT_BODY_MULTIPLIER,
+                        "need_atr_ratio_gte": self.config.DISPLACEMENT_ATR_MULTIPLIER,
+                        "sweep_direction": sweep_data.get("direction"),
+                    },
+                })
+
+        elif current_state == AMDState.DISPLACEMENT_CONFIRMED:
+            saved = state_data.get("data", {})
+            disp_data = saved.get("displacement", {})
+            sweep_data = saved.get("sweep", {})
+            displacement_idx = disp_data.get("candle_idx", 0)
+            candles_since_disp = len(candles) - 1 - displacement_idx
+
+            report["metrics"]["candles_since_displacement"] = candles_since_disp
+            report["metrics"]["ifvg_timeout"] = self.config.MAX_DISPLACEMENT_TO_IFVG_CANDLES
+
+            if candles_since_disp > self.config.MAX_DISPLACEMENT_TO_IFVG_CANDLES:
+                report["decisions"].append({
+                    "check": "ifvg_timeout",
+                    "result": "TIMED_OUT",
+                    "details": {
+                        "candles_since_displacement": candles_since_disp,
+                        "max_allowed": self.config.MAX_DISPLACEMENT_TO_IFVG_CANDLES,
+                    },
+                })
+                report["would_advance_to"] = "RESET (IFVG timeout)"
+                return report
+
+            direction = sweep_data.get("direction", "bullish")
+            ifvg = self.detect_ifvg(candles, displacement_idx, direction)
+            if ifvg:
+                # Compute quality score preview
+                accum_data = saved.get("accumulation", {})
+                quality_score = (
+                    accum_data.get("quality_score", 0) * 0.2
+                    + sweep_data.get("strength", 0) * 0.3
+                    + disp_data.get("quality", 0) * 0.3
+                    + 8.0 * 0.2
+                )
+                report["decisions"].append({
+                    "check": "ifvg",
+                    "result": "FOUND",
+                    "details": {
+                        "gap_high": round(ifvg["gap_high"], 6),
+                        "gap_low": round(ifvg["gap_low"], 6),
+                        "gap_size_pips": round(ifvg["gap_size"] / 0.0001, 1),
+                        "retest_idx": ifvg["retest_idx"],
+                        "min_gap_pips": self.config.IFVG_MIN_GAP_PIPS,
+                    },
+                })
+                report["would_advance_to"] = "ALERT_FIRED"
+                report["alert_preview"] = {
+                    "direction": direction,
+                    "ifvg_range": f"{ifvg['gap_low']:.5f} - {ifvg['gap_high']:.5f}",
+                    "estimated_quality": round(quality_score, 1),
+                }
+            else:
+                report["decisions"].append({
+                    "check": "ifvg",
+                    "result": "NOT_FOUND",
+                    "details": {
+                        "search_start_idx": displacement_idx + 1,
+                        "search_end_idx": min(
+                            len(candles),
+                            displacement_idx + self.config.MAX_DISPLACEMENT_TO_IFVG_CANDLES,
+                        ),
+                        "direction": direction,
+                        "min_gap_pips": self.config.IFVG_MIN_GAP_PIPS,
+                        "retest_window": self.config.IFVG_RETEST_WINDOW_CANDLES,
+                    },
+                })
+
+        return report
 
 
 # Global instance

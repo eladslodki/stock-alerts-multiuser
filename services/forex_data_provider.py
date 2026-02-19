@@ -10,40 +10,104 @@ import requests
 import logging
 import time as _time
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Symbol normalisation
+# Known currency / commodity codes (used for whitelist validation)
+# ---------------------------------------------------------------------------
+
+KNOWN_CURRENCIES: frozenset = frozenset({
+    # G10 / Majors
+    "USD", "EUR", "GBP", "JPY", "CHF", "AUD", "NZD", "CAD",
+    # Other liquid FX
+    "SGD", "HKD", "SEK", "NOK", "DKK", "MXN", "ZAR", "TRY",
+    "PLN", "CZK", "HUF", "INR", "BRL", "KRW", "CNH", "CNY",
+    # Precious metals (ISO 4217 commodity codes)
+    "XAU", "XAG", "XPT", "XPD",
+})
+
+
+# ---------------------------------------------------------------------------
+# Symbol normalisation (public)
+# ---------------------------------------------------------------------------
+
+def normalize_symbol(raw: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Robustly normalize a forex/metal symbol to Twelve Data ``BASE/QUOTE`` format.
+
+    Accepted input formats (all case-insensitive):
+    - ``EURUSD``, ``eurusd``          → ``EUR/USD``
+    - ``XAU-USD``, ``XAU_USD``        → ``XAU/USD``
+    - ``USD JPY``, ``usd jpy``        → ``USD/JPY``
+    - ``EUR/USD``, ``EUR / USD``      → ``EUR/USD``
+
+    Returns
+    -------
+    (normalized, None)   on success, e.g. ("EUR/USD", None)
+    (None, error_msg)    on failure, e.g. (None, "Invalid base currency …")
+    """
+    if not raw or not isinstance(raw, str):
+        return None, "Symbol is required"
+
+    s = raw.upper().strip()
+    if not s:
+        return None, "Symbol is required"
+
+    # --- Step 1: split into base / quote ---
+    if "/" in s:
+        parts = [p.strip() for p in s.split("/", 1)]
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            return None, f"Invalid format '{raw}': use BASE/QUOTE (e.g. EUR/USD)"
+        base, quote = parts[0], parts[1]
+    else:
+        # Remove common separators: dash, underscore, space
+        cleaned = s.replace("-", "").replace("_", "").replace(" ", "")
+        if len(cleaned) != 6:
+            return (
+                None,
+                f"Cannot parse '{raw}': expected 6-char compact (EURUSD) "
+                f"or separated (EUR-USD, EUR_USD, EUR/USD)",
+            )
+        base, quote = cleaned[:3], cleaned[3:]
+
+    # --- Step 2: structural validation ---
+    if not base.isalpha() or len(base) != 3:
+        return None, f"Invalid base currency '{base}': must be exactly 3 letters"
+    if not quote.isalpha() or len(quote) != 3:
+        return None, f"Invalid quote currency '{quote}': must be exactly 3 letters"
+    if base == quote:
+        return None, f"Base and quote currencies cannot be the same ({base})"
+
+    # --- Step 3: whitelist validation ---
+    unknown = [c for c in (base, quote) if c not in KNOWN_CURRENCIES]
+    if unknown:
+        supported = "USD EUR GBP JPY CHF AUD NZD CAD XAU XAG (and others)"
+        return (
+            None,
+            f"Unrecognized currency code(s): {', '.join(unknown)}. "
+            f"Supported: {supported}",
+        )
+
+    return f"{base}/{quote}", None
+
+
+# ---------------------------------------------------------------------------
+# Internal helper kept for backward-compat with existing callers
 # ---------------------------------------------------------------------------
 
 def _normalise_symbol(symbol: str) -> str:
     """
-    Convert compact forex symbols to Twelve Data slash format.
-
-    Examples
-    --------
-    EURUSD  -> EUR/USD
-    XAUUSD  -> XAU/USD
-    GBPJPY  -> GBP/JPY
-    EUR/USD -> EUR/USD  (already normalised – returned as-is)
+    Internal wrapper used by ForexDataProvider.  Delegates to the public
+    ``normalize_symbol`` and falls back to the raw (uppercased) string on
+    parse failure so the API can return a proper error message.
     """
-    symbol = symbol.upper().strip()
-    if "/" in symbol:
-        return symbol
-
-    # Known 6-char forex pairs: split at position 3
-    # Edge-cases with 3-char base (XAU, XAG, BTC, XPD …)
-    THREE_CHAR_BASES = {"XAU", "XAG", "XPT", "XPD", "BTC", "ETH", "LTC"}
-    if len(symbol) == 6:
-        base = symbol[:3]
-        if base in THREE_CHAR_BASES:
-            return f"{base}/{symbol[3:]}"
-        return f"{symbol[:3]}/{symbol[3:]}"
-
-    # Fallback: return unchanged and let the API reject it
-    return symbol
+    normalized, _err = normalize_symbol(symbol)
+    if normalized:
+        return normalized
+    # Fallback: uppercase + strip so the Twelve Data call fails gracefully
+    return symbol.upper().strip()
 
 
 # ---------------------------------------------------------------------------
