@@ -464,9 +464,10 @@ class AlertProcessor:
             detect_and_alert,
             'interval',
             minutes=15,
-            id='forex_amd_detection'
+            id='forex_amd_detection',
+            next_run_time=datetime.now()
         )
-        logger.info("✅ Forex AMD detection scheduled (every 15 min)")
+        logger.info("✅ Forex AMD detection scheduled (every 15 min, first run immediate)")
 
     def start(self):
         """Start the background scheduler"""
