@@ -23,6 +23,11 @@ from typing import Optional, List, Dict, Any
 
 import requests
 
+# Max bytes to download from a single filing document.
+# 10-K filings can be 50-200 MB; 8 MB is enough to capture the key sections
+# while preventing OOM kills in a memory-constrained worker.
+MAX_FILING_BYTES = int(os.getenv("SEC_MAX_FILING_BYTES", str(8 * 1024 * 1024)))
+
 logger = logging.getLogger(__name__)
 
 SEC_USER_AGENT = os.getenv(
@@ -207,7 +212,10 @@ def list_filings(
 # --------------------------------------------------------------------------- #
 def fetch_filing_content(source_url: str) -> Dict[str, str]:
     """
-    Download the primary filing document.
+    Download the primary filing document, capped at MAX_FILING_BYTES.
+
+    Streams the response so that large 10-K filings (50-200 MB) do not
+    load entirely into memory before we can truncate them.
 
     Returns a dict with keys:
         html  – raw HTML string (may be empty)
@@ -219,16 +227,32 @@ def fetch_filing_content(source_url: str) -> Dict[str, str]:
         return {"html": "", "text": ""}
 
     try:
-        resp = _get(source_url, as_json=False, timeout=90)
-    except RuntimeError as exc:
+        resp = _session.get(source_url, timeout=90, stream=True)
+        resp.raise_for_status()
+    except requests.exceptions.RequestException as exc:
         raise RuntimeError(f"Cannot fetch filing document: {exc}") from exc
 
+    # Stream-read with a hard byte cap to prevent OOM
+    byte_chunks = []
+    total = 0
+    for chunk in resp.iter_content(chunk_size=65_536):
+        byte_chunks.append(chunk)
+        total += len(chunk)
+        if total >= MAX_FILING_BYTES:
+            logger.warning(
+                "Filing download truncated at %d bytes (cap: %d): %s",
+                total, MAX_FILING_BYTES, source_url,
+            )
+            break
+    resp.close()
+
+    raw_text = b"".join(byte_chunks).decode("utf-8", errors="replace")
     content_type = resp.headers.get("content-type", "").lower()
 
     if "html" in content_type or re.search(r"\.(htm|html)$", source_url, re.I):
-        return {"html": resp.text, "text": ""}
+        return {"html": raw_text, "text": ""}
     elif "text" in content_type or source_url.endswith(".txt"):
-        return {"html": "", "text": resp.text}
+        return {"html": "", "text": raw_text}
     else:
         # Best-effort: treat as HTML
-        return {"html": resp.text, "text": ""}
+        return {"html": raw_text, "text": ""}

@@ -25,6 +25,10 @@ CHUNK_SIZE    = 3_500   # chars per chunk sent to the map-LLM
 CHUNK_OVERLAP = 400     # overlap between adjacent chunks
 MAX_RELEVANT  = 55_000  # max chars kept after section extraction
 LINES_PER_SECTION = 220 # how many lines to take from each matched section
+# Hard cap on HTML passed to BeautifulSoup: 8 MB of chars.
+# BS4 can use 5-10× the input size in memory; this keeps peak usage bounded
+# even if the upstream streaming cap is bypassed or raised.
+MAX_HTML_PARSE = 8 * 1024 * 1024
 
 
 # ---- section keyword index ------------------------------------------------- #
@@ -67,6 +71,13 @@ def html_to_text(html: str) -> str:
     """Convert an HTML string to clean plain text."""
     if not html:
         return ""
+
+    if len(html) > MAX_HTML_PARSE:
+        logger.warning(
+            "HTML input truncated from %d to %d chars before parsing",
+            len(html), MAX_HTML_PARSE,
+        )
+        html = html[:MAX_HTML_PARSE]
 
     if _BS4:
         soup = BeautifulSoup(html, "html.parser")
