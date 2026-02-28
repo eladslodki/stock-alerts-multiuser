@@ -31,6 +31,17 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login_page'
 
+# ── Fundamentals Reports feature ──────────────────────────────────────────────
+try:
+    from fundamentals_db import init_db as _init_fundamentals_db
+    from fundamentals_routes import fundamentals_bp
+    app.register_blueprint(fundamentals_bp)
+    _init_fundamentals_db()
+    logger.info("Fundamentals Reports feature loaded.")
+except Exception as _fn_err:
+    logger.warning("Fundamentals Reports feature could not be loaded: %s", _fn_err)
+# ─────────────────────────────────────────────────────────────────────────────
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.get_by_id(int(user_id))
