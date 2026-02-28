@@ -196,9 +196,11 @@ async function searchFilings() {
             '<div class="filing-period">הוגש: ' + (f.filed_at || '—') + '</div>' +
           '</div>' +
           '<div class="filing-actions">' +
-            '<button class="btn-sm btn-view" onclick="viewReport(\'' + ticker + '\',\'' + f.filing_id + '\')">צפה</button>' +
-            '<button class="btn-sm btn-gen"  onclick="generateReport(\'' + ticker + '\',\'' + f.filing_id + '\')">ייצר</button>' +
+            '<button class="btn-sm btn-view _view-btn">צפה</button>' +
+            '<button class="btn-sm btn-gen _gen-btn">ייצר</button>' +
           '</div>';
+        card.querySelector('._view-btn').addEventListener('click', function () { viewReport(ticker, f.filing_id); });
+        card.querySelector('._gen-btn').addEventListener('click', function () { generateReport(ticker, f.filing_id); });
         lst.appendChild(card);
       });
     }
