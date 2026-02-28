@@ -112,6 +112,18 @@ _TAB_HTML = """
   </style>
 </head>
 <body>
+<nav class="top-nav wide">
+  <span class="top-nav-brand">📈 PulseAlerts</span>
+  <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
+  <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
+  <a href="/alerts/history" class="top-nav-link">📜 History</a>
+  <a href="/radar" class="top-nav-link">🚨 Radar</a>
+  <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
+  <a href="/forex-amd" class="top-nav-link">🌐 Forex</a>
+  <a href="/fundamentals" class="top-nav-link active">📋 Fundamentals</a>
+  <span class="top-nav-spacer"></span>
+  <button class="top-nav-logout" onclick="logout()">Sign out</button>
+</nav>
 <div class="page-wrap">
   <h1 class="page-title">📊 דוחות פונדמנטליים</h1>
   <p class="page-sub">בחר טיקר וצפה בדוחות SEC 10-K / 10-Q עם ניתוח AI</p>
@@ -232,6 +244,11 @@ function viewReport(ticker, filingId) {
 document.getElementById('ticker-input').addEventListener('keydown', function (e) {
   if (e.key === 'Enter') searchFilings();
 });
+
+async function logout() {
+  await fetch('/api/logout');
+  window.location.href = '/login';
+}
 </script>
 </body>
 </html>
