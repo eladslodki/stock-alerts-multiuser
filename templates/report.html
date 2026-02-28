@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+{#
+  Fundamentals Report — Jinja2 Template
+  ======================================
+  Receives a single `report` variable conforming to ReportData/v1.
+
+  Design tokens are frozen as CSS custom properties.
+  Layout is: sticky cover header  +  two-column body (TOC sidebar | main content).
+
+  Section types rendered:
+    overview              – narrative prose + insights
+    metrics_table         – comparison table with YoY change column
+    segment_bars          – horizontal proportion bars
+    profitability_cards   – metric cards + pure-CSS donut chart
+    cash_flow_timeline    – waterfall-style item list
+    balance_sheet_cards   – two-column assets / liabilities + equity
+    guidance              – narrative + forward-looking bullet list
+    risk_factors          – severity-tagged risk cards
+    management_quotes     – pull-quote cards
+    analyst_takeaways     – rating badge + recommendation cards
+
+  insight.text is rendered with |safe (sanitized server-side by bleach).
+  All other values are auto-escaped by Jinja2.
+#}
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>
+    {{ report.cover.companyName }} — {{ report.cover.filingType }}
+    {% if report.cover.periodEnd %} ({{ report.cover.periodEnd }}){% endif %}
+  </title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* ================================================================
+       DESIGN TOKENS — frozen; change only here
+       ================================================================ */
+    :root {
+      --clr-bg:          #0A0E1A;
+      --clr-surface:     #111827;
+      --clr-surface2:    #1C2333;
+      --clr-border:      #1E2D45;
+      --clr-primary:     #5B7CFF;
+      --clr-primary-dim: rgba(91,124,255,.15);
+      --clr-positive:    #00D084;
+      --clr-positive-dim:rgba(0,208,132,.12);
+      --clr-negative:    #FF4757;
+      --clr-negative-dim:rgba(255,71,87,.12);
+      --clr-warning:     #FFB800;
+      --clr-warning-dim: rgba(255,184,0,.12);
+      --clr-neutral:     #64748B;
+      --clr-text:        #E2E8F0;
+      --clr-text-muted:  #64748B;
+      --clr-text-dim:    #94A3B8;
+
+      --rad-sm:   6px;
+      --rad-md:   10px;
+      --rad-lg:   16px;
+      --rad-xl:   24px;
+
+      --sp-1:  4px;  --sp-2:  8px;  --sp-3:  12px; --sp-4:  16px;
+      --sp-5:  20px; --sp-6:  24px; --sp-8:  32px; --sp-10: 40px;
+      --sp-12: 48px; --sp-16: 64px;
+
+      --font-body:   'Inter', system-ui, sans-serif;
+      --font-mono:   'JetBrains Mono', 'Fira Code', monospace;
+
+      --toc-width:  240px;
+      --header-h:   180px;
+    }
+
+    /* ================================================================
+       RESET & BASE
+       ================================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--clr-bg);
+      color: var(--clr-text);
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    a { color: var(--clr-primary); text-decoration: none; }
+
+    /* ================================================================
+       COVER / HEADER
+       ================================================================ */
+    .report-cover {
+      background: linear-gradient(135deg, #0D1528 0%, #111827 60%, #0A0E1A 100%);
+      border-bottom: 1px solid var(--clr-border);
+      padding: var(--sp-8) var(--sp-8) var(--sp-6);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .cover-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: var(--sp-6);
+      margin-bottom: var(--sp-5);
+      flex-wrap: wrap;
+    }
+
+    .cover-identity { display: flex; align-items: center; gap: var(--sp-4); }
+
+    .cover-ticker {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--clr-primary);
+      letter-spacing: -0.5px;
+    }
+
+    .cover-meta { display: flex; flex-direction: column; gap: 2px; }
+
+    .cover-company {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--clr-text);
+    }
+
+    .cover-subtitle {
+      font-size: 12px;
+      color: var(--clr-text-muted);
+      display: flex;
+      gap: var(--sp-3);
+      align-items: center;
+    }
+
+    .cover-subtitle .sep { color: var(--clr-border); }
+
+    .badge-filing {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      background: var(--clr-primary-dim);
+      color: var(--clr-primary);
+      border: 1px solid rgba(91,124,255,.3);
+      border-radius: var(--rad-sm);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .5px;
+    }
+
+    .cover-generated {
+      font-size: 11px;
+      color: var(--clr-text-muted);
+      text-align: left;
+    }
+
+    /* KPI row */
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: var(--sp-3);
+    }
+
+    .kpi-card {
+      background: var(--clr-surface);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--rad-md);
+      padding: var(--sp-4);
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-1);
+      transition: border-color .2s;
+    }
+
+    .kpi-card:hover { border-color: var(--clr-primary); }
+
+    .kpi-label {
+      font-size: 11px;
+      color: var(--clr-text-muted);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+
+    .kpi-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--clr-text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .kpi-change {
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .kpi-change.pos { color: var(--clr-positive); }
+    .kpi-change.neg { color: var(--clr-negative); }
+
+    /* ================================================================
+       BODY LAYOUT  (TOC + main)
+       ================================================================ */
+    .report-body {
+      display: flex;
+      align-items: flex-start;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: var(--sp-6) var(--sp-6);
+      gap: var(--sp-6);
+    }
+
+    /* ---- TOC sidebar ---- */
+    .toc-sidebar {
+      width: var(--toc-width);
+      flex-shrink: 0;
+      position: sticky;
+      top: calc(var(--header-h) + var(--sp-4));
+      max-height: calc(100vh - var(--header-h) - var(--sp-8));
+      overflow-y: auto;
+      background: var(--clr-surface);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--rad-lg);
+      padding: var(--sp-4);
+      scrollbar-width: thin;
+      scrollbar-color: var(--clr-border) transparent;
+    }
+
+    .toc-header {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--clr-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 0 var(--sp-2) var(--sp-3);
+      border-bottom: 1px solid var(--clr-border);
+      margin-bottom: var(--sp-3);
+    }
+
+    .toc-link {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      padding: var(--sp-2) var(--sp-2);
+      border-radius: var(--rad-sm);
+      color: var(--clr-text-dim);
+      font-size: 13px;
+      transition: background .15s, color .15s;
+      cursor: pointer;
+    }
+
+    .toc-link:hover,
+    .toc-link.active {
+      background: var(--clr-primary-dim);
+      color: var(--clr-primary);
+    }
+
+    .toc-num {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--clr-surface2);
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--clr-text-muted);
+      flex-shrink: 0;
+    }
+
+    .toc-link.active .toc-num {
+      background: var(--clr-primary);
+      color: #fff;
+    }
+
+    /* ---- Main content ---- */
+    .report-main {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-6);
+    }
+
+    /* ================================================================
+       SECTION SHELL
+       ================================================================ */
+    .report-section {
+      background: var(--clr-surface);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--rad-lg);
+      overflow: hidden;
+      scroll-margin-top: calc(var(--header-h) + var(--sp-6));
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      padding: var(--sp-5) var(--sp-6);
+      border-bottom: 1px solid var(--clr-border);
+      background: linear-gradient(90deg, var(--clr-surface2) 0%, var(--clr-surface) 100%);
+    }
+
+    .section-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--clr-primary-dim);
+      border: 1px solid rgba(91,124,255,.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--clr-primary);
+      flex-shrink: 0;
+    }
+
+    .section-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--clr-text);
+    }
+
+    .section-body {
+      padding: var(--sp-6);
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-5);
+    }
+
+    /* ================================================================
+       INSIGHT CHIPS
+       ================================================================ */
+    .insights-row {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-2);
+    }
+
+    .insight-chip {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--sp-2);
+      padding: var(--sp-3) var(--sp-4);
+      border-radius: var(--rad-md);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .insight-chip.fact {
+      background: rgba(100,116,139,.08);
+      border: 1px solid rgba(100,116,139,.2);
+    }
+
+    .insight-chip.analyst {
+      background: var(--clr-primary-dim);
+      border: 1px solid rgba(91,124,255,.25);
+    }
+
+    .insight-badge {
+      flex-shrink: 0;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .5px;
+      padding: 2px 6px;
+      border-radius: var(--rad-sm);
+      margin-top: 2px;
+    }
+
+    .insight-chip.fact    .insight-badge { background: rgba(100,116,139,.3); color: var(--clr-text-dim); }
+    .insight-chip.analyst .insight-badge { background: var(--clr-primary);   color: #fff; }
+
+    .insight-text { color: var(--clr-text-dim); }
+    .insight-chip.analyst .insight-text { color: var(--clr-text); }
+
+    /* allow safe HTML inside insights */
+    .insight-text strong { color: var(--clr-text); font-weight: 600; }
+    .insight-text mark   { background: rgba(255,184,0,.2); color: var(--clr-warning); padding: 0 3px; border-radius: 3px; }
+    .insight-text em     { color: var(--clr-primary); font-style: normal; }
+
+    /* ================================================================
+       s1 — OVERVIEW
+       ================================================================ */
+    .narrative {
+      color: var(--clr-text-dim);
+      line-height: 1.8;
+      font-size: 14px;
+    }
+
+    /* ================================================================
+       s2 — METRICS TABLE
+       ================================================================ */
+    .metrics-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .metrics-table th,
+    .metrics-table td {
+      padding: var(--sp-3) var(--sp-4);
+      text-align: right;
+      border-bottom: 1px solid var(--clr-border);
+      font-size: 13px;
+    }
+
+    .metrics-table th {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--clr-text-muted);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      background: var(--clr-surface2);
+    }
+
+    .metrics-table td:first-child { font-weight: 500; color: var(--clr-text); }
+
+    .metrics-table tr:last-child td { border-bottom: none; }
+
+    .metrics-table tr:hover td { background: rgba(255,255,255,.02); }
+
+    .change-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .change-pill.pos { background: var(--clr-positive-dim); color: var(--clr-positive); }
+    .change-pill.neg { background: var(--clr-negative-dim); color: var(--clr-negative); }
+    .change-pill.neu { background: rgba(100,116,139,.15);   color: var(--clr-text-muted); }
+
+    /* ================================================================
+       s3 — SEGMENT BARS
+       ================================================================ */
+    .segment-list { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+    .segment-row { display: flex; flex-direction: column; gap: var(--sp-1); }
+
+    .segment-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--sp-2);
+    }
+
+    .segment-name  { font-size: 13px; font-weight: 500; color: var(--clr-text); }
+
+    .segment-stats { display: flex; align-items: center; gap: var(--sp-3); }
+
+    .segment-value { font-size: 13px; font-weight: 600; color: var(--clr-text); font-variant-numeric: tabular-nums; }
+
+    .segment-share { font-size: 11px; color: var(--clr-text-muted); }
+
+    .seg-bar-track {
+      height: 8px;
+      background: var(--clr-surface2);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .seg-bar-fill {
+      height: 100%;
+      border-radius: 99px;
+      transition: width .4s ease;
+    }
+
+    /* ================================================================
+       s4 — PROFITABILITY CARDS + DONUT
+       ================================================================ */
+    .profitability-layout {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: var(--sp-6);
+      align-items: start;
+    }
+
+    .prof-cards { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+    .prof-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--sp-4);
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--rad-md);
+    }
+
+    .prof-card-left { display: flex; flex-direction: column; gap: 2px; }
+
+    .prof-card-label { font-size: 12px; color: var(--clr-text-muted); }
+
+    .prof-card-subtext { font-size: 11px; color: var(--clr-text-muted); }
+
+    .prof-card-value {
+      font-size: 22px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .prof-card-value.pos { color: var(--clr-positive); }
+    .prof-card-value.neg { color: var(--clr-negative); }
+
+    /* Donut */
+    .donut-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--sp-4);
+      min-width: 200px;
+    }
+
+    .donut-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--clr-text-muted);
+      text-align: center;
+    }
+
+    .donut-ring {
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      position: relative;
+    }
+
+    .donut-ring::after {
+      content: '';
+      position: absolute;
+      inset: 30px;
+      border-radius: 50%;
+      background: var(--clr-surface);
+    }
+
+    .donut-legend { display: flex; flex-direction: column; gap: var(--sp-2); width: 100%; }
+
+    .donut-legend-item {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      font-size: 11px;
+      color: var(--clr-text-dim);
+    }
+
+    .donut-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .donut-pct { margin-right: auto; font-weight: 600; color: var(--clr-text); }
+
+    /* ================================================================
+       s5 — CASH FLOW TIMELINE
+       ================================================================ */
+    .cf-list { display: flex; flex-direction: column; position: relative; }
+
+    .cf-item {
+      display: grid;
+      grid-template-columns: 32px 1fr auto;
+      align-items: center;
+      gap: var(--sp-3);
+      padding: var(--sp-3) 0;
+      border-bottom: 1px dashed var(--clr-border);
+    }
+
+    .cf-item:last-child { border-bottom: none; }
+
+    .cf-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .cf-icon.pos { background: var(--clr-positive-dim); color: var(--clr-positive); }
+    .cf-icon.neg { background: var(--clr-negative-dim); color: var(--clr-negative); }
+    .cf-icon.neu { background: rgba(100,116,139,.15);   color: var(--clr-text-muted); }
+
+    .cf-label { font-size: 13px; color: var(--clr-text-dim); }
+
+    .cf-value {
+      font-size: 14px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      text-align: left;
+    }
+
+    .cf-value.pos { color: var(--clr-positive); }
+    .cf-value.neg { color: var(--clr-negative); }
+
+    /* ================================================================
+       s6 — BALANCE SHEET CARDS
+       ================================================================ */
+    .bs-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--sp-4);
+    }
+
+    .bs-panel {
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--rad-md);
+      overflow: hidden;
+    }
+
+    .bs-panel-header {
+      padding: var(--sp-3) var(--sp-4);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      border-bottom: 1px solid var(--clr-border);
+    }
+
+    .bs-panel-header.assets     { color: var(--clr-positive); background: var(--clr-positive-dim); }
+    .bs-panel-header.liabilities{ color: var(--clr-negative); background: var(--clr-negative-dim); }
+
+    .bs-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: var(--sp-3) var(--sp-4);
+      border-bottom: 1px solid rgba(255,255,255,.03);
+      font-size: 13px;
+    }
+
+    .bs-row:last-child { border-bottom: none; }
+
+    .bs-row-label { color: var(--clr-text-muted); }
+
+    .bs-row-value { font-weight: 600; color: var(--clr-text); font-variant-numeric: tabular-nums; }
+
+    .bs-equity-bar {
+      grid-column: 1 / -1;
+      background: var(--clr-primary-dim);
+      border: 1px solid rgba(91,124,255,.3);
+      border-radius: var(--rad-md);
+      padding: var(--sp-4);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .bs-equity-label { font-size: 13px; font-weight: 600; color: var(--clr-primary); }
+
+    .bs-equity-value { font-size: 18px; font-weight: 700; color: var(--clr-primary); }
+
+    /* ================================================================
+       s7 — GUIDANCE
+       ================================================================ */
+    .guidance-items { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+    .guidance-item {
+      display: flex;
+      gap: var(--sp-3);
+      padding: var(--sp-4);
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--rad-md);
+      align-items: flex-start;
+    }
+
+    .guidance-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      margin-top: 5px;
+    }
+
+    .guidance-dot.positive { background: var(--clr-positive); }
+    .guidance-dot.negative { background: var(--clr-negative); }
+    .guidance-dot.neutral  { background: var(--clr-neutral); }
+
+    .guidance-topic {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--clr-text-muted);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: 2px;
+    }
+
+    .guidance-statement { font-size: 13px; color: var(--clr-text-dim); }
+
+    /* ================================================================
+       s8 — RISK FACTORS
+       ================================================================ */
+    .risk-list { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+    .risk-card {
+      padding: var(--sp-4);
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--rad-md);
+      display: flex;
+      gap: var(--sp-3);
+      align-items: flex-start;
+    }
+
+    .risk-severity {
+      flex-shrink: 0;
+      padding: 3px 8px;
+      border-radius: var(--rad-sm);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-top: 2px;
+    }
+
+    .risk-severity.high   { background: var(--clr-negative-dim); color: var(--clr-negative); }
+    .risk-severity.medium { background: var(--clr-warning-dim);  color: var(--clr-warning); }
+    .risk-severity.low    { background: rgba(100,116,139,.15);   color: var(--clr-text-muted); }
+
+    .risk-body { flex: 1; }
+
+    .risk-title { font-size: 13px; font-weight: 600; color: var(--clr-text); margin-bottom: var(--sp-1); }
+
+    .risk-desc  { font-size: 12px; color: var(--clr-text-muted); line-height: 1.6; }
+
+    /* ================================================================
+       s9 — MANAGEMENT QUOTES
+       ================================================================ */
+    .quotes-list { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+    .quote-card {
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-border);
+      border-right: 3px solid var(--clr-primary);
+      border-radius: var(--rad-md);
+      padding: var(--sp-5);
+    }
+
+    .quote-text {
+      font-size: 14px;
+      color: var(--clr-text-dim);
+      line-height: 1.8;
+      font-style: italic;
+      margin-bottom: var(--sp-3);
+    }
+
+    .quote-text::before { content: '\201C'; color: var(--clr-primary); font-size: 20px; font-style: normal; }
+    .quote-text::after  { content: '\201D'; color: var(--clr-primary); font-size: 20px; font-style: normal; }
+
+    .quote-attribution {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      font-size: 12px;
+    }
+
+    .quote-role    { font-weight: 600; color: var(--clr-text); }
+    .quote-context { color: var(--clr-text-muted); }
+    .quote-sep     { color: var(--clr-border); }
+
+    /* ================================================================
+       s10 — ANALYST TAKEAWAYS
+       ================================================================ */
+    .rating-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-4);
+      padding: var(--sp-4) var(--sp-5);
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--rad-md);
+    }
+
+    .rating-badge {
+      font-size: 24px;
+      font-weight: 700;
+      padding: var(--sp-2) var(--sp-5);
+      border-radius: var(--rad-md);
+    }
+
+    .rating-badge.buy  { background: var(--clr-positive-dim); color: var(--clr-positive); }
+    .rating-badge.hold { background: var(--clr-warning-dim);  color: var(--clr-warning); }
+    .rating-badge.sell { background: var(--clr-negative-dim); color: var(--clr-negative); }
+
+    .rating-label { font-size: 12px; color: var(--clr-text-muted); }
+    .rating-target { font-size: 18px; font-weight: 700; color: var(--clr-text); }
+
+    .takeaway-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: var(--sp-3);
+    }
+
+    .takeaway-card {
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--rad-md);
+      padding: var(--sp-4);
+    }
+
+    .takeaway-card.positive { border-top: 3px solid var(--clr-positive); }
+    .takeaway-card.negative { border-top: 3px solid var(--clr-negative); }
+    .takeaway-card.neutral  { border-top: 3px solid var(--clr-neutral); }
+
+    .takeaway-label { font-size: 11px; color: var(--clr-text-muted); margin-bottom: var(--sp-1); }
+
+    .takeaway-value { font-size: 16px; font-weight: 700; color: var(--clr-text); margin-bottom: var(--sp-1); }
+
+    .takeaway-subtext { font-size: 12px; color: var(--clr-text-muted); line-height: 1.5; }
+
+    /* ================================================================
+       PRINT UTILITIES
+       ================================================================ */
+    .divider {
+      height: 1px;
+      background: var(--clr-border);
+      margin: var(--sp-4) 0;
+    }
+
+    /* ================================================================
+       RESPONSIVE — collapse TOC on small screens
+       ================================================================ */
+    @media (max-width: 900px) {
+      .report-cover   { position: relative; }
+      .kpi-row        { grid-template-columns: repeat(2, 1fr); }
+      .toc-sidebar    { display: none; }
+      .report-body    { padding: var(--sp-4); }
+      .profitability-layout { grid-template-columns: 1fr; }
+      .bs-layout      { grid-template-columns: 1fr; }
+      .donut-wrapper  { flex-direction: row; min-width: unset; flex-wrap: wrap; }
+    }
+
+    @media (max-width: 600px) {
+      .kpi-row  { grid-template-columns: 1fr 1fr; }
+      .cover-top { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+
+{# ================================================================
+   COVER
+   ================================================================ #}
+<header class="report-cover">
+  <div class="cover-top">
+    <div class="cover-identity">
+      <span class="cover-ticker">{{ report.cover.ticker }}</span>
+      <div class="cover-meta">
+        <span class="cover-company">{{ report.cover.companyName }}</span>
+        <div class="cover-subtitle">
+          <span class="badge-filing">{{ report.cover.filingType }}</span>
+          {% if report.cover.periodEnd %}
+          <span class="sep">|</span>
+          <span>תקופה: {{ report.cover.periodEnd }}</span>
+          {% endif %}
+          {% if report.cover.filedAt %}
+          <span class="sep">|</span>
+          <span>הוגש: {{ report.cover.filedAt }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% if report.generated_at %}
+    <div class="cover-generated">נוצר: {{ report.generated_at[:10] }}</div>
+    {% endif %}
+  </div>
+
+  {% if report.cover.kpis %}
+  <div class="kpi-row">
+    {% for kpi in report.cover.kpis %}
+    <div class="kpi-card">
+      <span class="kpi-label">{{ kpi.label }}</span>
+      <span class="kpi-value">{{ kpi.value }}</span>
+      {% if kpi.change %}
+      <span class="kpi-change {{ 'pos' if kpi.positive else 'neg' }}">
+        {{ kpi.change }}
+      </span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</header>
+
+{# ================================================================
+   BODY — TOC + sections
+   ================================================================ #}
+<div class="report-body">
+
+  {# --- TOC SIDEBAR --- #}
+  {% if report.toc and report.toc.items %}
+  <nav class="toc-sidebar" aria-label="תוכן עניינים">
+    <div class="toc-header">תוכן עניינים</div>
+    {% for item in report.toc.items %}
+    <a class="toc-link" href="#{{ item.id }}">
+      <span class="toc-num">{{ loop.index }}</span>
+      <span>{{ item.title }}</span>
+    </a>
+    {% endfor %}
+  </nav>
+  {% endif %}
+
+  {# --- MAIN CONTENT --- #}
+  <main class="report-main">
+    {% for section in report.sections %}
+    <section id="{{ section.id }}" class="report-section">
+
+      {# Section header #}
+      <div class="section-header">
+        <span class="section-num">{{ loop.index }}</span>
+        <h2 class="section-title">{{ section.title }}</h2>
+      </div>
+
+      <div class="section-body">
+
+        {# ============================================================
+           s1 — OVERVIEW
+           ============================================================ #}
+        {% if section.type == 'overview' %}
+          {% if section.narrative %}
+          <p class="narrative">{{ section.narrative }}</p>
+          {% endif %}
+
+        {# ============================================================
+           s2 — METRICS TABLE
+           ============================================================ #}
+        {% elif section.type == 'metrics_table' %}
+          {% if section.rows %}
+          <table class="metrics-table">
+            <thead>
+              <tr>
+                <th>מדד</th>
+                <th>תקופה נוכחית</th>
+                <th>תקופה קודמת</th>
+                <th>שינוי</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in section.rows %}
+              <tr>
+                <td>{{ row.metric }}</td>
+                <td>{{ row.current }}</td>
+                <td>{{ row.prior if row.prior else '—' }}</td>
+                <td>
+                  {% if row.change %}
+                  <span class="change-pill {{ 'pos' if row.positive else 'neg' }}">
+                    {{ row.change }}
+                  </span>
+                  {% else %}
+                  <span class="change-pill neu">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% endif %}
+
+        {# ============================================================
+           s3 — SEGMENT BARS
+           ============================================================ #}
+        {% elif section.type == 'segment_bars' %}
+          {% if section.segments %}
+          {# Define colours for up to 6 segments #}
+          {% set seg_colors = ['#5B7CFF','#00D084','#FFB800','#FF4757','#A78BFA','#34D399'] %}
+          <div class="segment-list">
+            {% for seg in section.segments %}
+            {% set color = seg_colors[loop.index0 % seg_colors|length] %}
+            <div class="segment-row">
+              <div class="segment-meta">
+                <span class="segment-name">{{ seg.name }}</span>
+                <div class="segment-stats">
+                  <span class="segment-value">{{ seg.value }}</span>
+                  {% if seg.share_pct is not none %}
+                  <span class="segment-share">{{ "%.1f"|format(seg.share_pct) }}%</span>
+                  {% endif %}
+                  {% if seg.change %}
+                  <span class="change-pill {{ 'pos' if seg.positive else 'neg' }} {{ 'neu' if seg.positive is none }}">
+                    {{ seg.change }}
+                  </span>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="seg-bar-track">
+                <div class="seg-bar-fill"
+                     style="width:{{ seg.share_pct if seg.share_pct is not none else 50 }}%;
+                            background:{{ color }};
+                            opacity:.85;">
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+        {# ============================================================
+           s4 — PROFITABILITY CARDS + DONUT
+           ============================================================ #}
+        {% elif section.type == 'profitability_cards' %}
+          <div class="profitability-layout">
+            {# Metric cards #}
+            {% if section.cards %}
+            <div class="prof-cards">
+              {% for card in section.cards %}
+              <div class="prof-card">
+                <div class="prof-card-left">
+                  <span class="prof-card-label">{{ card.label }}</span>
+                  {% if card.subtext %}
+                  <span class="prof-card-subtext">{{ card.subtext }}</span>
+                  {% endif %}
+                </div>
+                <span class="prof-card-value {{ 'pos' if card.positive else 'neg' }}">
+                  {{ card.value }}
+                </span>
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+
+            {# Donut chart #}
+            {% if section.donut and section.donut.items %}
+            {% set donut = section.donut %}
+            <div class="donut-wrapper">
+              {% if donut.title %}
+              <div class="donut-title">{{ donut.title }}</div>
+              {% endif %}
+
+              {# Build conic-gradient from pct values #}
+              {% set ns = namespace(cum=0) %}
+              {% set stops = [] %}
+              {% for item in donut.items %}
+                {% set end = ns.cum + item.pct %}
+                {% set _ = stops.append(item.color ~ ' ' ~ ns.cum|string ~ '% ' ~ end|string ~ '%') %}
+                {% set ns.cum = end %}
+              {% endfor %}
+              <div class="donut-ring"
+                   style="background: conic-gradient({{ stops | join(', ') }});">
+              </div>
+
+              <div class="donut-legend">
+                {% for item in donut.items %}
+                <div class="donut-legend-item">
+                  <span class="donut-dot" style="background:{{ item.color }};"></span>
+                  <span>{{ item.label }}</span>
+                  <span class="donut-pct">{{ "%.1f"|format(item.pct) }}%</span>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+            {% endif %}
+          </div>
+
+        {# ============================================================
+           s5 — CASH FLOW TIMELINE
+           ============================================================ #}
+        {% elif section.type == 'cash_flow_timeline' %}
+          {% if section.items %}
+          <div class="cf-list">
+            {% for item in section.items %}
+            {% if item.positive is not none %}
+              {% if item.positive == true %}{% set cf_class = 'pos' %}
+              {% elif item.positive == false %}{% set cf_class = 'neg' %}
+              {% else %}{% set cf_class = 'neu' %}{% endif %}
+            {% else %}
+              {% set cf_class = 'neu' %}
+            {% endif %}
+            <div class="cf-item">
+              <div class="cf-icon {{ cf_class }}">
+                {{ item.icon if item.icon else ('▲' if item.positive else '▼') }}
+              </div>
+              <span class="cf-label">{{ item.label }}</span>
+              <span class="cf-value {{ cf_class }}">{{ item.value }}</span>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+        {# ============================================================
+           s6 — BALANCE SHEET CARDS
+           ============================================================ #}
+        {% elif section.type == 'balance_sheet_cards' %}
+          <div class="bs-layout">
+            {# Assets #}
+            {% if section.assets %}
+            <div class="bs-panel">
+              <div class="bs-panel-header assets">נכסים</div>
+              {% for row in section.assets %}
+              <div class="bs-row">
+                <span class="bs-row-label">{{ row.label }}</span>
+                <span class="bs-row-value">{{ row.value }}</span>
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+
+            {# Liabilities #}
+            {% if section.liabilities %}
+            <div class="bs-panel">
+              <div class="bs-panel-header liabilities">התחייבויות</div>
+              {% for row in section.liabilities %}
+              <div class="bs-row">
+                <span class="bs-row-label">{{ row.label }}</span>
+                <span class="bs-row-value">{{ row.value }}</span>
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+
+            {# Equity bar spans full width #}
+            {% if section.equity %}
+            <div class="bs-equity-bar">
+              <span class="bs-equity-label">הון עצמי כולל</span>
+              <span class="bs-equity-value">{{ section.equity }}</span>
+            </div>
+            {% endif %}
+          </div>
+
+        {# ============================================================
+           s7 — GUIDANCE
+           ============================================================ #}
+        {% elif section.type == 'guidance' %}
+          {% if section.narrative %}
+          <p class="narrative">{{ section.narrative }}</p>
+          {% endif %}
+
+          {% if section.items %}
+          <div class="guidance-items">
+            {% for item in section.items %}
+            <div class="guidance-item">
+              <span class="guidance-dot {{ item.type if item.type else 'neutral' }}"></span>
+              <div>
+                {% if item.topic %}
+                <div class="guidance-topic">{{ item.topic }}</div>
+                {% endif %}
+                <div class="guidance-statement">{{ item.statement }}</div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+        {# ============================================================
+           s8 — RISK FACTORS
+           ============================================================ #}
+        {% elif section.type == 'risk_factors' %}
+          {% if section.risks %}
+          <div class="risk-list">
+            {% for risk in section.risks %}
+            <div class="risk-card">
+              <span class="risk-severity {{ risk.severity if risk.severity else 'medium' }}">
+                {{ risk.severity if risk.severity else 'medium' }}
+              </span>
+              <div class="risk-body">
+                <div class="risk-title">{{ risk.title }}</div>
+                {% if risk.description %}
+                <div class="risk-desc">{{ risk.description }}</div>
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+        {# ============================================================
+           s9 — MANAGEMENT QUOTES
+           ============================================================ #}
+        {% elif section.type == 'management_quotes' %}
+          {% if section.quotes %}
+          <div class="quotes-list">
+            {% for q in section.quotes %}
+            <div class="quote-card">
+              <p class="quote-text">{{ q.quote }}</p>
+              <div class="quote-attribution">
+                {% if q.role %}
+                <span class="quote-role">{{ q.role }}</span>
+                {% endif %}
+                {% if q.context %}
+                <span class="quote-sep">—</span>
+                <span class="quote-context">{{ q.context }}</span>
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+        {# ============================================================
+           s10 — ANALYST TAKEAWAYS
+           ============================================================ #}
+        {% elif section.type == 'analyst_takeaways' %}
+          {# Rating row #}
+          {% if section.rating or section.ratingHebrew %}
+          {% set rating_lower = (section.rating or 'hold')|lower %}
+          <div class="rating-row">
+            <div class="rating-badge {{ rating_lower }}">
+              {{ section.ratingHebrew if section.ratingHebrew else section.rating }}
+            </div>
+            <div>
+              <div class="rating-label">המלצה</div>
+              {% if section.priceTarget %}
+              <div class="rating-target">יעד מחיר: {{ section.priceTarget }}</div>
+              {% endif %}
+            </div>
+          </div>
+          {% endif %}
+
+          {# Takeaway cards #}
+          {% if section.cards %}
+          <div class="takeaway-cards">
+            {% for card in section.cards %}
+            <div class="takeaway-card {{ card.type if card.type else 'neutral' }}">
+              <div class="takeaway-label">{{ card.label }}</div>
+              <div class="takeaway-value">{{ card.value }}</div>
+              {% if card.subtext %}
+              <div class="takeaway-subtext">{{ card.subtext }}</div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+        {% endif %}
+        {# end section type switch #}
+
+        {# ============================================================
+           INSIGHTS  — rendered for every section type
+           ============================================================ #}
+        {% if section.insights %}
+        <div class="insights-row">
+          {% for insight in section.insights %}
+          <div class="insight-chip {{ 'analyst' if insight.isAnalyst else 'fact' }}">
+            <span class="insight-badge">
+              {{ 'ניתוח' if insight.isAnalyst else 'עובדה' }}
+            </span>
+            {# insight.text is already bleach-sanitized server-side #}
+            <span class="insight-text">{{ insight.text | safe }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+      </div>{# /section-body #}
+    </section>
+    {% endfor %}
+  </main>
+</div>
+
+{# TOC scroll-spy (lightweight, no external deps) #}
+<script>
+(function () {
+  var links = document.querySelectorAll('.toc-link');
+  var sections = Array.from(links).map(function (l) {
+    return document.getElementById(l.getAttribute('href').slice(1));
+  }).filter(Boolean);
+
+  function onScroll() {
+    var scrollY = window.scrollY + 220;
+    var active = sections[0];
+    sections.forEach(function (s) { if (s.offsetTop <= scrollY) active = s; });
+    links.forEach(function (l) {
+      l.classList.toggle('active', l.getAttribute('href') === '#' + active.id);
+    });
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
+</script>
+</body>
+</html>
