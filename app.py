@@ -53,273 +53,41 @@ def health():
 def login_page():
     html = """
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
-        <title>Login - Stock Alerts</title>
+        <title>Sign In — Stock Alerts</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="stylesheet" href="/static/css/theme.css">
         <style>
-            body { font-family: Arial; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                   min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; }
-            .container { background: white; padding: 40px; border-radius: 10px; max-width: 400px; width: 90%; }
-            h1 { text-align: center; color: #333; }
-            input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
-            button { width: 100%; padding: 12px; background: #667eea; color: white; border: none; 
-                     border-radius: 5px; cursor: pointer; font-size: 16px; }
-            button:hover { background: #5568d3; }
-            .message {
-                padding: 12px 16px;
-                border-radius: 10px;
-                margin-top: 15px;
-                font-size: 14px;
-                font-weight: 500;
-            }
-            .success {
-                background: rgba(0,255,163,0.1);
-                border: 1px solid rgba(0,255,163,0.2);
-                color: #00FFA3;
-            }
-            
-            .error {
-                background: rgba(255,107,107,0.1);
-                border: 1px solid rgba(255,107,107,0.2);
-                color: #FF6B6B;
-            }
-            .link { text-align: center; margin-top: 20px; }
-            /* Premium Fintech Additions */
-
-            /* Alert Type Toggle */
-            .alert-type-toggle {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 8px;
-                margin-bottom: 24px;
-                background: rgba(255,255,255,0.05);
-                border-radius: 12px;
-                padding: 4px;
-            }
-            
-            .toggle-option {
-                height: 44px;
-                border-radius: 10px;
-                background: transparent;
-                border: none;
-                color: #8B92A8;
-                font-size: 14px;
-                font-weight: 600;
-                box-shadow: none;
-                transition: all 0.3s ease;
-                margin: 0;
-                width: auto;
-            }
-            
-            .toggle-option.active {
-                background: #5B7CFF;
-                color: #FFFFFF;
-                box-shadow: 0 2px 12px rgba(91,124,255,0.3);
-            }
-            
-            /* MA Selector */
-            .ma-selector {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 8px;
-            }
-            
-            .ma-option {
-                height: 56px;
-                background: rgba(255,255,255,0.05);
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 12px;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                gap: 2px;
-                cursor: pointer;
-                transition: all 0.3s ease;
-            }
-            
-            .ma-option.active {
-                background: rgba(0,217,255,0.1);
-                border-color: #00D9FF;
-                box-shadow: 0 0 0 4px rgba(0,217,255,0.1);
-            }
-            
-            .ma-label {
-                font-size: 15px;
-                font-weight: 700;
-                color: #FFFFFF;
-            }
-            
-            .ma-sublabel {
-                font-size: 11px;
-                font-weight: 500;
-                color: #8B92A8;
-                text-transform: none;
-            }
-            
-            .ma-option.active .ma-sublabel {
-                color: #00D9FF;
-            }
-            
-            /* Financial Values */
-            .financial-value,
-            .price-value,
-            .summary-value {
-                font-variant-numeric: tabular-nums;
-                letter-spacing: -0.3px;
-            }
-            
-            /* Alert Cards */
-            .alert-card {
-                background: rgba(255,255,255,0.05);
-                backdrop-filter: blur(20px);
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 16px;
-                padding: 20px;
-                margin-bottom: 12px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-                position: relative;
-                overflow: hidden;
-            }
-            
-            .alert-card::before {
-                content: '';
-                position: absolute;
-                top: 0;
-                left: 0;
-                width: 4px;
-                height: 100%;
-                background: linear-gradient(180deg, #5B7CFF 0%, #7B5CFF 100%);
-            }
-            
-            .alert-card.ma-alert::before {
-                background: linear-gradient(180deg, #00D9FF 0%, #0099FF 100%);
-            }
-            
-            /* Status Badges */
-            .status-badge {
-                font-size: 11px;
-                font-weight: 600;
-                padding: 4px 8px;
-                border-radius: 6px;
-                letter-spacing: 0.3px;
-            }
-            
-            .status-badge.price {
-                background: rgba(91,124,255,0.15);
-                color: #5B7CFF;
-                border: 1px solid rgba(91,124,255,0.25);
-            }
-            
-            .status-badge.ma {
-                background: rgba(0,217,255,0.15);
-                color: #00D9FF;
-                border: 1px solid rgba(0,217,255,0.25);
-            }
-            
-            .status-indicator {
-                font-size: 12px;
-                font-weight: 600;
-                padding: 6px 10px;
-                border-radius: 8px;
-                display: inline-flex;
-                align-items: center;
-                gap: 4px;
-            }
-            
-            .status-indicator.above {
-                background: rgba(0,255,163,0.1);
-                color: #00FFA3;
-                border: 1px solid rgba(0,255,163,0.2);
-            }
-            
-            .status-indicator.below {
-                background: rgba(255,107,107,0.1);
-                color: #FF6B6B;
-                border: 1px solid rgba(255,107,107,0.2);
-            }
-            
-            .status-dot {
-                width: 6px;
-                height: 6px;
-                border-radius: 50%;
-                background: currentColor;
-                box-shadow: 0 0 8px currentColor;
-            }
-            
-            /* Price Display */
-            .price-item {
-                margin-bottom: 12px;
-            }
-            
-            .price-label {
-                font-size: 12px;
-                font-weight: 500;
-                color: #8B92A8;
-                margin-bottom: 4px;
-                text-transform: none;
-            }
-            
-            .price-value {
-                font-size: 20px;
-                font-weight: 600;
-                font-variant-numeric: tabular-nums;
-                letter-spacing: -0.3px;
-            }
-            
-            .price-change {
-                font-size: 13px;
-                font-weight: 600;
-                margin-top: 4px;
-            }
-            
-            .price-change.positive {
-                color: #00FFA3;
-            }
-            
-            .price-change.negative {
-                color: #FF6B6B;
-            }
-            
-            /* Autocomplete Dropdown */
-            .autocomplete-dropdown {
-                background: rgba(14,20,32,0.98);
-                backdrop-filter: blur(20px);
-                border: 1px solid rgba(91,124,255,0.3);
-                border-radius: 12px;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.4);
-            }
-            
-            .autocomplete-item:hover {
-                background: rgba(91,124,255,0.1);
-            }
-            
-            .ticker-symbol {
-                font-weight: 700;
-                color: #5B7CFF;
-            }
-            
-            .ticker-name {
-                color: #8B92A8;
-            }
-            
-            .ticker-type {
-                background: rgba(91,124,255,0.15);
-                color: #5B7CFF;
-                font-weight: 600;
-            }
+            /* page-specific overrides */
+            .auth-screen { background: none; }
         </style>
     </head>
     <body>
-        <div class="container">
-            <h1>📊 Stock Alerts</h1>
-            <div id="message"></div>
-            <input type="email" id="email" placeholder="Email" />
-            <input type="password" id="password" placeholder="Password" />
-            <button onclick="login()">Login</button>
-            <div class="link">
-                Don't have an account? <a href="/register">Register</a>
+        <div class="auth-screen">
+            <div class="auth-card">
+                <div class="auth-logo">📈</div>
+                <h1 class="auth-title">Welcome back</h1>
+                <p class="auth-subtitle">Sign in to your trading dashboard</p>
+
+                <div class="form-group">
+                    <label class="form-label">Email</label>
+                    <input type="email" id="email" placeholder="you@example.com" autocomplete="email" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" />
+                </div>
+
+                <div id="message"></div>
+
+                <button class="btn btn-primary" onclick="login()" style="margin-top: 12px;">
+                    Sign In
+                </button>
+
+                <div class="auth-footer">
+                    No account? <a href="/register">Create one</a>
+                </div>
             </div>
         </div>
         <script>
@@ -327,20 +95,19 @@ def login_page():
                 const email = document.getElementById('email').value;
                 const password = document.getElementById('password').value;
                 const msgEl = document.getElementById('message');
-                
                 const res = await fetch('/api/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email, password })
                 });
-                
                 const data = await res.json();
                 if (data.success) {
                     window.location.href = '/dashboard';
                 } else {
-                    msgEl.innerHTML = '<div class="message error">' + data.error + '</div>';
+                    msgEl.innerHTML = '<div class="message message-error">' + (data.error || 'Login failed') + '</div>';
                 }
             }
+            document.addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
         </script>
     </body>
     </html>
@@ -351,290 +118,39 @@ def login_page():
 def register_page():
     html = """
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
-        <title>Register - Stock Alerts</title>
+        <title>Create Account — Stock Alerts</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="stylesheet" href="/static/css/theme.css">
         <style>
-            body { font-family: Arial; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                   min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; }
-            .container { background: white; padding: 40px; border-radius: 10px; max-width: 400px; width: 90%; }
-            h1 { text-align: center; color: #333; }
-            input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
-            button {
-                width: 100%;
-                padding: 14px;
-                background: linear-gradient(135deg, #5B7CFF 0%, #7B5CFF 100%);
-                color: white;
-                border: none;
-                border-radius: 12px;
-                font-weight: 700;
-                cursor: pointer;
-                font-size: 15px;
-                transition: all 0.2s ease;
-                margin-top: 10px;
-                box-shadow: 0 4px 24px rgba(91,124,255,0.35), 0 2px 8px rgba(0,0,0,0.2);
-            }
-            
-            button:hover {
-                box-shadow: 0 6px 32px rgba(91,124,255,0.45), 0 2px 8px rgba(0,0,0,0.3);
-            }
-            
-            button:active {
-                transform: scale(0.98);
-            }
-            .message {
-                padding: 12px 16px;
-                border-radius: 10px;
-                margin-top: 15px;
-                font-size: 14px;
-                font-weight: 500;
-            }
-            .success {
-                background: rgba(0,255,163,0.1);
-                border: 1px solid rgba(0,255,163,0.2);
-                color: #00FFA3;
-            }
-            
-            .error {
-                background: rgba(255,107,107,0.1);
-                border: 1px solid rgba(255,107,107,0.2);
-                color: #FF6B6B;
-            }
-            .link { text-align: center; margin-top: 20px; }
-                        /* Alert Type Toggle */
-            .alert-type-toggle {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 8px;
-                margin-bottom: 24px;
-                background: rgba(255,255,255,0.05);
-                border-radius: 12px;
-                padding: 4px;
-            }
-            
-            .toggle-option {
-                height: 44px;
-                border-radius: 10px;
-                background: transparent;
-                border: none;
-                color: #8B92A8;
-                font-size: 14px;
-                font-weight: 600;
-                box-shadow: none;
-                transition: all 0.3s ease;
-                margin: 0;
-                width: auto;
-            }
-            
-            .toggle-option.active {
-                background: #5B7CFF;
-                color: #FFFFFF;
-                box-shadow: 0 2px 12px rgba(91,124,255,0.3);
-            }
-            
-            /* MA Selector */
-            .ma-selector {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 8px;
-            }
-            
-            .ma-option {
-                height: 56px;
-                background: rgba(255,255,255,0.05);
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 12px;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                gap: 2px;
-                cursor: pointer;
-                transition: all 0.3s ease;
-            }
-            
-            .ma-option.active {
-                background: rgba(0,217,255,0.1);
-                border-color: #00D9FF;
-                box-shadow: 0 0 0 4px rgba(0,217,255,0.1);
-            }
-            
-            .ma-label {
-                font-size: 15px;
-                font-weight: 700;
-                color: #FFFFFF;
-            }
-            
-            .ma-sublabel {
-                font-size: 11px;
-                font-weight: 500;
-                color: #8B92A8;
-                text-transform: none;
-            }
-            
-            .ma-option.active .ma-sublabel {
-                color: #00D9FF;
-            }
-            
-            /* Financial Values */
-            .financial-value,
-            .price-value,
-            .summary-value {
-                font-variant-numeric: tabular-nums;
-                letter-spacing: -0.3px;
-            }
-            
-            /* Alert Cards */
-            .alert-card {
-                background: rgba(255,255,255,0.05);
-                backdrop-filter: blur(20px);
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 16px;
-                padding: 20px;
-                margin-bottom: 12px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-                position: relative;
-                overflow: hidden;
-            }
-            
-            .alert-card::before {
-                content: '';
-                position: absolute;
-                top: 0;
-                left: 0;
-                width: 4px;
-                height: 100%;
-                background: linear-gradient(180deg, #5B7CFF 0%, #7B5CFF 100%);
-            }
-            
-            .alert-card.ma-alert::before {
-                background: linear-gradient(180deg, #00D9FF 0%, #0099FF 100%);
-            }
-            
-            /* Status Badges */
-            .status-badge {
-                font-size: 11px;
-                font-weight: 600;
-                padding: 4px 8px;
-                border-radius: 6px;
-                letter-spacing: 0.3px;
-            }
-            
-            .status-badge.price {
-                background: rgba(91,124,255,0.15);
-                color: #5B7CFF;
-                border: 1px solid rgba(91,124,255,0.25);
-            }
-            
-            .status-badge.ma {
-                background: rgba(0,217,255,0.15);
-                color: #00D9FF;
-                border: 1px solid rgba(0,217,255,0.25);
-            }
-            
-            .status-indicator {
-                font-size: 12px;
-                font-weight: 600;
-                padding: 6px 10px;
-                border-radius: 8px;
-                display: inline-flex;
-                align-items: center;
-                gap: 4px;
-            }
-            
-            .status-indicator.above {
-                background: rgba(0,255,163,0.1);
-                color: #00FFA3;
-                border: 1px solid rgba(0,255,163,0.2);
-            }
-            
-            .status-indicator.below {
-                background: rgba(255,107,107,0.1);
-                color: #FF6B6B;
-                border: 1px solid rgba(255,107,107,0.2);
-            }
-            
-            .status-dot {
-                width: 6px;
-                height: 6px;
-                border-radius: 50%;
-                background: currentColor;
-                box-shadow: 0 0 8px currentColor;
-            }
-            
-            /* Price Display */
-            .price-item {
-                margin-bottom: 12px;
-            }
-            
-            .price-label {
-                font-size: 12px;
-                font-weight: 500;
-                color: #8B92A8;
-                margin-bottom: 4px;
-                text-transform: none;
-            }
-            
-            .price-value {
-                font-size: 20px;
-                font-weight: 600;
-                font-variant-numeric: tabular-nums;
-                letter-spacing: -0.3px;
-            }
-            
-            .price-change {
-                font-size: 13px;
-                font-weight: 600;
-                margin-top: 4px;
-            }
-            
-            .price-change.positive {
-                color: #00FFA3;
-            }
-            
-            .price-change.negative {
-                color: #FF6B6B;
-            }
-            
-            /* Autocomplete Dropdown */
-            .autocomplete-dropdown {
-                background: rgba(14,20,32,0.98);
-                backdrop-filter: blur(20px);
-                border: 1px solid rgba(91,124,255,0.3);
-                border-radius: 12px;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.4);
-            }
-            
-            .autocomplete-item:hover {
-                background: rgba(91,124,255,0.1);
-            }
-            
-            .ticker-symbol {
-                font-weight: 700;
-                color: #5B7CFF;
-            }
-            
-            .ticker-name {
-                color: #8B92A8;
-            }
-            
-            .ticker-type {
-                background: rgba(91,124,255,0.15);
-                color: #5B7CFF;
-                font-weight: 600;
-            }
         </style>
     </head>
     <body>
-        <div class="container">
-            <h1>Create Account</h1>
-            <div id="message"></div>
-            <input type="email" id="email" placeholder="Email" />
-            <input type="password" id="password" placeholder="Password (min 6 chars)" />
-            <button onclick="register()">Register</button>
-            <div class="link">
-                Already have an account? <a href="/login">Login</a>
+        <div class="auth-screen">
+            <div class="auth-card">
+                <div class="auth-logo">📈</div>
+                <h1 class="auth-title">Create account</h1>
+                <p class="auth-subtitle">Start tracking your trades today</p>
+
+                <div class="form-group">
+                    <label class="form-label">Email</label>
+                    <input type="email" id="email" placeholder="you@example.com" autocomplete="email" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input type="password" id="password" placeholder="Min 6 characters" autocomplete="new-password" />
+                </div>
+
+                <div id="message"></div>
+
+                <button class="btn btn-primary" onclick="register()" style="margin-top: 12px;">
+                    Create Account
+                </button>
+
+                <div class="auth-footer">
+                    Already have an account? <a href="/login">Sign in</a>
+                </div>
             </div>
         </div>
         <script>
@@ -642,26 +158,24 @@ def register_page():
                 const email = document.getElementById('email').value;
                 const password = document.getElementById('password').value;
                 const msgEl = document.getElementById('message');
-                
                 if (password.length < 6) {
-                    msgEl.innerHTML = '<div class="message error">Password must be at least 6 characters</div>';
+                    msgEl.innerHTML = '<div class="message message-error">Password must be at least 6 characters</div>';
                     return;
                 }
-                
                 const res = await fetch('/api/register', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email, password })
                 });
-                
                 const data = await res.json();
                 if (data.success) {
-                    msgEl.innerHTML = '<div class="message success">Registration successful! Redirecting to login...</div>';
+                    msgEl.innerHTML = '<div class="message message-success">Account created! Redirecting to login...</div>';
                     setTimeout(() => window.location.href = '/login', 2000);
                 } else {
-                    msgEl.innerHTML = '<div class="message error">' + data.error + '</div>';
+                    msgEl.innerHTML = '<div class="message message-error">' + (data.error || 'Registration failed') + '</div>';
                 }
             }
+            document.addEventListener('keydown', e => { if (e.key === 'Enter') register(); });
         </script>
     </body>
     </html>
@@ -673,192 +187,28 @@ def register_page():
 def dashboard():
     html = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Dashboard - Stock Alerts</title>
+    <title>Dashboard — Stock Alerts</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/css/theme.css">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
-            background: #0A0E1A;
-            background-image: radial-gradient(circle at 50% 0%, #1a1f2e 0%, #0a0e1a 50%);
-            min-height: 100vh;
-            color: #FFFFFF;
-            padding: 20px;
-            -webkit-font-smoothing: antialiased;
-        }
-
+        /* Dashboard-specific styles */
+        .main-content { max-width: 1400px; margin: 0 auto; padding: 80px 20px 40px; }
+        .dash-grid { display: grid; grid-template-columns: 360px 1fr; gap: 24px; }
+        @media (max-width: 900px) { .dash-grid { grid-template-columns: 1fr; } }
+        /* Legacy aliases kept for JS compatibility */
         .container { max-width: 1400px; margin: 0 auto; }
 
-        .nav {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 30px;
-            padding: 15px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 10px;
-        }
-
-        .nav a {
-            color: #8B92A8;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 14px;
-            transition: color 0.3s;
-        }
-        
-        .nav a:hover { color: #5B7CFF; }
-
-        .header {
-            padding: 0;
-            margin-bottom: 30px;
-        }
-
-        .header h1 {
-            font-size: 32px;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            margin-bottom: 24px;
-        }
-
-        .header p {
-            opacity: 0.9;
-            font-size: 14px;
-        }
-
-        .logout-btn:hover {
-            background: rgba(255,255,255,0.3);
-            transform: translateY(-2px);
-        }
-
+        /* old nav/grid overrides removed — all via theme.css */
         .grid {
             display: grid;
             grid-template-columns: 1fr 2fr;
             gap: 25px;
             margin-bottom: 30px;
         }
-
-        @media (max-width: 968px) {
-            .grid { grid-template-columns: 1fr; }
-        }
-
-        .card {
-            background: rgba(255,255,255,0.05);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 16px;
-            padding: 25px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-            margin-bottom: 20px;
-        }
-
-        .card h2 {
-            font-size: 20px;
-            font-weight: 700;
-            margin-bottom: 20px;
-            letter-spacing: -0.3px;
-            color: #FFFFFF;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #8B92A8;
-            font-size: 13px;
-            letter-spacing: 0.2px;
-            text-transform: uppercase;
-        }
-
-        input, select, textarea {
-            width: 100%;
-            height: 56px;
-            padding: 0 16px;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 12px;
-            color: #FFFFFF;
-            font-size: 16px;
-            font-weight: 500;
-            font-family: inherit;
-            transition: all 0.3s ease;
-        }
-        
-        textarea {
-            height: auto;
-            min-height: 80px;
-            padding: 16px;
-        }
-            
-        input:focus, select:focus, textarea:focus {
-            outline: none;
-            border-color: #5B7CFF;
-            background: rgba(91,124,255,0.05);
-            box-shadow: 0 0 0 4px rgba(91,124,255,0.1);
-        }
-        
-        input::placeholder {
-            color: #4A5568;
-        }
-            
-        input::placeholder {
-                color: rgba(255,255,255,0.4);
-        }
-            
-        .autocomplete-container {
-                position: relative;
-                margin-bottom: 15px;
-        }
-
-       .autocomplete-dropdown {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            max-height: 300px;
-            overflow-y: auto;
-            background: rgba(30,30,46,0.98);
-            border: 1px solid rgba(100,255,218,0.3);
-            border-radius: 8px;
-            margin-top: 5px;
-            z-index: 1000;
-            display: none;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.4);
-        }
-            
-        .autocomplete-item {
-            padding: 12px 15px;
-            cursor: pointer;
-            transition: background 0.2s;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-         }
-            
-        .autocomplete-item:hover {
-            background: rgba(100,255,218,0.1);
-         }
-            
-        .ticker-symbol {
-            font-weight: 600;
-            color: #64ffda;
-         }
-            
-         .ticker-name {
-            font-size: 13px;
-            color: #888;
-            margin-left: 10px;
-         }
-            
-        .ticker-type {
-            float: right;
-            font-size: 11px;
-            padding: 2px 8px;
-            background: rgba(100,255,218,0.2);
-            border-radius: 4px;
-            color: #64ffda;
-        }
-            
+        @media (max-width: 968px) { .grid { grid-template-columns: 1fr; } }
+        /* keep legacy card/button/input styles for JS-generated HTML */
         button {
             width: 100%;
             padding: 14px;
@@ -887,393 +237,86 @@ def dashboard():
             cursor: not-allowed;
         }
             
-        .message {
-            padding: 12px 16px;
-            border-radius: 10px;
-            margin-top: 15px;
-            font-size: 14px;
-            font-weight: 500;
-        }
-        .success {
-            background: rgba(0,255,163,0.1);
-            border: 1px solid rgba(0,255,163,0.2);
-            color: #00FFA3;
-        }
-        
-        .error {
-            background: rgba(255,107,107,0.1);
-            border: 1px solid rgba(255,107,107,0.2);
-            color: #FF6B6B;
-        }
-        
-        .alert-item {
-            background: rgba(255,255,255,0.03);
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 15px;
-            border-left: 4px solid #64ffda;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            transition: all 0.3s;
-        }
-        
-        .alert-item:hover {
-            background: rgba(255,255,255,0.06);
-            transform: translateX(5px);
-        }
-        
-        .alert-info {
-            flex: 1;
-        }
-        
-        .alert-ticker {
-            font-size: 24px;
-            font-weight: 700;
-            color: #64ffda;
-            margin-bottom: 8px;
-        }
-        
-        .alert-direction {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 5px;
-            font-size: 12px;
-            font-weight: 600;
-            margin-left: 10px;
-        }
-        
-        .direction-up {
-            background: rgba(76,175,80,0.2);
-            color: #4caf50;
-        }
-        
-        .direction-down {
-            background: rgba(244,67,54,0.2);
-            color: #f44336;
-        }
-        
-        .alert-prices {
-            font-size: 14px;
-            color: #aaa;
-            margin-top: 5px;
-        }
-        
-        .current-price {
-            color: #fff;
-            font-weight: 600;
-        }
-        
-        .target-price {
-            color: #ffc107;
-            font-weight: 600;
-        }
-        
-        .alert-status {
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            font-weight: 600;
-            margin-right: 15px;
-        }
-        
-        .status-active {
-            background: rgba(33,150,243,0.2);
-            color: #2196f3;
-        }
-        
-        .status-triggered {
-            background: rgba(255,193,7,0.2);
-            color: #ffc107;
-        }
-        
-        .delete-btn {
-            padding: 10px 20px;
-            background: rgba(244,67,54,0.2);
-            border: 1px solid rgba(244,67,54,0.3);
-            color: #f44336;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 13px;
-            transition: all 0.3s;
-            width: auto;
-            margin: 0;
-        }
-        
-        .delete-btn:hover {
-            background: rgba(244,67,54,0.3);
-        }
-        
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #64ffda;
-            font-size: 16px;
-        }
-        
-        .empty {
-            text-align: center;
-            padding: 40px;
-            color: #666;
-        }
-        
-        .spinner {
-            border: 3px solid rgba(91,124,255,0.1);
-            border-top: 3px solid #5B7CFF;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-                    /* Alert Type Toggle */
-            .alert-type-toggle {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 8px;
-                margin-bottom: 24px;
-                background: rgba(255,255,255,0.05);
-                border-radius: 12px;
-                padding: 4px;
-            }
-            
-            .toggle-option {
-                height: 44px;
-                border-radius: 10px;
-                background: transparent;
-                border: none;
-                color: #8B92A8;
-                font-size: 14px;
-                font-weight: 600;
-                box-shadow: none;
-                transition: all 0.3s ease;
-                margin: 0;
-                width: auto;
-            }
-            
-            .toggle-option.active {
-                background: #5B7CFF;
-                color: #FFFFFF;
-                box-shadow: 0 2px 12px rgba(91,124,255,0.3);
-            }
-            
-            /* MA Selector */
-            .ma-selector {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 8px;
-            }
-            
-            .ma-option {
-                height: 56px;
-                background: rgba(255,255,255,0.05);
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 12px;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                gap: 2px;
-                cursor: pointer;
-                transition: all 0.3s ease;
-            }
-            
-            .ma-option.active {
-                background: rgba(0,217,255,0.1);
-                border-color: #00D9FF;
-                box-shadow: 0 0 0 4px rgba(0,217,255,0.1);
-            }
-            
-            .ma-label {
-                font-size: 15px;
-                font-weight: 700;
-                color: #FFFFFF;
-            }
-            
-            .ma-sublabel {
-                font-size: 11px;
-                font-weight: 500;
-                color: #8B92A8;
-                text-transform: none;
-            }
-            
-            .ma-option.active .ma-sublabel {
-                color: #00D9FF;
-            }
-            
-            /* Financial Values */
-            .financial-value,
-            .price-value,
-            .summary-value {
-                font-variant-numeric: tabular-nums;
-                letter-spacing: -0.3px;
-            }
-            
-            /* Alert Cards */
-            .alert-card {
-                background: rgba(255,255,255,0.05);
-                backdrop-filter: blur(20px);
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 16px;
-                padding: 20px;
-                margin-bottom: 12px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-                position: relative;
-                overflow: hidden;
-            }
-            
-            .alert-card::before {
-                content: '';
-                position: absolute;
-                top: 0;
-                left: 0;
-                width: 4px;
-                height: 100%;
-                background: linear-gradient(180deg, #5B7CFF 0%, #7B5CFF 100%);
-            }
-            
-            .alert-card.ma-alert::before {
-                background: linear-gradient(180deg, #00D9FF 0%, #0099FF 100%);
-            }
-            
-            /* Status Badges */
-            .status-badge {
-                font-size: 11px;
-                font-weight: 600;
-                padding: 4px 8px;
-                border-radius: 6px;
-                letter-spacing: 0.3px;
-            }
-            
-            .status-badge.price {
-                background: rgba(91,124,255,0.15);
-                color: #5B7CFF;
-                border: 1px solid rgba(91,124,255,0.25);
-            }
-            
-            .status-badge.ma {
-                background: rgba(0,217,255,0.15);
-                color: #00D9FF;
-                border: 1px solid rgba(0,217,255,0.25);
-            }
-            
-            .status-indicator {
-                font-size: 12px;
-                font-weight: 600;
-                padding: 6px 10px;
-                border-radius: 8px;
-                display: inline-flex;
-                align-items: center;
-                gap: 4px;
-            }
-            
-            .status-indicator.above {
-                background: rgba(0,255,163,0.1);
-                color: #00FFA3;
-                border: 1px solid rgba(0,255,163,0.2);
-            }
-            
-            .status-indicator.below {
-                background: rgba(255,107,107,0.1);
-                color: #FF6B6B;
-                border: 1px solid rgba(255,107,107,0.2);
-            }
-            
-            .status-dot {
-                width: 6px;
-                height: 6px;
-                border-radius: 50%;
-                background: currentColor;
-                box-shadow: 0 0 8px currentColor;
-            }
-            
-            /* Price Display */
-            .price-item {
-                margin-bottom: 12px;
-            }
-            
-            .price-label {
-                font-size: 12px;
-                font-weight: 500;
-                color: #8B92A8;
-                margin-bottom: 4px;
-                text-transform: none;
-            }
-            
-            .price-value {
-                font-size: 20px;
-                font-weight: 600;
-                font-variant-numeric: tabular-nums;
-                letter-spacing: -0.3px;
-            }
-            
-            .price-change {
-                font-size: 13px;
-                font-weight: 600;
-                margin-top: 4px;
-            }
-            
-            .price-change.positive {
-                color: #00FFA3;
-            }
-            
-            .price-change.negative {
-                color: #FF6B6B;
-            }
-            
-            /* Autocomplete Dropdown */
-            .autocomplete-dropdown {
-                background: rgba(14,20,32,0.98);
-                backdrop-filter: blur(20px);
-                border: 1px solid rgba(91,124,255,0.3);
-                border-radius: 12px;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.4);
-            }
-            
-            .autocomplete-item:hover {
-                background: rgba(91,124,255,0.1);
-            }
-            
-            .ticker-symbol {
-                font-weight: 700;
-                color: #5B7CFF;
-            }
-            
-            .ticker-name {
-                color: #8B92A8;
-            }
-            
-            .ticker-type {
-                background: rgba(91,124,255,0.15);
-                color: #5B7CFF;
-                font-weight: 600;
-            }
+        /* Semantic colours for JS-built alert cards */
+        .message { padding: 12px 16px; border-radius: 10px; margin-top: 15px; font-size: 14px; font-weight: 500; }
+        .success { background: rgba(0,208,132,0.12); border: 1px solid rgba(0,208,132,0.25); color: #00D084; }
+        .error   { background: rgba(255,71,87,0.12);  border: 1px solid rgba(255,71,87,0.25);  color: #FF4757; }
+        .alert-card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); position: relative; overflow: hidden; }
+        .alert-card::before { content: ''; position: absolute; top: 0; left: 0; width: 3px; height: 100%; background: linear-gradient(180deg, #5B7CFF 0%, #7B5CFF 100%); }
+        .alert-card.ma-alert::before { background: linear-gradient(180deg, #00D9FF 0%, #0099FF 100%); }
+        .alert-item { background: rgba(255,255,255,0.03); padding: 18px; border-radius: 12px; margin-bottom: 12px; border-left: 3px solid #5B7CFF; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s; }
+        .alert-item:hover { background: rgba(255,255,255,0.06); }
+        .alert-ticker { font-size: 18px; font-weight: 700; color: #5B7CFF; margin-bottom: 4px; }
+        .alert-prices { font-size: 13px; color: #8B92A8; margin-top: 4px; }
+        .current-price { color: #fff; font-weight: 600; }
+        .target-price  { color: #FFB800; font-weight: 600; }
+        .delete-btn { padding: 8px 16px; background: rgba(255,71,87,0.12); border: 1px solid rgba(255,71,87,0.25); color: #FF4757; border-radius: 8px; cursor: pointer; font-size: 13px; transition: background 0.2s; width: auto; margin: 0; }
+        .delete-btn:hover { background: rgba(255,71,87,0.2); }
+        .status-badge { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 99px; letter-spacing: 0.3px; }
+        .status-badge.price { background: rgba(91,124,255,0.15); color: #5B7CFF; border: 1px solid rgba(91,124,255,0.25); }
+        .status-badge.ma    { background: rgba(0,217,255,0.12);  color: #00D9FF; border: 1px solid rgba(0,217,255,0.2); }
+        .loading { text-align: center; padding: 40px; color: #8B92A8; }
+        .empty   { text-align: center; padding: 40px; color: #4A5268; }
+        .spinner { border: 3px solid rgba(91,124,255,0.1); border-top: 3px solid #5B7CFF; border-radius: 50%; width: 32px; height: 32px; animation: spin 0.7s linear infinite; margin: 16px auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .btn-secondary { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #8B92A8; border-radius: 10px; padding: 10px 16px; font-size: 14px; cursor: pointer; transition: background 0.2s; width: auto; margin: 0; }
+        .btn-secondary:hover { background: rgba(255,255,255,0.08); color: #fff; }
+        .card { background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 24px; margin-bottom: 20px; }
+        .card h2 { font-size: 18px; font-weight: 700; margin-bottom: 18px; letter-spacing: -0.3px; }
+        label { display: block; margin-bottom: 6px; font-weight: 600; color: #8B92A8; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase; }
+        input, select, textarea { width: 100%; height: 50px; padding: 0 14px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: #fff; font-size: 15px; font-weight: 500; font-family: inherit; transition: border-color 0.2s, box-shadow 0.2s; }
+        textarea { height: auto; min-height: 80px; padding: 12px 14px; }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: #5B7CFF; box-shadow: 0 0 0 3px rgba(91,124,255,0.2); background: rgba(91,124,255,0.06); }
+        input::placeholder { color: rgba(255,255,255,0.3); }
+        .autocomplete-container { position: relative; margin-bottom: 16px; }
+        .autocomplete-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; max-height: 280px; overflow-y: auto; background: rgba(10,14,26,0.97); border: 1px solid rgba(91,124,255,0.35); border-radius: 12px; z-index: 200; display: none; box-shadow: 0 10px 40px rgba(0,0,0,0.45); }
+        .autocomplete-item { padding: 11px 14px; cursor: pointer; transition: background 0.15s; border-bottom: 1px solid rgba(255,255,255,0.04); display: flex; align-items: center; justify-content: space-between; }
+        .autocomplete-item:last-child { border-bottom: none; }
+        .autocomplete-item:hover { background: rgba(91,124,255,0.1); }
+        .ticker-symbol { font-weight: 700; color: #5B7CFF; font-size: 14px; }
+        .ticker-name   { font-size: 12px; color: #8B92A8; margin-left: 8px; }
+        .ticker-type   { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 99px; background: rgba(91,124,255,0.12); color: #5B7CFF; }
+        .alert-type-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 4px; margin-bottom: 20px; }
+        .toggle-option { height: 40px; border-radius: 8px; background: transparent; border: none; color: #8B92A8; font-size: 13px; font-weight: 600; transition: all 0.2s; margin: 0; width: auto; cursor: pointer; }
+        .toggle-option.active { background: #5B7CFF; color: #fff; box-shadow: 0 2px 10px rgba(91,124,255,0.3); }
+        .ma-selector { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+        .ma-option { height: 56px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer; transition: all 0.2s; }
+        .ma-option:hover { background: rgba(255,255,255,0.08); }
+        .ma-option.active { background: rgba(0,217,255,0.08); border-color: #00D9FF; box-shadow: 0 0 0 3px rgba(0,217,255,0.15); }
+        .ma-label { font-size: 15px; font-weight: 700; color: #fff; }
+        .ma-sublabel { font-size: 11px; color: #8B92A8; }
+        .ma-option.active .ma-sublabel { color: #00D9FF; }
+        .status-indicator { font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 8px; display: inline-flex; align-items: center; gap: 4px; }
+        .status-indicator.above { background: rgba(0,208,132,0.1); color: #00D084; border: 1px solid rgba(0,208,132,0.2); }
+        .status-indicator.below { background: rgba(255,71,87,0.1);  color: #FF4757; border: 1px solid rgba(255,71,87,0.2); }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
+        .price-label { font-size: 12px; color: #8B92A8; margin-bottom: 4px; }
+        .price-value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .price-change { font-size: 13px; font-weight: 600; margin-top: 4px; }
+        .price-change.positive { color: #00D084; }
+        .price-change.negative { color: #FF4757; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="nav">
-            <a href="/dashboard">📊 Stock Alerts</a>
-            <a href="/alerts/history">📜 History</a>
-            <a href="/radar">🚨 Radar</a>
-            <a href="/bitcoin-scanner">₿ Bitcoin Scanner</a>
-            <a href="/forex-amd">🌐 Forex AMD</a>
-            <a href="/portfolio">💼 Portfolio</a>
-            <a href="#" onclick="logout()">Logout</a>
+    <!-- ── Sticky Top Nav ── -->
+    <nav class="top-nav wide">
+        <span class="top-nav-brand">📈 PulseAlerts</span>
+        <a href="/dashboard" class="top-nav-link active">📊 Alerts</a>
+        <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
+        <a href="/alerts/history" class="top-nav-link">📜 History</a>
+        <a href="/radar" class="top-nav-link">🚨 Radar</a>
+        <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
+        <a href="/forex-amd" class="top-nav-link">🌐 Forex</a>
+        <span class="top-nav-spacer"></span>
+        <button class="top-nav-logout" onclick="logout()">Sign out</button>
+    </nav>
+
+    <div class="main-content">
+        <div style="margin-bottom: 28px;">
+            <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 4px;">Good evening, trader</p>
+            <h1 style="font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">Dashboard</h1>
         </div>
-       
-        <div class="header" style="padding: 56px 0 24px; position: relative;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <div style="font-size: 15px; font-weight: 500; color: #8B92A8; letter-spacing: -0.2px;">Good Evening</div>
-            </div>
-            <h1 style="font-size: 32px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 24px;">Dashboard</h1>
-        </div>
-        
+
         <div class="grid">
             <div class="card">
     <h2>Create New Alert</h2>
@@ -1372,7 +415,7 @@ def dashboard():
                 </div>
             </div>
         </div>
-    </div>
+    </div><!-- /.main-content -->
     
     <script>
         let allTickers = [];
@@ -2373,20 +1416,25 @@ def bitcoin_scanner_page():
                 color: #5B7CFF;
                 font-weight: 600;
             }
+        <link rel="stylesheet" href="/static/css/theme.css">
         </style>
     </head>
     <body>
-        <div class="container">
-            <div class="nav">
-                <a href="/dashboard">📊 Stock Alerts</a>
-                <a href="/bitcoin-scanner">₿ Bitcoin Scanner</a>
-                <a href="/portfolio">💼 Portfolio</a>
-                <a href="#" onclick="logout()">Logout</a>
-            </div>
-
-            <div class="header" style="padding: 56px 0 24px;">
-                <div style="font-size: 15px; font-weight: 500; color: #8B92A8; margin-bottom: 8px;">Blockchain Analysis</div>
-                <h1 style="font-size: 32px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 24px;">Bitcoin Scanner</h1>
+        <nav class="top-nav wide">
+            <span class="top-nav-brand">📈 PulseAlerts</span>
+            <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
+            <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
+            <a href="/alerts/history" class="top-nav-link">📜 History</a>
+            <a href="/radar" class="top-nav-link">🚨 Radar</a>
+            <a href="/bitcoin-scanner" class="top-nav-link active">₿ Bitcoin</a>
+            <a href="/forex-amd" class="top-nav-link">🌐 Forex</a>
+            <span class="top-nav-spacer"></span>
+            <button class="top-nav-logout" onclick="logout()">Sign out</button>
+        </nav>
+        <div class="container" style="max-width:1200px;margin:0 auto;padding:80px 20px 40px">
+            <div style="margin-bottom:24px">
+                <h1 style="font-size: 28px; font-weight: 800; letter-spacing:-0.5px; margin-bottom:4px;">₿ Bitcoin Scanner</h1>
+                <p style="font-size:14px;color:var(--text-secondary)">Blockchain transaction analysis</p>
             </div>
 
             <div class="card">
@@ -2584,27 +1632,16 @@ def portfolio_page():
     """Portfolio management page"""
     html = """
     <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Portfolio Management - Stock Alerts</title>
+    <title>Portfolio — Stock Alerts</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/css/theme.css">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
-            background: #0A0E1A;
-            background-image: radial-gradient(circle at 50% 0%, #1a1f2e 0%, #0a0e1a 50%);
-            min-height: 100vh;
-            color: #FFFFFF;
-            padding: 20px;
-            -webkit-font-smoothing: antialiased;
-        }
-        
+        /* Portfolio-specific styles */
+        .main-content { max-width: 1600px; margin: 0 auto; padding: 80px 20px 40px; }
         .container { max-width: 1600px; margin: 0 auto; }
-        
-        /* Navigation */
-        .nav {
+        .nav-placeholder { /* replaced by top-nav */
             display: flex;
             gap: 20px;
             margin-bottom: 30px;
@@ -2613,706 +1650,96 @@ def portfolio_page():
             border-radius: 10px;
             flex-wrap: wrap;
         }
-        .nav a {
-            color: #8B92A8;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 14px;
-            transition: color 0.3s;
-        }
-        
-        .nav a:hover { color: #5B7CFF; }
-        
-        /* Header */
-        .header {
-            padding: 0;
-            margin-bottom: 30px;
-        }
-        
-        /* Card Styles */
-        .card {
-            background: rgba(255,255,255,0.05);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 16px;
-            padding: 25px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-            margin-bottom: 20px;
-        }
-        
-        .card h2 {
-            font-size: 20px;
-            font-weight: 700;
-            margin-bottom: 20px;
-            letter-spacing: -0.3px;
-            color: #FFFFFF;
-        }
-        
-        .card h3 {
-            color: #64ffda;
-            margin-bottom: 15px;
-            font-size: 18px;
-        }
-        
-        /* Portfolio Summary Grid */
-        .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .summary-item {
-            background: rgba(100,255,218,0.1);
-            padding: 20px;
-            border-radius: 10px;
-            border: 1px solid rgba(100,255,218,0.2);
-        }
-        
-        .summary-label {
-            font-size: 13px;
-            color: rgba(255,255,255,0.7);
-            margin-bottom: 8px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        
-        .summary-value {
-            font-size: 28px;
-            font-weight: 700;
-            color: #64ffda;
-        }
-        
-        .summary-value.positive { color: #4caf50; }
-        .summary-value.negative { color: #f44336; }
-        
-        /* Statistics */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-        }
-        
-        .stat-item {
-            background: rgba(255,255,255,0.05);
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-        }
-        
-        .stat-label {
-            font-size: 12px;
-            color: rgba(255,255,255,0.6);
-            margin-bottom: 5px;
-        }
-        
-        .stat-value {
-            font-size: 20px;
-            font-weight: 600;
-            color: #fff;
-        }
-        
-        /* Form Styles */
-        .form-group {
-            margin-bottom: 15px;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #8B92A8;
-            font-size: 13px;
-            letter-spacing: 0.2px;
-            text-transform: uppercase;
-        }
-        
-        input, select, textarea {
-            width: 100%;
-            padding: 12px 15px;
-            background: rgba(255,255,255,0.1);
-            border: 1px solid rgba(255,255,255,0.2);
-            border-radius: 8px;
-            color: #fff;
-            font-size: 15px;
-            font-family: inherit;
-        }
-        
-        textarea {
-            min-height: 80px;
-            resize: vertical;
-        }
-        
-        input:focus, select:focus, textarea:focus {
-            outline: none;
-            border-color: #64ffda;
-            background: rgba(255,255,255,0.15);
-        }
-        
-        input:disabled {
-            background: rgba(255,255,255,0.05);
-            color: rgba(255,255,255,0.5);
-            cursor: not-allowed;
-        }
-        
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-        }
-        
-        .calculated-value {
-            background: rgba(100,255,218,0.1);
-            padding: 12px 15px;
-            border-radius: 8px;
-            border: 1px solid rgba(100,255,218,0.2);
-            color: #64ffda;
-            font-weight: 600;
-            font-size: 15px;
-        }
-        
-        /* Buttons */
-        button {
-            padding: 12px 24px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
-            font-size: 15px;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 20px rgba(102,126,234,0.4);
-        }
-        
-        button:active {
-            transform: translateY(0);
-        }
-        
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-        
-        .btn-delete {
-            background: linear-gradient(135deg, #f44336 0%, #e91e63 100%);
-            padding: 8px 16px;
-            font-size: 13px;
-        }
-        
-        .btn-edit {
-            background: linear-gradient(135deg, #ff9800 0%, #ff5722 100%);
-            padding: 8px 16px;
-            font-size: 13px;
-            margin-right: 8px;
-        }
-        
-        .btn-close {
-            background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
-            padding: 8px 16px;
-            font-size: 13px;
-            margin-right: 8px;
-        }
-        
-        .btn-secondary {
-            background: rgba(255,255,255,0.1);
-            margin-left: 10px;
-        }
-        
-        /* Table Styles */
-        .table-container {
-            overflow-x: auto;
-            margin-top: 20px;
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            min-width: 1000px;
-        }
-        
-        th, td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-        }
-        
-        th {
-            background: rgba(100,255,218,0.1);
-            color: #64ffda;
-            font-weight: 600;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
-        
-        tbody tr {
-            transition: background 0.2s;
-        }
-        
-        tbody tr:hover {
-            background: rgba(255,255,255,0.05);
-        }
-        
-        .ticker-cell {
-            font-weight: 700;
-            color: #64ffda;
-            font-size: 15px;
-        }
-        
-        .positive {
-            color: #4caf50;
-            font-weight: 600;
-        }
-        
-        .negative {
-            color: #f44336;
-            font-weight: 600;
-        }
-        
-        .neutral {
-            color: #ffc107;
-        }
-        
-        /* Warning Badges */
-        .warning-badge {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 600;
-            margin: 2px;
-            text-transform: uppercase;
-        }
-        
-        .warning-badge.error {
-            background: rgba(244,67,54,0.3);
-            border: 1px solid #f44336;
-            color: #ff5252;
-        }
-        
-        .warning-badge.warning {
-            background: rgba(255,193,7,0.3);
-            border: 1px solid #ffc107;
-            color: #ffd54f;
-        }
-        
-        /* Status Badges */
-        .status-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
-        }
-        
-        .status-badge.open {
-            background: rgba(76,175,80,0.2);
-            color: #4caf50;
-        }
-        
-        .status-badge.closed {
-            background: rgba(158,158,158,0.2);
-            color: #9e9e9e;
-        }
-        
-        /* Messages */
-        .message {
-            padding: 12px 16px;
-            border-radius: 10px;
-            margin-top: 15px;
-            font-size: 14px;
-            font-weight: 500;
-        }
-        .success {
-            background: rgba(0,255,163,0.1);
-            border: 1px solid rgba(0,255,163,0.2);
-            color: #00FFA3;
-        }
-        
-        .error {
-            background: rgba(255,107,107,0.1);
-            border: 1px solid rgba(255,107,107,0.2);
-            color: #FF6B6B;
-        }
-        
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        
-        .success {
-            background: rgba(76,175,80,0.2);
-            border: 1px solid rgba(76,175,80,0.4);
-            color: #4caf50;
-        }
-        
-        .spinner {
-            border: 3px solid rgba(100,255,218,0.1);
-            border-top: 3px solid #64ffda;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        /* Modal */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.8);
-            backdrop-filter: blur(5px);
-        }
-        
+        /* ── Portfolio page compact CSS (preserves all JS-used classnames) ── */
+        .card { background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 24px; margin-bottom: 20px; }
+        .card h2 { font-size: 18px; font-weight: 700; margin-bottom: 16px; letter-spacing: -0.3px; }
+        label { display: block; margin-bottom: 6px; font-weight: 600; color: #8B92A8; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase; }
+        input, select, textarea { width: 100%; height: 48px; padding: 0 14px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: #fff; font-size: 14px; font-family: inherit; transition: border-color 0.2s, box-shadow 0.2s; }
+        textarea { height: auto; min-height: 80px; padding: 12px 14px; }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: #5B7CFF; box-shadow: 0 0 0 3px rgba(91,124,255,0.18); background: rgba(91,124,255,0.05); }
+        input:disabled { opacity: 0.45; cursor: not-allowed; }
+        button { padding: 12px 24px; background: linear-gradient(135deg, #5B7CFF 0%, #7B5CFF 100%); color: #fff; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-size: 14px; font-family: inherit; transition: box-shadow 0.2s; }
+        button:hover { box-shadow: 0 6px 24px rgba(91,124,255,0.4); }
+        button:active { transform: scale(0.98); }
+        button:disabled { opacity: 0.45; cursor: not-allowed; }
+        .btn-secondary { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #8B92A8; border-radius: 10px; padding: 10px 18px; font-size: 13px; cursor: pointer; transition: background 0.2s; margin: 0; }
+        .btn-secondary:hover { background: rgba(255,255,255,0.08); color: #fff; }
+        .form-group { margin-bottom: 14px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+        .calculated-value { height: 48px; padding: 0 14px; background: rgba(0,208,132,0.07); border: 1px solid rgba(0,208,132,0.18); border-radius: 10px; color: #00D084; font-weight: 700; font-size: 14px; display: flex; align-items: center; }
+        .info-text { font-size: 12px; color: #4A5268; margin-top: 4px; }
+        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .summary-item { background: rgba(255,255,255,0.04); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.07); }
+        .summary-label { font-size: 11px; color: #8B92A8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .summary-value { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; color: #5B7CFF; }
+        .summary-value.positive { color: #00D084; }
+        .summary-value.negative { color: #FF4757; }
+        .summary-value.neutral  { color: #FFB800; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+        .stat-item { background: rgba(255,255,255,0.04); padding: 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.06); text-align: center; }
+        .stat-label { font-size: 11px; color: #8B92A8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
+        .stat-value { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .stat-value.positive { color: #00D084; }
+        .stat-value.negative { color: #FF4757; }
+        .table-container { overflow-x: auto; border-radius: 10px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); white-space: nowrap; }
+        th { background: rgba(91,124,255,0.08); color: #8B92A8; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; position: sticky; top: 0; z-index: 1; }
+        tbody tr { transition: background 0.15s; }
+        tbody tr:hover { background: rgba(255,255,255,0.04); }
+        .ticker-cell { font-weight: 700; color: #5B7CFF; font-size: 14px; }
+        .positive { color: #00D084; font-weight: 600; }
+        .negative { color: #FF4757; font-weight: 600; }
+        .neutral  { color: #FFB800; }
+        .warning-badge { display: inline-block; padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 700; margin: 2px; text-transform: uppercase; }
+        .warning-badge.error   { background: rgba(255,71,87,0.15);  border: 1px solid rgba(255,71,87,0.3);  color: #FF4757; }
+        .warning-badge.warning { background: rgba(255,184,0,0.15);  border: 1px solid rgba(255,184,0,0.3);  color: #FFB800; }
+        .status-badge { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 11px; font-weight: 700; }
+        .status-badge.open   { background: rgba(0,208,132,0.12); color: #00D084; border: 1px solid rgba(0,208,132,0.25); }
+        .status-badge.closed { background: rgba(139,146,168,0.12); color: #8B92A8; border: 1px solid rgba(139,146,168,0.2); }
+        .message { padding: 12px 16px; border-radius: 10px; margin: 12px 0; font-size: 14px; font-weight: 500; }
+        .success { background: rgba(0,208,132,0.1); border: 1px solid rgba(0,208,132,0.25); color: #00D084; }
+        .error   { background: rgba(255,71,87,0.1); border: 1px solid rgba(255,71,87,0.25); color: #FF4757; }
+        .spinner { border: 3px solid rgba(91,124,255,0.1); border-top: 3px solid #5B7CFF; border-radius: 50%; width: 32px; height: 32px; animation: spin 0.7s linear infinite; margin: 16px auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading { text-align: center; padding: 32px; color: #8B92A8; }
+        .empty   { text-align: center; padding: 48px; color: #4A5268; }
+        .modal { display: none; position: fixed; z-index: 1000; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(6px); }
         .modal.active { display: flex; align-items: center; justify-content: center; }
-        
-        .modal-content {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            padding: 30px;
-            border-radius: 15px;
-            max-width: 500px;
-            width: 90%;
-            border: 1px solid rgba(100,255,218,0.2);
-        }
-        
-        .modal-header {
-            margin-bottom: 20px;
-        }
-        
-        .modal-header h3 {
-            color: #64ffda;
-        }
-        
-        /* Responsive */
-        @media (max-width: 768px) {
-            .summary-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            
-            .grid {
-                grid-template-columns: 1fr;
-            }
-            
-            table {
-                font-size: 12px;
-            }
-            
-            th, td {
-                padding: 8px 4px;
-            }
-            
-            .summary-value {
-                font-size: 22px;
-            }
-        }
-        
-        /* Tabs */
-        .tabs {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            border-bottom: 2px solid rgba(255,255,255,0.1);
-        }
-        
-        .tab {
-            padding: 12px 24px;
-            background: transparent;
-            border: none;
-            color: rgba(255,255,255,0.6);
-            cursor: pointer;
-            border-bottom: 2px solid transparent;
-            margin-bottom: -2px;
-            transition: all 0.3s;
-        }
-        
-        .tab.active {
-            color: #64ffda;
-            border-bottom-color: #64ffda;
-        }
-        
-        .tab:hover {
-            color: #fff;
-        }
-        
-        .tab-content {
-            display: none;
-        }
-        
-        .tab-content.active {
-            display: block;
-        }
-        
-        .info-text {
-            font-size: 12px;
-            color: rgba(255,255,255,0.6);
-            margin-top: 5px;
-        }
-                    /* Alert Type Toggle */
-            .alert-type-toggle {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 8px;
-                margin-bottom: 24px;
-                background: rgba(255,255,255,0.05);
-                border-radius: 12px;
-                padding: 4px;
-            }
-            
-            .toggle-option {
-                height: 44px;
-                border-radius: 10px;
-                background: transparent;
-                border: none;
-                color: #8B92A8;
-                font-size: 14px;
-                font-weight: 600;
-                box-shadow: none;
-                transition: all 0.3s ease;
-                margin: 0;
-                width: auto;
-            }
-            
-            .toggle-option.active {
-                background: #5B7CFF;
-                color: #FFFFFF;
-                box-shadow: 0 2px 12px rgba(91,124,255,0.3);
-            }
-            
-            /* MA Selector */
-            .ma-selector {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 8px;
-            }
-            
-            .ma-option {
-                height: 56px;
-                background: rgba(255,255,255,0.05);
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 12px;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                gap: 2px;
-                cursor: pointer;
-                transition: all 0.3s ease;
-            }
-            
-            .ma-option.active {
-                background: rgba(0,217,255,0.1);
-                border-color: #00D9FF;
-                box-shadow: 0 0 0 4px rgba(0,217,255,0.1);
-            }
-            
-            .ma-label {
-                font-size: 15px;
-                font-weight: 700;
-                color: #FFFFFF;
-            }
-            
-            .ma-sublabel {
-                font-size: 11px;
-                font-weight: 500;
-                color: #8B92A8;
-                text-transform: none;
-            }
-            
-            .ma-option.active .ma-sublabel {
-                color: #00D9FF;
-            }
-            
-            /* Financial Values */
-            .financial-value,
-            .price-value,
-            .summary-value {
-                font-variant-numeric: tabular-nums;
-                letter-spacing: -0.3px;
-            }
-            
-            /* Alert Cards */
-            .alert-card {
-                background: rgba(255,255,255,0.05);
-                backdrop-filter: blur(20px);
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 16px;
-                padding: 20px;
-                margin-bottom: 12px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-                position: relative;
-                overflow: hidden;
-            }
-            
-            .alert-card::before {
-                content: '';
-                position: absolute;
-                top: 0;
-                left: 0;
-                width: 4px;
-                height: 100%;
-                background: linear-gradient(180deg, #5B7CFF 0%, #7B5CFF 100%);
-            }
-            
-            .alert-card.ma-alert::before {
-                background: linear-gradient(180deg, #00D9FF 0%, #0099FF 100%);
-            }
-            
-            /* Status Badges */
-            .status-badge {
-                font-size: 11px;
-                font-weight: 600;
-                padding: 4px 8px;
-                border-radius: 6px;
-                letter-spacing: 0.3px;
-            }
-            
-            .status-badge.price {
-                background: rgba(91,124,255,0.15);
-                color: #5B7CFF;
-                border: 1px solid rgba(91,124,255,0.25);
-            }
-            
-            .status-badge.ma {
-                background: rgba(0,217,255,0.15);
-                color: #00D9FF;
-                border: 1px solid rgba(0,217,255,0.25);
-            }
-            
-            .status-indicator {
-                font-size: 12px;
-                font-weight: 600;
-                padding: 6px 10px;
-                border-radius: 8px;
-                display: inline-flex;
-                align-items: center;
-                gap: 4px;
-            }
-            
-            .status-indicator.above {
-                background: rgba(0,255,163,0.1);
-                color: #00FFA3;
-                border: 1px solid rgba(0,255,163,0.2);
-            }
-            
-            .status-indicator.below {
-                background: rgba(255,107,107,0.1);
-                color: #FF6B6B;
-                border: 1px solid rgba(255,107,107,0.2);
-            }
-            
-            .status-dot {
-                width: 6px;
-                height: 6px;
-                border-radius: 50%;
-                background: currentColor;
-                box-shadow: 0 0 8px currentColor;
-            }
-            
-            /* Price Display */
-            .price-item {
-                margin-bottom: 12px;
-            }
-            
-            .price-label {
-                font-size: 12px;
-                font-weight: 500;
-                color: #8B92A8;
-                margin-bottom: 4px;
-                text-transform: none;
-            }
-            
-            .price-value {
-                font-size: 20px;
-                font-weight: 600;
-                font-variant-numeric: tabular-nums;
-                letter-spacing: -0.3px;
-            }
-            
-            .price-change {
-                font-size: 13px;
-                font-weight: 600;
-                margin-top: 4px;
-            }
-            
-            .price-change.positive {
-                color: #00FFA3;
-            }
-            
-            .price-change.negative {
-                color: #FF6B6B;
-            }
-            
-            /* Autocomplete Dropdown */
-            .autocomplete-dropdown {
-                background: rgba(14,20,32,0.98);
-                backdrop-filter: blur(20px);
-                border: 1px solid rgba(91,124,255,0.3);
-                border-radius: 12px;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.4);
-            }
-            
-            .autocomplete-item:hover {
-                background: rgba(91,124,255,0.1);
-            }
-            
-            .ticker-symbol {
-                font-weight: 700;
-                color: #5B7CFF;
-            }
-            
-            .ticker-name {
-                color: #8B92A8;
-            }
-            
-            .ticker-type {
-                background: rgba(91,124,255,0.15);
-                color: #5B7CFF;
-                font-weight: 600;
-            }
+        .modal-content { background: #0F1420; border: 1px solid rgba(91,124,255,0.2); padding: 28px; border-radius: 16px; max-width: 480px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+        .modal-header { margin-bottom: 20px; }
+        .modal-header h3 { font-size: 18px; font-weight: 700; color: #5B7CFF; }
+        .tabs { display: flex; gap: 0; border-bottom: 1px solid rgba(255,255,255,0.08); margin-bottom: 20px; }
+        .tab { padding: 10px 20px; background: transparent; border: none; color: #8B92A8; font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 0.15s, border-color 0.15s; font-family: inherit; }
+        .tab.active { color: #5B7CFF; border-bottom-color: #5B7CFF; }
+        .tab:hover:not(.active) { color: #fff; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .timeframe-selector { display: flex; gap: 8px; margin-bottom: 14px; }
+        .timeframe-btn { flex: 1; padding: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #8B92A8; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit; }
+        .timeframe-btn.active { background: rgba(91,124,255,0.12); border-color: #5B7CFF; color: #5B7CFF; }
+        .timeframe-btn:hover:not(.active) { background: rgba(255,255,255,0.08); color: #fff; }
+        @media (max-width: 768px) { .summary-grid { grid-template-columns: 1fr 1fr; } .stats-grid { grid-template-columns: repeat(2, 1fr); } .grid { grid-template-columns: 1fr; } th, td { padding: 8px 6px; } }
     </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Navigation -->
-        <div class="nav">
-            <a href="/dashboard">📊 Stock Alerts</a>
-            <a href="/bitcoin-scanner">₿ Bitcoin Scanner</a>
-            <a href="/portfolio">💼 Portfolio</a>
-            <a href="#" onclick="logout()">Logout</a>
-        </div>
+    <!-- Sticky Top Nav -->
+    <nav class="top-nav wide">
+        <span class="top-nav-brand">📈 PulseAlerts</span>
+        <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
+        <a href="/portfolio" class="top-nav-link active">💼 Portfolio</a>
+        <a href="/alerts/history" class="top-nav-link">📜 History</a>
+        <a href="/radar" class="top-nav-link">🚨 Radar</a>
+        <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
+        <a href="/forex-amd" class="top-nav-link">🌐 Forex</a>
+        <span class="top-nav-spacer"></span>
+        <button class="top-nav-logout" onclick="logout()">Sign out</button>
+    </nav>
 
-        <!-- Header -->
-        <div class="header" style="padding: 56px 0 24px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <div style="font-size: 15px; font-weight: 500; color: #8B92A8;">Portfolio</div>
-            </div>
-            <h1 style="font-size: 32px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 24px;">Trading Performance</h1>
+    <div class="main-content">
+        <div style="margin-bottom: 28px;">
+            <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 4px;">Your trading performance</p>
+            <h1 style="font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">Portfolio</h1>
         </div>
 
         <div id="message"></div>
@@ -4578,69 +3005,35 @@ def alert_history_page():
     """Alert trigger history page with AI explanations"""
     html = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Alert History</title>
+    <title>Alert History — Stock Alerts</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/css/theme.css">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
-            background: #0A0E1A;
-            background-image: radial-gradient(circle at 50% 0%, #1a1f2e 0%, #0a0e1a 50%);
-            color: #FFFFFF;
-            padding: 20px;
-        }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .nav {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 30px;
-            padding: 15px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 12px;
-        }
-        .nav a {
-            color: #8B92A8;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 14px;
-        }
-        .nav a:hover { color: #5B7CFF; }
-        .history-card {
-            background: rgba(255,255,255,0.05);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 16px;
-            padding: 20px;
-            margin-bottom: 16px;
-        }
-        .explanation {
-            background: rgba(91,124,255,0.1);
-            border-left: 3px solid #5B7CFF;
-            padding: 12px;
-            margin-top: 12px;
-            border-radius: 8px;
-            font-size: 14px;
-            line-height: 1.6;
-        }
+        .main-content { max-width: 1200px; margin: 0 auto; padding: 80px 20px 40px; }
+        .history-card { background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 20px; margin-bottom: 14px; }
+        .explanation { background: rgba(91,124,255,0.08); border-left: 3px solid #5B7CFF; padding: 12px; margin-top: 12px; border-radius: 8px; font-size: 14px; line-height: 1.6; color: #C5C8D4; }
         .loading { text-align: center; padding: 40px; color: #8B92A8; }
-        .empty { text-align: center; padding: 60px; color: #8B92A8; }
+        .empty   { text-align: center; padding: 60px; color: #4A5268; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="nav">
-            <a href="/dashboard">📊 Dashboard</a>
-            <a href="/alerts/history">📜 History</a>
-            <a href="/radar">🚨 Radar</a>
-            <a href="/portfolio">💼 Portfolio</a>
-            <a href="/bitcoin-scanner">₿ Bitcoin</a>
-            <a href="#" onclick="logout()">Logout</a>
+    <nav class="top-nav wide">
+        <span class="top-nav-brand">📈 PulseAlerts</span>
+        <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
+        <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
+        <a href="/alerts/history" class="top-nav-link active">📜 History</a>
+        <a href="/radar" class="top-nav-link">🚨 Radar</a>
+        <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
+        <a href="/forex-amd" class="top-nav-link">🌐 Forex</a>
+        <span class="top-nav-spacer"></span>
+        <button class="top-nav-logout" onclick="logout()">Sign out</button>
+    </nav>
+    <div class="main-content">
+        <div style="margin-bottom: 28px;">
+            <h1 style="font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">Triggered Alerts</h1>
         </div>
-        
-        <h1 style="font-size: 32px; font-weight: 700; margin-bottom: 24px;">Triggered Alerts</h1>
-        
         <div id="historyList">
             <div class="loading">Loading history...</div>
         </div>
@@ -4755,22 +3148,27 @@ def radar_page():
         }
         .loading { text-align: center; padding: 40px; color: #8B92A8; }
         .empty { text-align: center; padding: 60px; color: #8B92A8; }
+    <link rel="stylesheet" href="/static/css/theme.css">
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="nav">
-            <a href="/dashboard">📊 Dashboard</a>
-            <a href="/alerts/history">📜 History</a>
-            <a href="/radar">🚨 Radar</a>
-            <a href="/portfolio">💼 Portfolio</a>
-            <a href="/bitcoin-scanner">₿ Bitcoin</a>
-            <a href="#" onclick="logout()">Logout</a>
+    <nav class="top-nav wide">
+        <span class="top-nav-brand">📈 PulseAlerts</span>
+        <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
+        <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
+        <a href="/alerts/history" class="top-nav-link">📜 History</a>
+        <a href="/radar" class="top-nav-link active">🚨 Radar</a>
+        <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
+        <a href="/forex-amd" class="top-nav-link">🌐 Forex</a>
+        <span class="top-nav-spacer"></span>
+        <button class="top-nav-logout" onclick="logout()">Sign out</button>
+    </nav>
+    <div class="main-content" style="max-width:1200px;margin:0 auto;padding:80px 20px 40px">
+        <div style="margin-bottom:24px">
+            <h1 style="font-size: 28px; font-weight: 800; letter-spacing:-0.5px;">Market Radar</h1>
+            <p style="color: #8B92A8; font-size: 14px; margin-top:4px;">Real-time anomaly detection</p>
         </div>
-        
-        <h1 style="font-size: 32px; font-weight: 700; margin-bottom: 8px;">Market Radar</h1>
-        <p style="color: #8B92A8; font-size: 14px; margin-bottom: 24px;">Unusual activity in your watchlist</p>
-        
+
         <div id="radarList">
             <div class="loading">Scanning for anomalies...</div>
         </div>
@@ -4927,24 +3325,26 @@ def forex_amd_page():
         }
         #amd-chart { border-radius: 8px; overflow: hidden; }
         #chart-error { color: #FF6B6B; font-size: 13px; margin-top: 8px; display: none; }
+    <link rel="stylesheet" href="/static/css/theme.css">
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="nav">
-            <a href="/dashboard">📊 Dashboard</a>
-            <a href="/alerts/history">📜 History</a>
-            <a href="/radar">🚨 Radar</a>
-            <a href="/forex-amd">🌐 Forex AMD</a>
-            <a href="/forex-amd/debug">🔬 AMD Debug</a>
-            <a href="/portfolio">💼 Portfolio</a>
-            <a href="#" onclick="logout()">Logout</a>
+    <nav class="top-nav wide">
+        <span class="top-nav-brand">📈 PulseAlerts</span>
+        <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
+        <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
+        <a href="/alerts/history" class="top-nav-link">📜 History</a>
+        <a href="/radar" class="top-nav-link">🚨 Radar</a>
+        <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
+        <a href="/forex-amd" class="top-nav-link active">🌐 Forex AMD</a>
+        <span class="top-nav-spacer"></span>
+        <button class="top-nav-logout" onclick="logout()">Sign out</button>
+    </nav>
+    <div class="container" style="max-width:1400px;margin:0 auto;padding:80px 20px 40px">
+        <div style="margin-bottom:24px">
+            <h1 style="font-size: 28px; font-weight: 800; letter-spacing:-0.5px;">🌐 Forex AMD Scanner</h1>
+            <p style="color: #8B92A8; font-size: 14px; margin-top:4px;">Institutional-grade AMD detection: Accumulation → Manipulation → Displacement → IFVG</p>
         </div>
-
-        <h1 style="font-size: 32px; font-weight: 700; margin-bottom: 8px;">Forex AMD Scanner</h1>
-        <p style="color: #8B92A8; font-size: 14px; margin-bottom: 24px;">
-            Institutional-grade AMD detection: Accumulation → Manipulation → Displacement → IFVG
-        </p>
         
         <div class="section">
             <h2 style="margin-bottom: 16px;">Watchlist</h2>
@@ -5578,12 +3978,12 @@ def forex_amd_debug_page():
 <head>
   <title>AMD Debug</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/css/theme.css">
   <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family: monospace; background:#0A0E1A; color:#ccc; padding:20px; }
+    body { font-family: monospace; }
     h2   { color:#5B7CFF; margin-bottom:16px; }
     h3   { color:#8B92A8; font-size:14px; margin-bottom:10px; }
-    .card{ background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1);
+    .debug-card { background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1);
            border-radius:10px; padding:16px; margin-bottom:16px; }
     .ok   { color:#00FFA3; }
     .err  { color:#FF6B6B; }
@@ -5593,32 +3993,36 @@ def forex_amd_debug_page():
             border-bottom:1px solid rgba(255,255,255,.07); }
     th    { color:#5B7CFF; }
     pre   { white-space:pre-wrap; font-size:12px; color:#aaa; }
-    .nav  { display:flex; gap:20px; margin-bottom:24px;
-            padding:12px; background:rgba(255,255,255,.05); border-radius:10px; }
-    .nav a{ color:#8B92A8; text-decoration:none; font-weight:600; font-size:14px; }
-    .nav a:hover { color:#5B7CFF; }
-    .badge{ display:inline-block; padding:3px 10px; border-radius:8px;
-            font-size:12px; font-weight:700; }
     .badge-ok  { background:rgba(0,255,163,.15); color:#00FFA3; }
     .badge-err { background:rgba(255,107,107,.15); color:#FF6B6B; }
-    .refresh-note { font-size:11px; color:#555; margin-left:auto; }
+    .refresh-note { font-size:11px; color:var(--text-secondary); margin-left:auto; }
+    .debug-content { max-width:1200px; margin:0 auto; padding:80px 20px 40px; }
   </style>
 </head>
 <body>
-  <div class="nav">
-    <a href="/forex-amd">&larr; Forex AMD</a>
-    <a href="/dashboard">Dashboard</a>
+  <nav class="top-nav wide">
+    <span class="top-nav-brand">📈 PulseAlerts</span>
+    <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
+    <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
+    <a href="/alerts/history" class="top-nav-link">📜 History</a>
+    <a href="/radar" class="top-nav-link">🚨 Radar</a>
+    <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
+    <a href="/forex-amd" class="top-nav-link active">🌐 Forex AMD</a>
+    <span class="top-nav-spacer"></span>
+    <button class="top-nav-logout" onclick="window.location='/logout'">Sign out</button>
+  </nav>
+  <div class="debug-content">
+  <div style="margin-bottom:20px;display:flex;align-items:center;gap:16px;">
+    <h2 style="margin-bottom:0">AMD Debug Dashboard</h2>
     <span class="refresh-note" id="last-refresh"></span>
   </div>
 
-  <h2>AMD Debug Dashboard</h2>
-
-  <div class="card" id="health-card">
+  <div class="debug-card" id="health-card">
     <h3>Scanner Health <span id="health-badge"></span></h3>
     <pre id="health-data">Loading...</pre>
   </div>
 
-  <div class="card">
+  <div class="debug-card">
     <h3>State Machine Snapshot</h3>
     <table>
       <thead><tr><th>Symbol</th><th>State</th><th>Last Update</th></tr></thead>
@@ -5626,7 +4030,7 @@ def forex_amd_debug_page():
     </table>
   </div>
 
-  <div class="card">
+  <div class="debug-card">
     <h3>Recent Triggers (last 20)</h3>
     <table>
       <thead><tr>
@@ -5636,6 +4040,7 @@ def forex_amd_debug_page():
       <tbody id="event-rows"><tr><td colspan="5">Loading...</td></tr></tbody>
     </table>
   </div>
+  </div><!-- /debug-content -->
 
 <script>
 const STATE_COLOR = {
