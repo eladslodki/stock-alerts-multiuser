@@ -25,10 +25,11 @@ CHUNK_SIZE    = 3_500   # chars per chunk sent to the map-LLM
 CHUNK_OVERLAP = 400     # overlap between adjacent chunks
 MAX_RELEVANT  = 55_000  # max chars kept after section extraction
 LINES_PER_SECTION = 220 # how many lines to take from each matched section
-# Hard cap on HTML passed to BeautifulSoup: 8 MB of chars.
-# BS4 can use 5-10× the input size in memory; this keeps peak usage bounded
-# even if the upstream streaming cap is bypassed or raised.
-MAX_HTML_PARSE = 8 * 1024 * 1024
+# Hard cap on HTML fed into any parser; matches the download cap in sec_provider.
+MAX_HTML_PARSE = 3 * 1024 * 1024
+# Below this threshold we use BS4 (accurate script/style removal).
+# Above it we use regex — 5-10× less peak memory, safe for OOM-constrained workers.
+_BS4_MAX_INPUT = 200_000  # 200 KB
 
 
 # ---- section keyword index ------------------------------------------------- #
@@ -68,7 +69,13 @@ SECTION_KEYWORDS: Dict[str, List[str]] = {
 # 1. HTML → plain text
 # --------------------------------------------------------------------------- #
 def html_to_text(html: str) -> str:
-    """Convert an HTML string to clean plain text."""
+    """Convert an HTML string to clean plain text.
+
+    For inputs <= _BS4_MAX_INPUT (200 KB): use BeautifulSoup for accurate
+    script/style removal.  For larger inputs (all real EDGAR filings after
+    truncation): use regex, which uses ~2× the input size in peak memory vs
+    5–10× for BeautifulSoup with html.parser.
+    """
     if not html:
         return ""
 
@@ -79,12 +86,16 @@ def html_to_text(html: str) -> str:
         )
         html = html[:MAX_HTML_PARSE]
 
-    if _BS4:
-        soup = BeautifulSoup(html, "html.parser")
-        for tag in soup.find_all(["script", "style", "header", "footer", "nav", "noscript"]):
-            tag.decompose()
-        raw = soup.get_text(separator="\n", strip=True)
+    if _BS4 and len(html) <= _BS4_MAX_INPUT:
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+            for tag in soup.find_all(["script", "style", "header", "footer", "nav", "noscript"]):
+                tag.decompose()
+            raw = soup.get_text(separator="\n", strip=True)
+        except Exception:
+            raw = re.sub(r"<[^>]+>", " ", html)
     else:
+        # Regex path: safe for large EDGAR filings, low memory overhead
         raw = re.sub(r"<[^>]+>", " ", html)
 
     # Collapse SEC filing artefacts: long runs of dots / dashes used as separators

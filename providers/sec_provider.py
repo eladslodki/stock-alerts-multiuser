@@ -24,9 +24,9 @@ from typing import Optional, List, Dict, Any
 import requests
 
 # Max bytes to download from a single filing document.
-# 10-K filings can be 50-200 MB; 8 MB is enough to capture the key sections
-# while preventing OOM kills in a memory-constrained worker.
-MAX_FILING_BYTES = int(os.getenv("SEC_MAX_FILING_BYTES", str(8 * 1024 * 1024)))
+# 10-K filings can be 50-200 MB; 3 MB is enough to capture the key financial
+# sections while staying well within memory limits of a constrained worker.
+MAX_FILING_BYTES = int(os.getenv("SEC_MAX_FILING_BYTES", str(3 * 1024 * 1024)))
 
 logger = logging.getLogger(__name__)
 
