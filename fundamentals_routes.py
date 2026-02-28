@@ -24,11 +24,13 @@ from flask import (
 from flask_login import login_required
 
 from providers.sec_provider import list_filings as sec_list_filings
+from providers.consensus_provider import get_consensus
 from services.report_generator import (
     generate_report,
     get_cached_report_json,
     get_cached_report_html,
 )
+from services.llm_client import get_llm_client, PRE_EARNINGS_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -384,3 +386,75 @@ def view_report(ticker: str, filing_id: str):
         202,
         {"Content-Type": "text/html; charset=utf-8"},
     )
+
+
+# =========================================================================== #
+# API — Pre-Earnings Mode  (Part 8)
+# =========================================================================== #
+
+@fundamentals_bp.route("/api/preearnings/<ticker>")
+@login_required
+def api_pre_earnings(ticker: str):
+    """
+    GET /api/preearnings/<ticker>
+
+    Returns a pre-earnings brief generated from analyst consensus data ONLY.
+    No SEC filing required. LLM adds narrative context around the numbers.
+
+    Response:
+        200 {
+          "ticker": "OKE",
+          "expected_eps": "$1.05",
+          "expected_revenue": "$4.3B",
+          "key_metric_to_watch": "...",
+          "implied_market_expectation_summary": "...",
+          "bull_scenario": "...",
+          "bear_scenario": "...",
+          "consensus_source": "yahoo",
+          "consensus_period": "2024-09-30"
+        }
+        400 { "error": "..." }
+        502 { "error": "..." }
+    """
+    ticker = ticker.upper().strip()
+    if not ticker or len(ticker) > 10:
+        return jsonify({"error": "Invalid ticker"}), 400
+
+    # 1. Fetch consensus data
+    consensus = get_consensus(ticker)
+
+    # 2. Call LLM with consensus only
+    try:
+        llm    = get_llm_client()
+        prompt = PRE_EARNINGS_PROMPT.format(
+            ticker=ticker,
+            consensus_json=json.dumps(consensus, ensure_ascii=False, indent=2),
+        )
+        raw    = llm.complete(prompt, max_tokens=1_200)
+
+        # Strip markdown fences if present
+        text = raw.strip()
+        if text.startswith("```"):
+            parts = text.split("```")
+            text  = parts[1] if len(parts) >= 2 else text
+            if text.lower().startswith("json"):
+                text = text[4:]
+            text = text.strip()
+
+        brief = json.loads(text)
+    except Exception as exc:
+        logger.error("Pre-earnings LLM failed for %s: %s", ticker, exc)
+        brief = {
+            "expected_eps":                       None,
+            "expected_revenue":                   None,
+            "key_metric_to_watch":                None,
+            "implied_market_expectation_summary": None,
+            "bull_scenario":                      None,
+            "bear_scenario":                      None,
+        }
+
+    brief["ticker"]           = ticker
+    brief["consensus_source"] = consensus.get("source", "yahoo")
+    brief["consensus_period"] = consensus.get("period")
+
+    return jsonify(brief), 200

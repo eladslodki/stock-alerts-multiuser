@@ -235,6 +235,98 @@ CURRENT JSON:
 Return ONLY the corrected JSON object. No explanation, no markdown.
 """
 
+# =========================================================================== #
+# Market Reaction Analysis prompt  (second LLM call)
+# =========================================================================== #
+
+MARKET_REACTION_PROMPT = """\
+You are an institutional equity analyst. Given the data below, explain the \
+likely market reaction to this earnings release.
+
+ACTUAL METRICS:
+{actuals_json}
+
+CONSENSUS EXPECTATIONS:
+{consensus_json}
+
+SURPRISE DATA:
+{surprise_json}
+
+GUIDANCE SUMMARY:
+{guidance_text}
+
+Return ONLY a JSON object (no markdown, no explanation):
+{{
+  "reaction_driver":  "<which single metric most likely drove price action — in Hebrew>",
+  "bull_view":        "<2-3 sentence bull interpretation — in Hebrew>",
+  "bear_view":        "<2-3 sentence bear interpretation — in Hebrew>",
+  "quality_of_beat":  "<demand-driven | cost-driven | mixed | no beat — explain briefly in Hebrew>",
+  "guidance_signal":  "positive | neutral | negative"
+}}
+
+RULES:
+- All values must be in Hebrew except guidance_signal.
+- Do NOT invent metrics not present in the input.
+- Return ONLY the JSON object.
+"""
+
+# =========================================================================== #
+# Narrative Change Detection prompt  (second LLM call on prior vs current)
+# =========================================================================== #
+
+NARRATIVE_CHANGE_PROMPT = """\
+You are a narrative analysis AI comparing two consecutive quarterly earnings reports \
+for the same company. Identify changes in tone, strategic focus, and risk profile.
+
+PRIOR QUARTER SUMMARY:
+{prior_summary}
+
+CURRENT QUARTER SUMMARY:
+{current_summary}
+
+Return ONLY a JSON object (no markdown, no explanation):
+{{
+  "narrative_shift":         "more bullish | more cautious | unchanged",
+  "new_risks":               ["<Hebrew risk description>"],
+  "removed_risks":           ["<Hebrew risk description>"],
+  "new_growth_focus":        "<Hebrew — what new growth theme emerged, or empty string>",
+  "management_tone_change":  "<Hebrew — how management language changed>"
+}}
+
+RULES:
+- All string values must be in Hebrew.
+- new_risks and removed_risks are arrays of short Hebrew descriptions (max 5 each).
+- Return ONLY the JSON object.
+"""
+
+# =========================================================================== #
+# Pre-Earnings Mode prompt  (consensus-only, no filing text needed)
+# =========================================================================== #
+
+PRE_EARNINGS_PROMPT = """\
+You are a buy-side equity analyst preparing a pre-earnings brief for investors.
+Using ONLY the consensus data below, produce a pre-earnings expectations summary.
+
+TICKER: {ticker}
+CONSENSUS DATA:
+{consensus_json}
+
+Return ONLY a JSON object (no markdown, no explanation):
+{{
+  "expected_eps":     "<formatted string or null>",
+  "expected_revenue": "<formatted string or null>",
+  "key_metric_to_watch": "<Hebrew — the single most critical metric Wall Street is watching>",
+  "implied_market_expectation_summary": "<Hebrew — 2-3 sentence summary of what the market is pricing in>",
+  "bull_scenario":    "<Hebrew — what needs to happen for a positive surprise>",
+  "bear_scenario":    "<Hebrew — what could disappoint>"
+}}
+
+RULES:
+- All Hebrew strings must contain actual Hebrew characters.
+- Do NOT invent numbers not present in the input.
+- Return ONLY the JSON object.
+"""
+
 
 # =========================================================================== #
 # Base interface
@@ -262,8 +354,15 @@ class MockLLMClient(LLMClient):
 
     def complete(self, prompt: str, max_tokens: int = 8_000) -> str:
         logger.info("MockLLMClient: returning stub response")
-        # Differentiate map vs reduce call by prompt content
-        if "facts bag" in prompt.lower() or "extracted facts" in prompt.lower():
+        p = prompt.lower()
+        # Dispatch to the right stub by keyword fingerprints
+        if "prior quarter summary" in p or "narrative_shift" in p:
+            return json.dumps(self._narrative_stub(), ensure_ascii=False)
+        if "reaction_driver" in p or "bull_view" in p or "quality_of_beat" in p:
+            return json.dumps(self._market_reaction_stub(), ensure_ascii=False)
+        if "pre-earnings" in p or "key_metric_to_watch" in p or "implied_market" in p:
+            return json.dumps(self._pre_earnings_stub(), ensure_ascii=False)
+        if "facts bag" in p or "extracted facts" in p:
             return json.dumps(self._reduce_stub(), ensure_ascii=False)
         return json.dumps(self._map_stub(), ensure_ascii=False)
 
@@ -540,6 +639,55 @@ class MockLLMClient(LLMClient):
                     ],
                 },
             ],
+        }
+
+    # ---- New analysis stubs ------------------------------------------------ #
+
+    def _market_reaction_stub(self) -> dict:
+        return {
+            "reaction_driver":  "הכנסות גבוהות מהציפיות ב-11.6% הובילו את תגובת השוק החיובית",
+            "bull_view": (
+                "המשכיות הצמיחה בנפחי הגז מאשרת את הביקוש הבסיסי לתשתיות האנרגיה. "
+                "תזרים המזומנים החופשי תומך בהגדלת הדיבידנד ובחזרת הון לבעלי המניות. "
+                "ה-EBITDA החזק מבסס את יכולת המינוף לצמיחה עתידית."
+            ),
+            "bear_view": (
+                "חלק ניכר מהעלייה בהכנסות נובע מתנודות מחיר סחורות ולא מצמיחה אורגנית. "
+                "ה-CapEx הגבוה מגביל את הגמישות הפיננסית לטווח הקצר. "
+                "חשיפת הריבית המשתנה עלולה ללחוץ על השוליים בסביבת ריבית גבוהה."
+            ),
+            "quality_of_beat":  "ביטהeat מבוסס ביקוש — עליית נפחים אורגנית, לא צמצום עלויות",
+            "guidance_signal":  "positive",
+        }
+
+    def _narrative_stub(self) -> dict:
+        return {
+            "narrative_shift":        "more bullish",
+            "new_risks":              [
+                "חשיפה מוגברת לשוק ה-LNG לאחר הרחבת הפעילות הבינלאומית",
+                "תלות גוברת בחוזים ספוטיים בשוק הגז הטבעי",
+            ],
+            "removed_risks":          [
+                "סיכון הרגולציה הפדרלית שהוזכר ברבעון הקודם הוסר לאחר אישור ה-FERC",
+            ],
+            "new_growth_focus":       "ההנהלה מדגישה השקעות חדשות בתשתיות ה-NGL וצינורות הפצה לאוקלהומה",
+            "management_tone_change": "מעבר משפה זהירה של 'אתגרים בשוק' לנרטיב התרחבות פרואקטיבי",
+        }
+
+    def _pre_earnings_stub(self) -> dict:
+        return {
+            "expected_eps":     "$1.05",
+            "expected_revenue": "$4.3B",
+            "key_metric_to_watch": (
+                "נפח תפוקה הגז הטבעי (Bcf/d) — הוא המנוע האמיתי של הרווחיות ב-ONEOK"
+            ),
+            "implied_market_expectation_summary": (
+                "השוק מתמחר צמיחה של כ-8-10% בהכנסות לעומת הרבעון המקביל. "
+                "ציפיות מרומזות ל-EPS של כ-$1.05 וה-EBITDA ב-$1.1-1.15B. "
+                "כל סטייה מעל 5% למעלה עשויה לייצר ראלי חד."
+            ),
+            "bull_scenario":    "EPS מעל $1.10 + אישור הגדלת דיבידנד = עלייה חדה של 5-8%",
+            "bear_scenario":    "הכנסות מתחת ל-$4.0B + הורדת תחזית = ירידה של 4-7%",
         }
 
 

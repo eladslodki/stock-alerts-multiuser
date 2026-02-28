@@ -818,6 +818,131 @@
     .takeaway-subtext { font-size: 12px; color: var(--clr-text-muted); line-height: 1.5; }
 
     /* ================================================================
+       s11 — MARKET REACTION ANALYSIS  (reuses existing tokens only)
+       ================================================================ */
+
+    /* Expectations vs Reality table */
+    .expect-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .expect-table th,
+    .expect-table td {
+      padding: var(--sp-3) var(--sp-4);
+      text-align: right;
+      border-bottom: 1px solid var(--clr-border);
+      font-size: 13px;
+    }
+    .expect-table th {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--clr-text-muted);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      background: var(--clr-surface2);
+    }
+    .expect-table td:first-child { font-weight: 500; color: var(--clr-text); }
+    .expect-table tr:last-child td { border-bottom: none; }
+    .expect-table tr:hover td { background: rgba(255,255,255,.02); }
+
+    /* Bull / Bear split layout */
+    .bull-bear-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--sp-4);
+    }
+    .view-panel {
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--rad-md);
+      padding: var(--sp-4);
+    }
+    .view-panel.bull { border-top: 3px solid var(--clr-positive); }
+    .view-panel.bear { border-top: 3px solid var(--clr-negative); }
+    .view-panel-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: var(--sp-3);
+    }
+    .view-panel.bull .view-panel-title { color: var(--clr-positive); }
+    .view-panel.bear .view-panel-title { color: var(--clr-negative); }
+    .view-panel-text { font-size: 13px; color: var(--clr-text-dim); line-height: 1.7; }
+
+    /* Narrative change box */
+    .narrative-change-box {
+      background: var(--clr-surface2);
+      border: 1px solid var(--clr-border);
+      border-radius: var(--rad-md);
+      overflow: hidden;
+    }
+    .nc-header {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      padding: var(--sp-4) var(--sp-5);
+      border-bottom: 1px solid var(--clr-border);
+      background: var(--clr-primary-dim);
+    }
+    .nc-shift-badge {
+      padding: 3px 10px;
+      border-radius: var(--rad-sm);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .4px;
+    }
+    .nc-shift-badge.bullish  { background: var(--clr-positive-dim); color: var(--clr-positive); }
+    .nc-shift-badge.cautious { background: var(--clr-negative-dim); color: var(--clr-negative); }
+    .nc-shift-badge.unchanged{ background: rgba(100,116,139,.15);  color: var(--clr-text-muted); }
+    .nc-body { padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-4); }
+    .nc-section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--clr-text-muted);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: var(--sp-2);
+    }
+    .nc-list { list-style: none; display: flex; flex-direction: column; gap: var(--sp-2); }
+    .nc-list li {
+      display: flex;
+      gap: var(--sp-2);
+      font-size: 13px;
+      color: var(--clr-text-dim);
+      align-items: flex-start;
+    }
+    .nc-list li::before { content: '•'; flex-shrink: 0; margin-top: 1px; }
+    .nc-list.new  li::before { color: var(--clr-negative); }
+    .nc-list.gone li::before { color: var(--clr-positive); }
+    .nc-tone {
+      font-size: 13px;
+      color: var(--clr-text-dim);
+      line-height: 1.7;
+      padding: var(--sp-3) var(--sp-4);
+      background: rgba(91,124,255,.06);
+      border-radius: var(--rad-sm);
+    }
+
+    /* Guidance signal banner */
+    .guidance-signal-bar {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      padding: var(--sp-3) var(--sp-4);
+      border-radius: var(--rad-md);
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .guidance-signal-bar.positive { background: var(--clr-positive-dim); color: var(--clr-positive); }
+    .guidance-signal-bar.negative { background: var(--clr-negative-dim); color: var(--clr-negative); }
+    .guidance-signal-bar.neutral  { background: rgba(100,116,139,.12);  color: var(--clr-text-muted); }
+
+    @media (max-width: 700px) {
+      .bull-bear-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ================================================================
        PRINT UTILITIES
        ================================================================ */
     .divider {
@@ -906,6 +1031,13 @@
       <span>{{ item.title }}</span>
     </a>
     {% endfor %}
+    {# s11 — only shown when analysis data is available #}
+    {% if analysis and analysis.market_reaction %}
+    <a class="toc-link" href="#s11">
+      <span class="toc-num">11</span>
+      <span>ניתוח תגובת השוק</span>
+    </a>
+    {% endif %}
   </nav>
   {% endif %}
 
@@ -1251,6 +1383,158 @@
       </div>{# /section-body #}
     </section>
     {% endfor %}
+
+    {# ================================================================
+       s11 — MARKET REACTION ANALYSIS
+       Rendered only when the analysis pipeline has run.
+       ================================================================ #}
+    {% if analysis and analysis.market_reaction %}
+    {% set mr = analysis.market_reaction %}
+    <section id="s11" class="report-section">
+
+      <div class="section-header">
+        <span class="section-num">11</span>
+        <h2 class="section-title">ניתוח תגובת השוק</h2>
+      </div>
+
+      <div class="section-body">
+
+        {# ---- 1. Expectations vs Reality table ---- #}
+        {% if analysis.table_rows %}
+        <table class="expect-table">
+          <thead>
+            <tr>
+              <th>מדד</th>
+              <th>בפועל</th>
+              <th>ציפיות אנליסטים</th>
+              <th>הפתעה %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in analysis.table_rows %}
+            <tr>
+              <td>{{ row.metric }}</td>
+              <td>{{ row.actual }}</td>
+              <td>{{ row.expected }}</td>
+              <td>
+                <span class="change-pill {{ row.sentiment }}">{{ row.surprise }}</span>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+
+        {# ---- 2. Guidance signal banner ---- #}
+        {% if analysis.guidance_signal %}
+        {% set gs = analysis.guidance_signal | lower %}
+        <div class="guidance-signal-bar {{ gs }}">
+          {% if gs == 'positive' %}
+            ✦ אות תחזית: חיובי — ההנהלה מסמנת אופטימיות לקראת הרבעון הבא
+          {% elif gs == 'negative' %}
+            ▼ אות תחזית: שלילי — ההנהלה מסמנת זהירות
+          {% else %}
+            ● אות תחזית: ניטרלי — אין שינוי מהותי בתחזיות
+          {% endif %}
+        </div>
+        {% endif %}
+
+        {# ---- 3. Reaction driver insight ---- #}
+        {% if mr.reaction_driver %}
+        <div class="insight-chip analyst">
+          <span class="insight-badge">מנוע תגובה</span>
+          <span class="insight-text">{{ mr.reaction_driver }}</span>
+        </div>
+        {% endif %}
+
+        {# ---- 4. Quality of beat ---- #}
+        {% if mr.quality_of_beat %}
+        <div class="insight-chip fact">
+          <span class="insight-badge">איכות הביט</span>
+          <span class="insight-text">{{ mr.quality_of_beat }}</span>
+        </div>
+        {% endif %}
+
+        {# ---- 5. Bull vs Bear split ---- #}
+        {% if mr.bull_view or mr.bear_view %}
+        <div class="bull-bear-grid">
+          {% if mr.bull_view %}
+          <div class="view-panel bull">
+            <div class="view-panel-title">📈 תרחיש שורי</div>
+            <div class="view-panel-text">{{ mr.bull_view }}</div>
+          </div>
+          {% endif %}
+          {% if mr.bear_view %}
+          <div class="view-panel bear">
+            <div class="view-panel-title">📉 תרחיש דובי</div>
+            <div class="view-panel-text">{{ mr.bear_view }}</div>
+          </div>
+          {% endif %}
+        </div>
+        {% endif %}
+
+        {# ---- 6. Narrative change box (if prior report exists) ---- #}
+        {% if analysis.narrative_change %}
+        {% set nc = analysis.narrative_change %}
+        <div class="narrative-change-box">
+          <div class="nc-header">
+            <span style="font-size:13px;font-weight:600;color:var(--clr-text);">
+              שינוי נרטיב לעומת הרבעון הקודם
+            </span>
+            {% set shift = nc.narrative_shift | lower %}
+            {% if 'bullish' in shift or 'חיובי' in shift %}
+              <span class="nc-shift-badge bullish">{{ nc.narrative_shift }}</span>
+            {% elif 'cautious' in shift or 'זהיר' in shift %}
+              <span class="nc-shift-badge cautious">{{ nc.narrative_shift }}</span>
+            {% else %}
+              <span class="nc-shift-badge unchanged">{{ nc.narrative_shift }}</span>
+            {% endif %}
+          </div>
+
+          <div class="nc-body">
+            {% if nc.new_risks %}
+            <div>
+              <div class="nc-section-title">סיכונים חדשים שהוזכרו</div>
+              <ul class="nc-list new">
+                {% for r in nc.new_risks %}
+                <li>{{ r }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% endif %}
+
+            {% if nc.removed_risks %}
+            <div>
+              <div class="nc-section-title">סיכונים שהוסרו</div>
+              <ul class="nc-list gone">
+                {% for r in nc.removed_risks %}
+                <li>{{ r }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% endif %}
+
+            {% if nc.new_growth_focus %}
+            <div>
+              <div class="nc-section-title">מיקוד צמיחה חדש</div>
+              <div class="nc-tone">{{ nc.new_growth_focus }}</div>
+            </div>
+            {% endif %}
+
+            {% if nc.management_tone_change %}
+            <div>
+              <div class="nc-section-title">שינוי טון הנהלה</div>
+              <div class="nc-tone">{{ nc.management_tone_change }}</div>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+
+      </div>{# /section-body #}
+    </section>
+    {% endif %}{# /if analysis #}
+
   </main>
 </div>
 

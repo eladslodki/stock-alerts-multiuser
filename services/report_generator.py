@@ -1,27 +1,27 @@
 """
 Report generation orchestration for the Fundamentals Reports feature.
 
-Flow
-----
+Flow  (extended with Earnings Expectations & Market Reaction Engine)
+----------------------------------------------------------------------
 generate_report(ticker, filing_id, force, render_fn)
-  1. Check cache  →  return immediately if hit
-  2. Resolve company + filing metadata from SEC
-  3. Fetch & clean filing text  (cached in fn_filing_text)
-  4. Map-reduce LLM extraction  →  ReportData/v1 JSON
-  5. Validate + sanitize JSON
-  6. Render HTML via render_fn("report.html", report=...)
-  7. Persist to fn_report_outputs
+  1.  Cache check  →  return "cached" if report+HTML+market_analysis_json all exist
+  2.  Resolve company + filing metadata from SEC  [skipped if report_json cached]
+  3.  Fetch & clean filing text                  [skipped if cached]
+  4.  Map-reduce LLM  →  ReportData/v1 JSON      [skipped if cached]
+  5.  Validate + sanitize JSON
+  5b. Fetch consensus expectations  (Yahoo Finance 24 h cache)
+  5c. Extract actual metrics  (deterministic parser, no LLM)
+  5d. Compute surprise percentages
+  5e. Market reaction LLM call  →  market_analysis_json
+  5f. Narrative change LLM call  (only if prior report in DB)
+  6.  Build template analysis block + render HTML
+  7.  Persist all columns
 
-Caching
--------
-- If fn_report_outputs has valid JSON + HTML  →  return "cached"
-- If fn_filing_text exists but output missing →  skip fetch, jump to LLM
-- Per-filing threading.Lock prevents concurrent duplicate generation
-
-Security
---------
-insight.text fields are sanitized via bleach (allow: strong, mark, br, em).
-All other strings are rendered {{ x }} (auto-escaped by Jinja2).
+Caching tiers
+  Full    : report_json + rendered_html + market_analysis_json  → instant return
+  Partial : report_json + rendered_html, no analysis            → steps 5b-6 + re-render
+  No HTML : report_json only                                    → steps 5b-6 + render
+  Nothing : full generation
 """
 
 import json
@@ -47,7 +47,16 @@ from services.llm_client import (
     MAP_PROMPT_TEMPLATE,
     REDUCE_PROMPT_TEMPLATE,
     FIX_SCHEMA_PROMPT,
+    MARKET_REACTION_PROMPT,
 )
+from providers.consensus_provider import get_consensus
+from services.metrics_extractor import extract_actuals
+from services.surprise_engine import (
+    compute_all_surprises,
+    fmt_surprise,
+    surprise_sentiment,
+)
+from services.narrative_engine import run_narrative_change
 
 logger = logging.getLogger(__name__)
 
@@ -322,21 +331,154 @@ def generate_report(
         lock.release()
 
 
+# =========================================================================== #
+# Analysis helpers  (steps 5b-5f)
+# =========================================================================== #
+
+def _fmt_financial(v: Optional[float]) -> str:
+    """Format a raw float into a display string like '$4.8B'."""
+    if v is None:
+        return "—"
+    if abs(v) >= 1e9:
+        return f"${v / 1e9:.2f}B"
+    if abs(v) >= 1e6:
+        return f"${v / 1e6:.0f}M"
+    return f"${v:.2f}"
+
+
+def _fetch_consensus_safe(ticker: str) -> dict:
+    try:
+        return get_consensus(ticker)
+    except Exception as exc:
+        logger.warning("Consensus fetch failed for %s: %s", ticker, exc)
+        return {"eps_estimate": None, "revenue_estimate": None,
+                "ebitda_estimate": None, "currency": "USD", "source": "error"}
+
+
+def _run_market_reaction(
+    actuals: dict,
+    consensus: dict,
+    surprise: dict,
+    report_json: dict,
+    llm,
+) -> dict:
+    """Call LLM for market reaction analysis. Returns {} on any failure."""
+    try:
+        # Build guidance text from s7
+        guidance_lines = []
+        for sec in report_json.get("sections", []):
+            if sec.get("id") == "s7":
+                if sec.get("narrative"):
+                    guidance_lines.append(sec["narrative"])
+                for item in sec.get("items", []):
+                    guidance_lines.append(
+                        f"{item.get('topic', '')}: {item.get('statement', '')}"
+                    )
+                break
+        guidance_text = "\n".join(guidance_lines)[:800] or "N/A"
+
+        prompt = MARKET_REACTION_PROMPT.format(
+            actuals_json=json.dumps(actuals,   ensure_ascii=False),
+            consensus_json=json.dumps(consensus, ensure_ascii=False),
+            surprise_json=json.dumps(surprise,  ensure_ascii=False),
+            guidance_text=guidance_text,
+        )
+        raw    = llm.complete(prompt, max_tokens=1_500)
+        result = _parse_llm_json(raw)
+
+        # Validate required keys
+        for k in ("reaction_driver", "bull_view", "bear_view",
+                  "quality_of_beat", "guidance_signal"):
+            result.setdefault(k, "")
+        return result
+    except Exception as exc:
+        logger.warning("Market reaction LLM failed: %s", exc)
+        return {}
+
+
+def _build_template_analysis(
+    consensus: dict,
+    actuals: dict,
+    surprise: dict,
+    market_reaction: dict,
+    narrative_change: Optional[dict],
+) -> dict:
+    """
+    Build the `analysis` dict passed to report.html for s11 rendering.
+    Pre-formats all display strings so the template stays logic-free.
+    """
+    # Expectations vs Reality table rows
+    rows = []
+
+    def _row(label, actual_raw, expected_raw, surp_pct):
+        return {
+            "metric":       label,
+            "actual":       _fmt_financial(actual_raw),
+            "expected":     _fmt_financial(expected_raw),
+            "surprise":     fmt_surprise(surp_pct),
+            "sentiment":    surprise_sentiment(surp_pct),
+        }
+
+    rows.append(_row(
+        "הכנסות",
+        actuals.get("revenue_actual"),
+        consensus.get("revenue_estimate"),
+        surprise.get("revenue_surprise_pct"),
+    ))
+    rows.append(_row(
+        "EPS מדולל",
+        actuals.get("eps_actual"),
+        consensus.get("eps_estimate"),
+        surprise.get("eps_surprise_pct"),
+    ))
+    rows.append(_row(
+        "EBITDA",
+        actuals.get("ebitda_actual"),
+        consensus.get("ebitda_estimate"),
+        surprise.get("ebitda_surprise_pct"),
+    ))
+
+    # guidance_midpoint vs consensus revenue (proxy for guidance surprise)
+    gm = actuals.get("guidance_midpoint")
+    if gm is not None:
+        rows.append({
+            "metric":    "נקודת אמצע תחזית הנהלה",
+            "actual":    _fmt_financial(gm),
+            "expected":  "—",
+            "surprise":  "—",
+            "sentiment": "neu",
+        })
+
+    return {
+        "table_rows":       rows,
+        "market_reaction":  market_reaction,
+        "narrative_change": narrative_change,
+        "guidance_signal":  market_reaction.get("guidance_signal", "neutral"),
+        "source":           consensus.get("source", "yahoo"),
+    }
+
+
 def _generate_inner(ticker, filing_id, force, render_fn):
     with get_db() as db:
 
         # ------------------------------------------------------------------ #
-        # 1. Cache check
+        # 1. Layered cache check
         # ------------------------------------------------------------------ #
         filing_rec = db.query(Filing).filter_by(filing_id=filing_id).first()
-        if filing_rec and not force:
-            output = (
+        existing_output = None
+        if filing_rec:
+            existing_output = (
                 db.query(ReportOutput)
                 .filter_by(filing_id=filing_rec.id)
                 .order_by(ReportOutput.created_at.desc())
                 .first()
             )
-            if output and output.report_json and output.rendered_html:
+
+        # Full cache: report + HTML + analysis all present
+        if not force and existing_output:
+            if (existing_output.report_json
+                    and existing_output.rendered_html
+                    and existing_output.market_analysis_json is not None):
                 return {
                     "status":    "cached",
                     "filing_id": filing_id,
@@ -344,76 +486,68 @@ def _generate_inner(ticker, filing_id, force, render_fn):
                     "url_json":  f"/api/reports/{ticker}/{filing_id}",
                 }
 
-        # ------------------------------------------------------------------ #
-        # 2. Resolve filing metadata from SEC
-        # ------------------------------------------------------------------ #
-        try:
-            filings = sec_list_filings(ticker)
-        except (ValueError, RuntimeError) as exc:
-            return {"status": "error", "error": str(exc), "code": 502}
-
-        fd = next((f for f in filings if f["filing_id"] == filing_id), None)
-        if not fd:
-            return {
-                "status": "error",
-                "error":  f"Filing '{filing_id}' not found for ticker '{ticker}'.",
-                "code":   404,
-            }
+        # Determine what work needs to be done
+        skip_llm      = (not force
+                         and existing_output is not None
+                         and existing_output.report_json is not None)
+        skip_analysis = (not force
+                         and existing_output is not None
+                         and existing_output.market_analysis_json is not None)
 
         # ------------------------------------------------------------------ #
-        # 3. Persist company + filing records
+        # 2–4. SEC fetch + text extraction + LLM  (skipped when cached)
         # ------------------------------------------------------------------ #
-        company    = _upsert_company(db, ticker,
-                                     cik=fd.get("cik"),
-                                     name=fd.get("company_name"),
-                                     exchange=fd.get("exchange"))
-        filing_rec = _upsert_filing(db, company, fd)
+        fd          = None   # filing metadata dict from SEC
+        company     = None
+        filing_text = None
 
-        # ------------------------------------------------------------------ #
-        # 4. Fetch + clean filing text  (cached in fn_filing_text)
-        # ------------------------------------------------------------------ #
-        filing_text = (
-            db.query(FilingText).filter_by(filing_id=filing_rec.id).first()
-        )
-        if not filing_text or force:
+        if not skip_llm:
             try:
-                raw = fetch_filing_content(fd.get("source_url", ""))
-            except RuntimeError as exc:
+                filings = sec_list_filings(ticker)
+            except (ValueError, RuntimeError) as exc:
                 return {"status": "error", "error": str(exc), "code": 502}
 
-            result = prepare_filing_text(raw.get("html", ""), raw.get("text", ""))
+            fd = next((f for f in filings if f["filing_id"] == filing_id), None)
+            if not fd:
+                return {
+                    "status": "error",
+                    "error":  f"Filing '{filing_id}' not found for ticker '{ticker}'.",
+                    "code":   404,
+                }
 
-            if filing_text:
-                filing_text.raw_html     = (raw.get("html") or "")[:100_000]
-                filing_text.clean_text   = result["clean_text"]
-                filing_text.chunks_json  = result["chunks"]
-                filing_text.extracted_at = datetime.now(timezone.utc)
-            else:
-                filing_text = FilingText(
-                    filing_id   = filing_rec.id,
-                    raw_html    = (raw.get("html") or "")[:100_000],
-                    clean_text  = result["clean_text"],
-                    chunks_json = result["chunks"],
-                )
-                db.add(filing_text)
-            db.flush()
+            company    = _upsert_company(db, ticker,
+                                         cik=fd.get("cik"),
+                                         name=fd.get("company_name"),
+                                         exchange=fd.get("exchange"))
+            filing_rec = _upsert_filing(db, company, fd)
 
-        # ------------------------------------------------------------------ #
-        # 5. LLM generation
-        # ------------------------------------------------------------------ #
-        existing_output = (
-            db.query(ReportOutput)
-            .filter_by(filing_id=filing_rec.id)
-            .order_by(ReportOutput.created_at.desc())
-            .first()
-        )
+            # Fetch filing text
+            filing_text = db.query(FilingText).filter_by(filing_id=filing_rec.id).first()
+            if not filing_text or force:
+                try:
+                    raw = fetch_filing_content(fd.get("source_url", ""))
+                except RuntimeError as exc:
+                    return {"status": "error", "error": str(exc), "code": 502}
 
-        if existing_output and existing_output.report_json and not force:
-            report_json = existing_output.report_json
-        else:
+                result = prepare_filing_text(raw.get("html", ""), raw.get("text", ""))
+                if filing_text:
+                    filing_text.raw_html     = (raw.get("html") or "")[:100_000]
+                    filing_text.clean_text   = result["clean_text"]
+                    filing_text.chunks_json  = result["chunks"]
+                    filing_text.extracted_at = datetime.now(timezone.utc)
+                else:
+                    filing_text = FilingText(
+                        filing_id   = filing_rec.id,
+                        raw_html    = (raw.get("html") or "")[:100_000],
+                        clean_text  = result["clean_text"],
+                        chunks_json = result["chunks"],
+                    )
+                    db.add(filing_text)
+                db.flush()
+
+            # LLM map-reduce
             llm    = get_llm_client()
-            chunks = filing_text.chunks_json or []
-
+            chunks = (filing_text.chunks_json or []) if filing_text else []
             try:
                 report_json = _run_map_reduce(
                     chunks       = chunks,
@@ -429,63 +563,135 @@ def _generate_inner(ticker, filing_id, force, render_fn):
                 logger.exception("LLM generation failed")
                 return {"status": "error", "error": f"LLM error: {exc}", "code": 500}
 
-            # Validate — attempt one LLM fix if needed
+            # Validate + one-shot fix
             errors = validate_report_json(report_json)
             if errors:
-                logger.warning("Schema errors: %s — attempting fix", errors)
+                logger.warning("Schema errors — attempting fix: %s", errors)
                 try:
-                    fix_prompt = FIX_SCHEMA_PROMPT.format(
+                    fix_prompt  = FIX_SCHEMA_PROMPT.format(
                         errors="\n".join(errors),
                         current_json=json.dumps(report_json, ensure_ascii=False),
                     )
-                    fixed_raw    = llm.complete(fix_prompt, max_tokens=8_000)
-                    report_json  = _parse_llm_json(fixed_raw)
-                    errors       = validate_report_json(report_json)
+                    report_json = _parse_llm_json(llm.complete(fix_prompt, max_tokens=8_000))
+                    errors      = validate_report_json(report_json)
                 except Exception as fix_exc:
                     logger.error("Fix attempt failed: %s", fix_exc)
-
                 if errors:
                     logger.error("Report still invalid after fix: %s", errors)
 
-            # Sanitize insight HTML
             report_json = sanitize_report_json(report_json)
 
-        # ------------------------------------------------------------------ #
-        # 6. Render HTML
-        # ------------------------------------------------------------------ #
-        if render_fn is None:
-            from flask import render_template as render_fn  # type: ignore
+        else:
+            # Use cached report JSON
+            report_json = existing_output.report_json
+            llm         = get_llm_client()   # needed for analysis LLM calls
 
-        try:
-            rendered_html = render_fn("report.html", report=report_json)
-        except Exception as exc:
-            logger.error("Template rendering error: %s", exc)
-            rendered_html = f"<html><body><pre>Rendering error: {exc}</pre></body></html>"
+        # Ensure filing_rec and company are loaded even in skip_llm path
+        if filing_rec is None:
+            filing_rec = db.query(Filing).filter_by(filing_id=filing_id).first()
+        if filing_rec and company is None:
+            company = filing_rec.company
 
         # ------------------------------------------------------------------ #
-        # 7. Persist output
+        # 5b–5f. Earnings Expectations & Market Reaction Engine
+        # ------------------------------------------------------------------ #
+        if not skip_analysis:
+            # 5b. Consensus
+            consensus = _fetch_consensus_safe(ticker)
+
+            # 5c. Extract actuals (deterministic)
+            actuals = extract_actuals(report_json)
+
+            # 5d. Surprise
+            surprise = compute_all_surprises(actuals, consensus)
+
+            # 5e. Market reaction LLM
+            market_reaction = _run_market_reaction(
+                actuals, consensus, surprise, report_json, llm
+            )
+
+            # 5f. Narrative change (only if prior report exists)
+            narrative_change = None
+            if filing_rec and company:
+                narrative_change = run_narrative_change(
+                    db              = db,
+                    company_id      = company.id,
+                    current_filing_db_id = filing_rec.id,
+                    current_report_json  = report_json,
+                    llm             = llm,
+                )
+        else:
+            # Reconstruct from cached columns
+            consensus        = existing_output.consensus_json or {}
+            actuals          = extract_actuals(report_json)   # fast, no LLM
+            surprise         = existing_output.surprise_json or {}
+            market_reaction  = existing_output.market_analysis_json or {}
+            narrative_change = existing_output.narrative_change_json
+
+        # ------------------------------------------------------------------ #
+        # 6. Render HTML  (always re-render if LLM ran or analysis ran)
+        # ------------------------------------------------------------------ #
+        need_render = not skip_llm or not skip_analysis or not (
+            existing_output and existing_output.rendered_html
+        )
+
+        if need_render:
+            if render_fn is None:
+                from flask import render_template as render_fn  # type: ignore
+
+            template_analysis = _build_template_analysis(
+                consensus, actuals, surprise, market_reaction, narrative_change
+            )
+            try:
+                rendered_html = render_fn(
+                    "report.html",
+                    report=report_json,
+                    analysis=template_analysis,
+                )
+            except Exception as exc:
+                logger.error("Template rendering error: %s", exc)
+                rendered_html = (
+                    f"<html><body><pre>Rendering error: {exc}</pre></body></html>"
+                )
+        else:
+            rendered_html = existing_output.rendered_html
+
+        # ------------------------------------------------------------------ #
+        # 7. Persist everything
         # ------------------------------------------------------------------ #
         llm_model = "mock"
         if os.getenv("AI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"):
             llm_model = os.getenv("AI_MODEL", "claude-opus-4-6")
 
-        if existing_output and force:
-            existing_output.report_json   = report_json
+        if existing_output and (force or skip_llm):
+            # Update in place
+            if not skip_llm:
+                existing_output.report_json   = report_json
+                existing_output.llm_model     = llm_model
+            if not skip_analysis:
+                existing_output.consensus_json        = consensus
+                existing_output.surprise_json         = surprise
+                existing_output.market_analysis_json  = market_reaction
+                existing_output.narrative_change_json = narrative_change
             existing_output.rendered_html = rendered_html
-            existing_output.llm_model     = llm_model
             existing_output.created_at    = datetime.now(timezone.utc)
         else:
             new_output = ReportOutput(
-                filing_id     = filing_rec.id,
-                schema_version= "ReportData/v1",
-                report_json   = report_json,
-                rendered_html = rendered_html,
-                llm_model     = llm_model,
+                filing_id             = filing_rec.id,
+                schema_version        = "ReportData/v1",
+                report_json           = report_json,
+                rendered_html         = rendered_html,
+                llm_model             = llm_model,
+                consensus_json        = consensus        if not skip_analysis else None,
+                surprise_json         = surprise         if not skip_analysis else None,
+                market_analysis_json  = market_reaction  if not skip_analysis else None,
+                narrative_change_json = narrative_change if not skip_analysis else None,
             )
             db.add(new_output)
 
+        status = "generated" if not skip_llm else ("enriched" if not skip_analysis else "cached")
         return {
-            "status":    "generated",
+            "status":    status,
             "filing_id": filing_id,
             "url_html":  f"/reports/{ticker}/{filing_id}",
             "url_json":  f"/api/reports/{ticker}/{filing_id}",

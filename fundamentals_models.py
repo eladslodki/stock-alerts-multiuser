@@ -89,6 +89,12 @@ class ReportOutput(Base):
     # error_state: None | 'llm_error' | 'schema_error'
     error_state    = Column(String(50), nullable=True)
     error_message  = Column(Text, nullable=True)
+    # ── Earnings Expectations & Market Reaction Engine ───────────────────────
+    consensus_json        = Column(JSON, nullable=True)  # analyst expectations
+    surprise_json         = Column(JSON, nullable=True)  # beat/miss percentages
+    market_analysis_json  = Column(JSON, nullable=True)  # LLM reaction analysis
+    narrative_change_json = Column(JSON, nullable=True)  # LLM narrative comparison
+    # ────────────────────────────────────────────────────────────────────────
     created_at     = Column(DateTime, default=datetime.utcnow)
 
     filing = relationship("Filing", back_populates="report_outputs")
