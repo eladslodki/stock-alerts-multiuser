@@ -29,6 +29,17 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
+# =========================================================================== #
+# Custom exception — raised on 401 / authentication failures
+# =========================================================================== #
+class LLMAuthError(RuntimeError):
+    """
+    Raised when the LLM API rejects the request due to an invalid / missing
+    API key (HTTP 401).  Callers should abort the entire generation job and
+    surface this as a hard error rather than retrying or using an empty bag.
+    """
+
 # =========================================================================== #
 # Extraction prompts
 # =========================================================================== #
@@ -702,9 +713,19 @@ class AnthropicLLMClient(LLMClient):
         api_key: str | None = None,
         model: str | None = None,
     ):
-        self._api_key = api_key or os.getenv("AI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
-        self._model   = model or os.getenv("AI_MODEL", "claude-opus-4-6")
-        self._client  = None
+        raw_key = api_key or os.getenv("AI_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or ""
+        self._api_key = raw_key.strip()
+        if not self._api_key:
+            raise LLMAuthError(
+                "ANTHROPIC_API_KEY / AI_API_KEY is not set or is empty. "
+                "Set the key in your production environment."
+            )
+        self._model  = model or os.getenv("AI_MODEL", "claude-opus-4-6")
+        self._client = None
+        logger.info(
+            "AnthropicLLMClient ready: model=%s key_prefix=%s…",
+            self._model, self._api_key[:8],
+        )
 
     @property
     def model_name(self) -> str:
@@ -729,7 +750,26 @@ class AnthropicLLMClient(LLMClient):
             )
             return msg.content[0].text
         except Exception as exc:
-            logger.error("Anthropic API error: %s", exc)
+            # Surface 401 / authentication failures as LLMAuthError so callers
+            # can abort immediately instead of retrying with a doomed key.
+            exc_type = type(exc).__name__
+            exc_str  = str(exc).lower()
+            is_auth  = (
+                "401" in exc_str
+                or "authenticationerror" in exc_type.lower()
+                or "invalid x-api-key" in exc_str
+                or "invalid api key" in exc_str
+                or "authentication_error" in exc_str
+            )
+            if is_auth:
+                logger.error(
+                    "Anthropic 401 authentication error — key is invalid or missing: %s", exc
+                )
+                raise LLMAuthError(
+                    f"Anthropic API key rejected (401): {exc}. "
+                    "Check ANTHROPIC_API_KEY in your production environment."
+                ) from exc
+            logger.error("Anthropic API error (%s): %s", exc_type, exc)
             raise
 
 
@@ -739,19 +779,25 @@ class AnthropicLLMClient(LLMClient):
 def get_llm_client() -> LLMClient:
     """
     Return the appropriate LLM client based on environment:
-      - LLM_USE_MOCK=1  → always use mock
-      - AI_API_KEY set  → AnthropicLLMClient
-      - otherwise       → MockLLMClient
+      - LLM_USE_MOCK=1       → always use MockLLMClient (no API calls)
+      - AI_API_KEY or
+        ANTHROPIC_API_KEY set → AnthropicLLMClient
+      - otherwise             → MockLLMClient
+
+    Raises LLMAuthError if a key is present but empty after stripping.
     """
     use_mock = os.getenv("LLM_USE_MOCK", "").lower() in ("1", "true", "yes")
     if use_mock:
         logger.info("LLM: using MockLLMClient (LLM_USE_MOCK=1)")
         return MockLLMClient()
 
-    api_key = os.getenv("AI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+    api_key = (os.getenv("AI_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "")).strip()
     if not api_key:
-        logger.info("LLM: no API key found — using MockLLMClient")
+        logger.info("LLM: no API key found — using MockLLMClient (set AI_API_KEY or ANTHROPIC_API_KEY)")
         return MockLLMClient()
 
-    logger.info("LLM: using AnthropicLLMClient (model=%s)", os.getenv("AI_MODEL", "claude-opus-4-6"))
+    logger.info(
+        "LLM: ANTHROPIC_API_KEY present (len=%d) — using AnthropicLLMClient (model=%s)",
+        len(api_key), os.getenv("AI_MODEL", "claude-opus-4-6"),
+    )
     return AnthropicLLMClient(api_key=api_key)
