@@ -31,6 +31,20 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
+try:
+    import psutil as _psutil
+    _PROC = _psutil.Process(os.getpid())
+except ImportError:
+    _psutil = None
+    _PROC   = None
+
+
+def _rss_mb() -> str:
+    """Current process RSS in MB, or '?' if psutil not installed."""
+    if _PROC is None:
+        return "?"
+    return f"{_PROC.memory_info().rss / 1_048_576:.1f}"
+
 import bleach
 
 from fundamentals_db import get_db
@@ -459,6 +473,7 @@ def _build_template_analysis(
 
 
 def _generate_inner(ticker, filing_id, force, render_fn):
+    logger.info("[MEM] %s/%s start: %s MB RSS", ticker, filing_id, _rss_mb())
     with get_db() as db:
 
         # ------------------------------------------------------------------ #
@@ -540,6 +555,7 @@ def _generate_inner(ticker, filing_id, force, render_fn):
                 # Release the large raw HTML and full clean_text NOW so Python can
                 # GC them before the expensive LLM calls and rendering steps.
                 raw = result = None  # noqa: F841
+                logger.info("[MEM] %s after extraction (freed): %s MB RSS", ticker, _rss_mb())
 
                 if filing_text:
                     filing_text.raw_html     = ""          # never read back; don't waste RAM
@@ -591,6 +607,7 @@ def _generate_inner(ticker, filing_id, force, render_fn):
                     logger.error("Report still invalid after fix: %s", errors)
 
             report_json = sanitize_report_json(report_json)
+            logger.info("[MEM] %s after LLM map-reduce: %s MB RSS", ticker, _rss_mb())
 
         else:
             # Use cached report JSON
@@ -700,6 +717,8 @@ def _generate_inner(ticker, filing_id, force, render_fn):
             )
             db.add(new_output)
 
+        logger.info("[MEM] %s/%s done (%s): %s MB RSS", ticker, filing_id,
+                    "generated" if not skip_llm else "cached", _rss_mb())
         status = "generated" if not skip_llm else ("enriched" if not skip_analysis else "cached")
         return {
             "status":    status,
