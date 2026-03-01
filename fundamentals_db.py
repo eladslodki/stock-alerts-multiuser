@@ -50,6 +50,8 @@ def get_db():
 def init_db():
     """Create all fundamentals tables if they don't already exist."""
     # Import models here so Base.metadata is populated before create_all.
-    from fundamentals_models import Company, Filing, FilingText, ReportOutput  # noqa: F401
+    from fundamentals_models import (  # noqa: F401
+        Company, Filing, FilingText, ReportOutput, GenerationLock,
+    )
     Base.metadata.create_all(bind=engine)
     logger.info("Fundamentals DB tables ensured.")

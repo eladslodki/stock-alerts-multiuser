@@ -101,3 +101,21 @@ class ReportOutput(Base):
 
     def __repr__(self):
         return f"<ReportOutput filing_id={self.filing_id} schema={self.schema_version}>"
+
+
+class GenerationLock(Base):
+    """
+    Persistent per-filing generation lock with expiry.
+    Replaces the in-process threading.Lock so stale locks don't survive crashes.
+    key         – SEC accession number (filing_id)
+    acquired_at – when the lock was taken (naive UTC)
+    expires_at  – after this time the lock may be stolen (naive UTC)
+    """
+    __tablename__ = "fn_generation_locks"
+
+    key         = Column(String(200), primary_key=True)
+    acquired_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at  = Column(DateTime, nullable=False)
+
+    def __repr__(self):
+        return f"<GenerationLock key={self.key!r} expires={self.expires_at}>"
