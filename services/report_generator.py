@@ -984,4 +984,10 @@ def get_cached_report_html(ticker: str, filing_id: str) -> Optional[str]:
             .order_by(ReportOutput.created_at.desc())
             .first()
         )
-        return output.rendered_html if output else None
+        if not output:
+            return None
+        html = output.rendered_html
+        # Treat render-error placeholder as uncached so the user is prompted to regenerate
+        if html and html.startswith("<html><body><pre>Rendering error:"):
+            return None
+        return html
