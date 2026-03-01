@@ -232,11 +232,16 @@ def fetch_filing_content(source_url: str) -> Dict[str, str]:
     except requests.exceptions.RequestException as exc:
         raise RuntimeError(f"Cannot fetch filing document: {exc}") from exc
 
-    # Stream-read with a hard byte cap to prevent OOM
-    byte_chunks = []
+    # Stream-read with a hard byte cap to prevent OOM.
+    # Decode each 64 KB chunk immediately to str rather than accumulating bytes
+    # and decoding in one shot — this avoids holding bytes + str simultaneously
+    # (would be 2× the download size at peak).
+    import codecs
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    str_chunks: list = []
     total = 0
     for chunk in resp.iter_content(chunk_size=65_536):
-        byte_chunks.append(chunk)
+        str_chunks.append(decoder.decode(chunk, final=False))
         total += len(chunk)
         if total >= MAX_FILING_BYTES:
             logger.warning(
@@ -244,9 +249,10 @@ def fetch_filing_content(source_url: str) -> Dict[str, str]:
                 total, MAX_FILING_BYTES, source_url,
             )
             break
+    str_chunks.append(decoder.decode(b"", final=True))  # flush remaining bytes
     resp.close()
 
-    raw_text = b"".join(byte_chunks).decode("utf-8", errors="replace")
+    raw_text = "".join(str_chunks)
     content_type = resp.headers.get("content-type", "").lower()
 
     if "html" in content_type or re.search(r"\.(htm|html)$", source_url, re.I):
