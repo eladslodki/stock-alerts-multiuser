@@ -190,14 +190,17 @@ def prepare_filing_text(html: str, raw_text: str = "") -> Dict:
         clean_text = ""
 
     relevant_text = extract_relevant_sections(clean_text)
+    # Free the full clean_text (~2 MB) before chunking; only relevant_text is needed downstream.
+    n_clean = len(clean_text)
+    del clean_text
+
     chunks = chunk_text(relevant_text)
 
     logger.info(
         "Text pipeline: %d raw chars → %d clean → %d relevant → %d chunks",
-        len(html or raw_text), len(clean_text), len(relevant_text), len(chunks),
+        len(html or raw_text), n_clean, len(relevant_text), len(chunks),
     )
     return {
-        "clean_text":    clean_text,
         "relevant_text": relevant_text,
         "chunks":        chunks,
     }
