@@ -27,6 +27,7 @@ Caching tiers
 import json
 import logging
 import os
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -53,6 +54,8 @@ from fundamentals_models import Company, Filing, FilingText, ReportOutput
 from providers.sec_provider import (
     list_filings as sec_list_filings,
     fetch_filing_content,
+    fetch_company_facts,
+    extract_facts_for_period,
     ticker_to_cik,
     get_company_info,
 )
@@ -61,6 +64,7 @@ from services.generation_lock import acquire_lock, release_lock
 from services.llm_client import (
     get_llm_client,
     LLMAuthError,
+    ANTI_HALLUCINATION_SYSTEM_PROMPT,
     MAP_PROMPT_TEMPLATE,
     REDUCE_PROMPT_TEMPLATE,
     FIX_SCHEMA_PROMPT,
@@ -208,6 +212,59 @@ def _merge_facts_bags(bags: List[dict]) -> dict:
     return merged
 
 
+# Extracts significant digit sequences from formatted value strings like "$4.8B", "$980M".
+_VALUE_NUM_RE = re.compile(r'\$?([\d,]+(?:\.\d+)?)')
+
+
+def _grounding_check(facts_bag: dict, chunk_text: str) -> int:
+    """
+    Warn about facts items whose numeric values are not present in the source chunk.
+
+    For each item in the facts lists (revenue, profitability, cash flow, balance
+    sheet), the significant digit sequence of the "value" field is compared to
+    the chunk text (with commas stripped from both sides).  A WARNING is logged
+    for every item whose digits cannot be found.
+
+    This is a best-effort diagnostic: items are NOT removed, and false positives
+    may occur when a value is expressed in different units (e.g. "$4.8B" vs
+    "4,800,000,000").  The count returned helps detect hallucinated numbers.
+
+    Returns
+    -------
+    int – count of ungrounded numeric claims detected.
+    """
+    ungrounded    = 0
+    chunk_no_comma = chunk_text.replace(",", "")
+    checked_fields = [
+        "revenue_items", "profitability_items",
+        "cash_flow_items", "balance_sheet_items",
+    ]
+
+    for field in checked_fields:
+        for item in facts_bag.get(field, []):
+            value_str = str(item.get("value", "") or "").strip()
+            if not value_str or value_str.lower() in ("null", "none", "—", "-", "n/a"):
+                continue
+
+            # Extract numeric digit sequences (≥2 chars after stripping commas).
+            nums = [
+                m.group(1).replace(",", "")
+                for m in _VALUE_NUM_RE.finditer(value_str)
+                if len(m.group(1).replace(",", "")) >= 2
+            ]
+            if not nums:
+                continue
+
+            if not any(n in chunk_no_comma for n in nums):
+                ungrounded += 1
+                logger.warning(
+                    "Grounding miss: %s value=%r not found in chunk (chunk_len=%d)",
+                    field, value_str[:60], len(chunk_text),
+                )
+
+    return ungrounded
+
+
 def _run_map_reduce(
     chunks: List[str],
     ticker: str,
@@ -230,10 +287,18 @@ def _run_map_reduce(
     for i, chunk in enumerate(chunks[:6]):
         try:
             prompt   = MAP_PROMPT_TEMPLATE.format(chunk_text=chunk)
-            response = llm.complete(prompt, max_tokens=2_000)
-            facts    = _parse_llm_json(response)
+            response = llm.complete(
+                prompt,
+                max_tokens=2_000,
+                system_prompt=ANTI_HALLUCINATION_SYSTEM_PROMPT,
+            )
+            facts   = _parse_llm_json(response)
+            missed  = _grounding_check(facts, chunk)
             facts_bags.append(facts)
-            logger.info("Map chunk %d/%d: OK", i + 1, min(len(chunks), 6))
+            logger.info(
+                "Map chunk %d/%d: OK (grounding_misses=%d)",
+                i + 1, min(len(chunks), 6), missed,
+            )
         except LLMAuthError:
             # Auth failure is unrecoverable — abort immediately, do not try
             # remaining chunks or proceed to reduce with empty bag.
@@ -619,7 +684,33 @@ def _generate_inner(ticker, filing_id, force, render_fn, quarter_label=None):
                     time.monotonic() - t3b, _rss_mb(),
                 )
 
-                # STEP 4-7: prestrip → html_to_text → extract → chunk
+                # STEP 3b.5: fetch deterministic XBRL facts for cross-check
+                if fd.get("cik"):
+                    logger.info(
+                        "STEP 3b.5 begin fetch_company_facts: CIK=%s accn=%s",
+                        fd["cik"], filing_id,
+                    )
+                    t3b5 = time.monotonic()
+                    facts_data = fetch_company_facts(fd["cik"])
+                    if facts_data:
+                        xbrl_facts = extract_facts_for_period(facts_data, filing_id)
+                        found_count = sum(1 for v in xbrl_facts.values() if v is not None)
+                        logger.info(
+                            "STEP 3b.5 done: %d/%d XBRL facts found for this filing "
+                            "[%.2fs]: %s",
+                            found_count, len(xbrl_facts),
+                            time.monotonic() - t3b5,
+                            {k: v for k, v in xbrl_facts.items() if v is not None},
+                        )
+                    else:
+                        xbrl_facts = {}
+                        logger.info(
+                            "STEP 3b.5 done: companyfacts unavailable [%.2fs]",
+                            time.monotonic() - t3b5,
+                        )
+                    facts_data = None   # free large JSON immediately
+
+                # STEP 4-7: prestrip → html_to_text → xbrl_filter → extract → chunk
                 # (detailed STEP 4-7 logs emitted by extract_text.prepare_filing_text)
                 result = prepare_filing_text(raw.get("html", ""), raw.get("text", ""))
 

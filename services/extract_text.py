@@ -34,8 +34,86 @@ CHUNK_OVERLAP        = 500
 # Lines to take from each matched section window
 LINES_PER_SECTION    = 400
 
+# ── XBRL taxonomy noise filter ───────────────────────────────────────────────
+# SEC EDGAR iXBRL filings leak thousands of taxonomy strings into plain text,
+# e.g. "us-gaap:Revenues", "srt:ConsolidatedEntitiesMember", "NaturalGasMember".
+# These fill the LLM context window without adding financial information.
+#
+# Pattern 1: unambiguous namespace-colon prefixes used by XBRL taxonomies.
+# Pattern 2: CamelCase identifiers ending in structural XBRL suffix words that
+#            virtually never appear as plain English (Member, Domain, Axis, LineItems).
+_XBRL_LINE_RE = re.compile(
+    r'(?:us-gaap|srt|dei|ifrs-full|invest|country|currency|exch|naics|sic|stpr|xbrli):'
+    r'|[A-Z][a-zA-Z0-9]{4,}(?:Member|Domain|Axis|LineItems)\b',
+)
+# "Financial significance" number — requires a dollar sign, OR 4+ consecutive digits,
+# OR a comma-formatted number (e.g. 4,800,000,000).  A small percentage like "12%"
+# or "7%" does NOT qualify, preventing narrative prose from keeping adjacent XBRL lines.
+_FINANCIAL_NUM_RE = re.compile(
+    r'\$[\d,.]+'              # dollar-prefixed: $4.8B, $760M, $1,234
+    r'|\b\d{4,}'              # 4+ consecutive digits: 4800000000
+    r'|\b\d{1,3}(?:,\d{3})+'  # comma-formatted: 4,800 or 4,800,000,000
+)
+
 
 # ── Memory instrumentation ───────────────────────────────────────────────────
+def filter_xbrl_noise(text: str) -> str:
+    """
+    Remove XBRL taxonomy / member lines that carry no numeric content.
+
+    An EDGAR iXBRL filing converted to plain text contains thousands of lines
+    like "us-gaap:Revenues", "srt:ConsolidatedEntitiesMember", or CamelCase
+    identifiers like "NaturalGasMidstreamMember" that are pure taxonomy noise.
+    These lines fill up the LLM context window without adding information.
+
+    A line is discarded when:
+    1. It matches _XBRL_LINE_RE (namespace prefix or CamelCase XBRL suffix), AND
+    2. Neither the line itself nor the immediately following line contains a
+       financially significant number (dollar-sign, 4+ digits, or comma-formatted).
+
+    Window is [i, i+1] only (current + next, no lookback).  In iXBRL documents
+    the concept name precedes its value, not the other way around.  Restricting
+    to a forward-only window prevents narrative prose sentences before an XBRL
+    block from keeping unrelated taxonomy lines.
+
+    Returns the filtered text preserving the original line structure.
+    """
+    if not text:
+        return text
+
+    lines = text.splitlines()
+    n     = len(lines)
+    keep  = [True] * n
+
+    for i, line in enumerate(lines):
+        if not _XBRL_LINE_RE.search(line):
+            continue
+        # Check current line and immediately following line for financial number.
+        hi = min(n, i + 2)
+        if not any(_FINANCIAL_NUM_RE.search(lines[j]) for j in range(i, hi)):
+            keep[i] = False
+
+    removed = keep.count(False)
+    if removed:
+        logger.debug(
+            "filter_xbrl_noise: removed %d/%d XBRL-only lines (%.0f%%)",
+            removed, n, 100.0 * removed / n,
+        )
+
+    buf   = io.StringIO()
+    first = True
+    for i, line in enumerate(lines):
+        if keep[i]:
+            if not first:
+                buf.write("\n")
+            buf.write(line)
+            first = False
+
+    result = buf.getvalue()
+    buf.close()
+    return result
+
+
 def log_mem(label: str) -> None:
     """Log current process RSS MB at a named pipeline checkpoint."""
     try:
@@ -332,6 +410,19 @@ def prepare_filing_text(html: str, raw_text: str = "") -> Dict:
         log_mem("after_html_to_text")
     else:
         clean_text = ""
+
+    # STEP 5.5 — filter XBRL taxonomy noise lines
+    n_before_xbrl = len(clean_text)
+    logger.info("STEP 5.5 begin filter_xbrl_noise: input %d chars", n_before_xbrl)
+    t55 = _time.monotonic()
+    clean_text = filter_xbrl_noise(clean_text)
+    logger.info(
+        "STEP 5.5 done filter_xbrl_noise: %d → %d chars (%.0f%% removed) [%.2fs]",
+        n_before_xbrl, len(clean_text),
+        100.0 * (1 - len(clean_text) / max(n_before_xbrl, 1)),
+        _time.monotonic() - t55,
+    )
+    log_mem("after_xbrl_filter")
 
     n_clean = len(clean_text)
 
