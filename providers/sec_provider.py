@@ -79,6 +79,14 @@ def _get(url: str, *, as_json: bool = True, timeout: int = 30) -> Any:
 # --------------------------------------------------------------------------- #
 _CIK_CACHE: Dict[str, str] = {}
 
+# Cache for list_filings results.
+# The submissions JSON for large companies is 1–3 MB; re-downloading it inside
+# _generate_inner (called seconds after the user's /api/filings search) spikes
+# memory by 4–8 MB at the exact moment the baseline is already high.
+# A 5-minute TTL covers the normal search→click→generate user flow.
+_FILINGS_CACHE: Dict[str, Dict] = {}   # ticker_upper -> {"ts": float, "data": list}
+_FILINGS_CACHE_TTL = 300               # seconds
+
 
 def ticker_to_cik(ticker: str) -> Optional[str]:
     """
@@ -146,6 +154,15 @@ def list_filings(
     if form_types is None:
         form_types = ["10-Q", "10-K"]
 
+    ticker_upper = ticker.upper().strip()
+
+    # Return cached result if fresh — avoids re-downloading the submissions JSON
+    # when generate is called shortly after the user's filing search.
+    cached = _FILINGS_CACHE.get(ticker_upper)
+    if cached and (time.time() - cached["ts"]) < _FILINGS_CACHE_TTL:
+        logger.debug("list_filings: cache hit for %s", ticker_upper)
+        return cached["data"]
+
     cik = ticker_to_cik(ticker)
     if not cik:
         raise ValueError(f"Cannot resolve ticker '{ticker}' to a CIK number.")
@@ -204,6 +221,7 @@ def list_filings(
         if len(results) >= max_results:
             break
 
+    _FILINGS_CACHE[ticker_upper] = {"ts": time.time(), "data": results}
     return results
 
 
