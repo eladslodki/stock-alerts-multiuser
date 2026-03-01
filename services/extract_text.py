@@ -353,11 +353,13 @@ def _run_checks() -> None:
     print("✓ quarter mapping")
 
     # Check 2: prestrip reduces size significantly on table-heavy HTML
-    sample = ("<html><body>"
-              "<table><tr><td>$1,234</td><td>$5,678</td></tr></table>" * 200
-              "<p>Management's Discussion: revenue grew 15% year over year.</p>"
-              "<script>alert(1)</script>"
-              "</body></html>")
+    sample = (
+        "<html><body>"
+        + "<table><tr><td>$1,234</td><td>$5,678</td></tr></table>" * 200
+        + "<p>Management's Discussion: revenue grew 15% year over year.</p>"
+        + "<script>alert(1)</script>"
+        + "</body></html>"
+    )
     stripped = prestrip_html(sample)
     assert len(stripped) < len(sample) * 0.3, "prestrip should remove >70% of table-heavy HTML"
     assert "revenue grew" in stripped, "narrative text must survive prestrip"
