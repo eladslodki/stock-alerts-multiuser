@@ -15,6 +15,8 @@ SEC requires a User-Agent header with your app name and email.
 Set SEC_USER_AGENT env var, e.g.:
   SEC_USER_AGENT="MyApp/1.0 contact@example.com"
 """
+import codecs
+import io
 import os
 import re
 import time
@@ -23,10 +25,10 @@ from typing import Optional, List, Dict, Any
 
 import requests
 
-# Max bytes to download from a single filing document.
-# 10-K filings can be 50-200 MB; 3 MB is enough to capture the key financial
-# sections while staying well within memory limits of a constrained worker.
-MAX_FILING_BYTES = int(os.getenv("SEC_MAX_FILING_BYTES", str(3 * 1024 * 1024)))
+# Hard network cap for filing content downloads.
+# 2.5 MB is enough to capture all key narrative sections (MD&A, Risk Factors,
+# Outlook) from any 10-Q/10-K while staying well within RAM constraints.
+MAX_FILING_BYTES = int(os.getenv("SEC_MAX_FILING_BYTES", str(2_500_000)))
 
 logger = logging.getLogger(__name__)
 
@@ -232,8 +234,9 @@ def fetch_filing_content(source_url: str) -> Dict[str, str]:
     """
     Download the primary filing document, capped at MAX_FILING_BYTES.
 
-    Streams the response so that large 10-K filings (50-200 MB) do not
-    load entirely into memory before we can truncate them.
+    Streams the response and decodes each chunk incrementally into a StringIO
+    buffer.  This avoids holding both the raw bytes list AND the joined/decoded
+    string in memory simultaneously (which was 2× the filing size at peak).
 
     Returns a dict with keys:
         html  – raw HTML string (may be empty)
@@ -250,16 +253,14 @@ def fetch_filing_content(source_url: str) -> Dict[str, str]:
     except requests.exceptions.RequestException as exc:
         raise RuntimeError(f"Cannot fetch filing document: {exc}") from exc
 
-    # Stream-read with a hard byte cap to prevent OOM.
-    # Decode each 64 KB chunk immediately to str rather than accumulating bytes
-    # and decoding in one shot — this avoids holding bytes + str simultaneously
-    # (would be 2× the download size at peak).
-    import codecs
+    # Decode each 64 KB chunk into StringIO immediately — avoids the
+    # bytes-list → joined-bytes → decoded-str triple allocation.
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-    str_chunks: list = []
-    total = 0
+    buf     = io.StringIO()
+    total   = 0
+
     for chunk in resp.iter_content(chunk_size=65_536):
-        str_chunks.append(decoder.decode(chunk, final=False))
+        buf.write(decoder.decode(chunk, final=False))
         total += len(chunk)
         if total >= MAX_FILING_BYTES:
             logger.warning(
@@ -267,10 +268,13 @@ def fetch_filing_content(source_url: str) -> Dict[str, str]:
                 total, MAX_FILING_BYTES, source_url,
             )
             break
-    str_chunks.append(decoder.decode(b"", final=True))  # flush remaining bytes
+
+    buf.write(decoder.decode(b"", final=True))   # flush partial multibyte char
     resp.close()
 
-    raw_text = "".join(str_chunks)
+    raw_text = buf.getvalue()
+    buf.close()
+
     content_type = resp.headers.get("content-type", "").lower()
 
     if "html" in content_type or re.search(r"\.(htm|html)$", source_url, re.I):
@@ -278,5 +282,4 @@ def fetch_filing_content(source_url: str) -> Dict[str, str]:
     elif "text" in content_type or source_url.endswith(".txt"):
         return {"html": "", "text": raw_text}
     else:
-        # Best-effort: treat as HTML
         return {"html": raw_text, "text": ""}

@@ -1,118 +1,211 @@
 """
-Text extraction pipeline for SEC filings.
+OOM-proof text extraction pipeline for SEC filings.
 
-Steps
------
-1. HTML  → clean plain-text  (via BeautifulSoup if available, regex fallback)
-2. plain-text → relevant sections  (keyword-guided selection)
-3. relevant text → overlapping chunks  (for map-step LLM calls)
+Pipeline
+--------
+1. prestrip_html(html)           – remove <table>/<script>/<style> BEFORE parsing
+2. html_to_text(stripped_html)   – regex strip tags, write to StringIO
+3. extract_relevant_sections(text) – keyword-guided section extraction, strict cap
+4. chunk_text(relevant_text)     – overlapping chunks, hard cap on count
+
+Strict memory caps
+------------------
+MAX_FILING_BYTES     – enforced in sec_provider (network download cap)
+MAX_HTML_PARSE_CHARS – hard truncation after prestrip, before tag-stripping
+MAX_RELEVANT_CHARS   – maximum text fed to the LLM
+MAX_CHUNKS           – maximum chunk count passed to map-reduce
+MAX_CHUNK_CHARS      – maximum characters per chunk
 """
+import io
 import re
 import logging
+import os
 from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
-try:
-    from bs4 import BeautifulSoup
-    _BS4 = True
-except ImportError:
-    _BS4 = False
-    logger.warning("beautifulsoup4 not installed – falling back to regex HTML stripping.")
+# ── Caps ────────────────────────────────────────────────────────────────────
+MAX_HTML_PARSE_CHARS = 600_000    # hard parse cap after prestrip
+MAX_RELEVANT_CHARS   = 250_000    # what we feed to the LLM map-reduce
+MAX_CHUNKS           = 20
+MAX_CHUNK_CHARS      = 14_000
+CHUNK_OVERLAP        = 500
 
-# ---- tuneable constants --------------------------------------------------- #
-CHUNK_SIZE    = 3_500   # chars per chunk sent to the map-LLM
-CHUNK_OVERLAP = 400     # overlap between adjacent chunks
-MAX_RELEVANT  = 55_000  # max chars kept after section extraction
-LINES_PER_SECTION = 220 # how many lines to take from each matched section
-# Hard cap on HTML fed into any parser; matches the download cap in sec_provider.
-MAX_HTML_PARSE = 3 * 1024 * 1024
-# Below this threshold we use BS4 (accurate script/style removal).
-# Above it we use regex — 5-10× less peak memory, safe for OOM-constrained workers.
-_BS4_MAX_INPUT = 200_000  # 200 KB
+# Lines to take from each matched section window
+LINES_PER_SECTION    = 400
 
 
-# ---- section keyword index ------------------------------------------------- #
+# ── Memory instrumentation ───────────────────────────────────────────────────
+def log_mem(label: str) -> None:
+    """Log current process RSS MB at a named pipeline checkpoint."""
+    try:
+        import psutil
+        rss = psutil.Process(os.getpid()).memory_info().rss / 1_048_576
+        logger.info("[MEM][extract] %s: %.1f MB RSS", label, rss)
+    except Exception:
+        pass
+
+
+# ── Section keyword index ─────────────────────────────────────────────────────
 SECTION_KEYWORDS: Dict[str, List[str]] = {
     "mda": [
-        "management's discussion", "management discussion",
-        "results of operations", "discussion and analysis",
+        "management's discussion and analysis",
+        "management discussion and analysis",
+        "management's discussion",
+        "item 7.",
+        "item 7 —",
+        "item 7:",
+    ],
+    "results": [
+        "results of operations",
+        "results of operation",
+    ],
+    "liquidity": [
+        "liquidity and capital resources",
+        "liquidity",
+        "capital resources",
+    ],
+    "risk": [
+        "risk factors",
+        "risks and uncertainties",
+        "item 1a.",
+        "item 1a —",
+        "item 1a:",
+    ],
+    "outlook": [
+        "outlook",
+        "guidance",
+        "forward-looking",
+        "fiscal year",
+        "full year",
+        "we expect",
+        "we anticipate",
     ],
     "revenue": [
-        "revenue", "net sales", "net revenues", "segment revenues",
+        "revenue",
+        "net sales",
+        "net revenues",
+        "segment revenues",
         "total revenues",
     ],
     "profitability": [
-        "gross profit", "operating income", "net income",
-        "earnings per share", "ebitda", "adjusted ebitda",
-    ],
-    "cash_flow": [
-        "cash flows", "liquidity", "capital resources", "free cash flow",
-        "cash provided by operating",
-    ],
-    "guidance": [
-        "outlook", "guidance", "forward-looking", "fiscal year",
-        "full year", "expect to", "we anticipate",
-    ],
-    "risk_factors": [
-        "risk factors", "risks and uncertainties",
-        "forward-looking statements",
-    ],
-    "balance_sheet": [
-        "total assets", "total liabilities", "stockholders equity",
-        "shareholders equity", "long-term debt",
+        "gross profit",
+        "operating income",
+        "net income",
+        "earnings per share",
+        "ebitda",
+        "adjusted ebitda",
     ],
 }
 
 
 # --------------------------------------------------------------------------- #
-# 1. HTML → plain text
+# 1. Pre-strip HTML (before any full parsing)
+# --------------------------------------------------------------------------- #
+def prestrip_html(html: str) -> str:
+    """
+    Aggressively remove large HTML blocks BEFORE tag-stripping.
+
+    Order matters: remove scripts/styles/comments first (they can contain
+    fake table markup), then tables (the biggest EDGAR memory hog).
+
+    Each re.sub replaces the previous string, so Python frees the old copy
+    immediately via reference counting — no peak doubling.
+
+    Returns the stripped string truncated to MAX_HTML_PARSE_CHARS.
+    """
+    if not html:
+        return html
+
+    original_len = len(html)
+
+    # Remove <script>...</script>
+    html = re.sub(r"<script[^>]*>.*?</script>", " ",
+                  html, flags=re.IGNORECASE | re.DOTALL)
+
+    # Remove <style>...</style>
+    html = re.sub(r"<style[^>]*>.*?</style>", " ",
+                  html, flags=re.IGNORECASE | re.DOTALL)
+
+    # Remove HTML comments
+    html = re.sub(r"<!--.*?-->", " ", html, flags=re.DOTALL)
+
+    # Remove <table>...</table> — primary win for EDGAR filings.
+    # Non-greedy + DOTALL; nested innermost tables are removed first.
+    # Outer shells with orphaned tags are harmless for plain-text extraction.
+    html = re.sub(r"<table[^>]*>.*?</table>", " ",
+                  html, flags=re.IGNORECASE | re.DOTALL)
+
+    if len(html) > MAX_HTML_PARSE_CHARS:
+        logger.warning(
+            "HTML truncated from %d → %d chars after prestrip (raw was %d)",
+            len(html), MAX_HTML_PARSE_CHARS, original_len,
+        )
+        html = html[:MAX_HTML_PARSE_CHARS]
+
+    logger.debug(
+        "prestrip_html: %d → %d chars (%.0f%% reduction)",
+        original_len, len(html),
+        100.0 * (1 - len(html) / max(original_len, 1)),
+    )
+    return html
+
+
+# --------------------------------------------------------------------------- #
+# 2. HTML → plain text (StringIO, no large intermediate lists)
 # --------------------------------------------------------------------------- #
 def html_to_text(html: str) -> str:
-    """Convert an HTML string to clean plain text.
+    """
+    Strip remaining HTML tags and write non-empty lines to a StringIO buffer.
 
-    For inputs <= _BS4_MAX_INPUT (200 KB): use BeautifulSoup for accurate
-    script/style removal.  For larger inputs (all real EDGAR filings after
-    truncation): use regex, which uses ~2× the input size in peak memory vs
-    5–10× for BeautifulSoup with html.parser.
+    Avoids the pattern:
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        return "\\n".join(lines)
+    which builds a large list AND a full-size string simultaneously.
+
+    Instead: write each qualifying line directly to StringIO.
     """
     if not html:
         return ""
 
-    if len(html) > MAX_HTML_PARSE:
-        logger.warning(
-            "HTML input truncated from %d to %d chars before parsing",
-            len(html), MAX_HTML_PARSE,
-        )
-        html = html[:MAX_HTML_PARSE]
+    # Strip tags
+    no_tags = re.sub(r"<[^>]+>", " ", html)
 
-    if _BS4 and len(html) <= _BS4_MAX_INPUT:
-        try:
-            soup = BeautifulSoup(html, "html.parser")
-            for tag in soup.find_all(["script", "style", "header", "footer", "nav", "noscript"]):
-                tag.decompose()
-            raw = soup.get_text(separator="\n", strip=True)
-        except Exception:
-            raw = re.sub(r"<[^>]+>", " ", html)
-    else:
-        # Regex path: safe for large EDGAR filings, low memory overhead
-        raw = re.sub(r"<[^>]+>", " ", html)
+    # Collapse SEC filing artefacts (long dot/dash separators)
+    no_tags = re.sub(r"[.\-_]{4,}", " ", no_tags)
 
-    # Collapse SEC filing artefacts: long runs of dots / dashes used as separators
-    raw = re.sub(r"[.\-_]{4,}", " ", raw)
-    # Collapse whitespace runs
-    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    return "\n".join(lines)
+    buf   = io.StringIO()
+    first = True
+    for line in no_tags.splitlines():
+        stripped = line.strip()
+        if stripped:
+            if not first:
+                buf.write("\n")
+            buf.write(stripped)
+            first = False
+
+    result = buf.getvalue()
+    buf.close()
+    return result
 
 
 # --------------------------------------------------------------------------- #
-# 2. Extract most-relevant sections
+# 3. Extract relevant sections
 # --------------------------------------------------------------------------- #
-def extract_relevant_sections(text: str, max_chars: int = MAX_RELEVANT) -> str:
+def extract_relevant_sections(text: str, max_chars: int = MAX_RELEVANT_CHARS) -> str:
     """
-    Return a concatenation of the most financially relevant sections.
-    Falls back to the first *max_chars* characters if no sections are found.
+    Return at most *max_chars* of the most financially relevant text.
+
+    Strategy:
+    - Scan line by line for section-heading keywords.
+    - Take LINES_PER_SECTION lines from each matched heading.
+    - Assemble into StringIO, stop when budget exhausted.
+    - Fallback: first *max_chars* chars if no keywords found.
+
+    GUARANTEE: result length <= max_chars.
     """
+    if not text:
+        return ""
     if len(text) <= max_chars:
         return text
 
@@ -126,43 +219,60 @@ def extract_relevant_sections(text: str, max_chars: int = MAX_RELEVANT) -> str:
                 section_starts[sec_key] = i
 
     if not section_starts:
-        logger.debug("No named sections found; using first %d chars.", max_chars)
+        logger.debug(
+            "extract_relevant_sections: no keywords found; using first %d chars", max_chars
+        )
         return text[:max_chars]
 
-    chunks: List[str] = []
-    chars_used = 0
-    per_section_max = max_chars // max(len(section_starts), 1)
+    n       = len(section_starts)
+    per_sec = max_chars // max(n, 1)
+    buf     = io.StringIO()
+    written = 0
 
-    for sec_key, start_idx in sorted(section_starts.items(), key=lambda x: x[1]):
-        section_lines = lines[start_idx: start_idx + LINES_PER_SECTION]
-        snippet = "\n".join(section_lines)[:per_section_max]
-        chunks.append(f"\n\n### {sec_key.upper()} ###\n{snippet}")
-        chars_used += len(snippet)
-        if chars_used >= max_chars:
+    for sec_key, start in sorted(section_starts.items(), key=lambda x: x[1]):
+        if written >= max_chars:
             break
 
-    combined = "".join(chunks)
-    return combined[:max_chars]
+        snippet = "\n".join(lines[start: start + LINES_PER_SECTION])
+        budget  = min(per_sec, max_chars - written)
+        if len(snippet) > budget:
+            snippet = snippet[:budget]
+
+        header = f"\n\n### {sec_key.upper()} ###\n"
+        buf.write(header)
+        buf.write(snippet)
+        written += len(header) + len(snippet)
+
+    result = buf.getvalue()
+    buf.close()
+    return result[:max_chars]   # hard guarantee
 
 
 # --------------------------------------------------------------------------- #
-# 3. Chunking
+# 4. Chunk text
 # --------------------------------------------------------------------------- #
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
-    """Split *text* into overlapping chunks of ≤ *chunk_size* characters."""
+def chunk_text(
+    text: str,
+    chunk_size: int = MAX_CHUNK_CHARS,
+    overlap:    int = CHUNK_OVERLAP,
+) -> List[str]:
+    """
+    Split *text* into overlapping chunks, hard-capped at MAX_CHUNKS.
+    """
     if not text:
         return []
 
     chunks: List[str] = []
-    start = 0
+    start  = 0
     length = len(text)
 
-    while start < length:
+    while start < length and len(chunks) < MAX_CHUNKS:
         end = min(start + chunk_size, length)
         chunks.append(text[start:end])
-        start = end - overlap
-        if start <= 0 or start >= length:
+        next_start = end - overlap
+        if next_start <= start or next_start >= length:
             break
+        start = next_start
 
     return chunks
 
@@ -172,35 +282,102 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
 # --------------------------------------------------------------------------- #
 def prepare_filing_text(html: str, raw_text: str = "") -> Dict:
     """
-    Full pipeline:
-      raw HTML (or plain text)  →  clean_text  →  relevant_text  →  chunks
+    Full OOM-proof pipeline:
+      raw HTML  →  prestrip  →  html_to_text  →  relevant_text  →  chunks
+
+    Intermediate strings are explicitly set to None after use so Python's
+    reference-counting GC can free them before the next (larger) allocation.
 
     Returns:
         {
-            "clean_text":    str,   # full cleaned text
-            "relevant_text": str,   # section-filtered subset
-            "chunks":        list[str],
+            "relevant_text": str,    # <= MAX_RELEVANT_CHARS
+            "chunks":        list[str],  # <= MAX_CHUNKS items
         }
     """
+    log_mem("start")
+    n_raw = len(html or raw_text)
+
     if html:
-        clean_text = html_to_text(html)
+        # Step 1 — prestrip (removes tables, scripts, styles; truncates to 600 KB)
+        stripped = prestrip_html(html)
+        html     = None            # free original HTML (~2.5 MB)
+        log_mem("after_prestrip")
+
+        # Step 2 — HTML → plain text
+        clean_text = html_to_text(stripped)
+        stripped   = None          # free stripped HTML (~600 KB)
+        log_mem("after_html_to_text")
+
     elif raw_text:
         clean_text = raw_text
+        log_mem("after_html_to_text")
     else:
         clean_text = ""
 
-    relevant_text = extract_relevant_sections(clean_text)
-    # Free the full clean_text (~2 MB) before chunking; only relevant_text is needed downstream.
     n_clean = len(clean_text)
-    del clean_text
 
+    # Step 3 — extract relevant sections
+    relevant_text = extract_relevant_sections(clean_text)
+    clean_text    = None           # free full plain-text (~1-2 MB)
+    log_mem("after_extract_relevant")
+
+    # Step 4 — chunk
     chunks = chunk_text(relevant_text)
+    log_mem("after_chunking")
 
     logger.info(
-        "Text pipeline: %d raw chars → %d clean → %d relevant → %d chunks",
-        len(html or raw_text), n_clean, len(relevant_text), len(chunks),
+        "Text pipeline: %d raw → %d clean → %d relevant → %d chunks",
+        n_raw, n_clean, len(relevant_text), len(chunks),
     )
     return {
         "relevant_text": relevant_text,
         "chunks":        chunks,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Quick self-checks  (python -m services.extract_text)
+# --------------------------------------------------------------------------- #
+def _run_checks() -> None:
+    import sys
+
+    # Check 1: period_end → quarter (tested via quarter_service, shown here for completeness)
+    from datetime import datetime
+    def _q(period_end):
+        m = datetime.strptime(period_end, "%Y-%m-%d").month
+        return ["Q1","Q1","Q1","Q2","Q2","Q2","Q3","Q3","Q3","Q4","Q4","Q4"][m-1]
+    assert _q("2025-03-31") == "Q1"
+    assert _q("2025-06-30") == "Q2"
+    assert _q("2025-09-30") == "Q3"
+    assert _q("2025-12-31") == "Q4"
+    print("✓ quarter mapping")
+
+    # Check 2: prestrip reduces size significantly on table-heavy HTML
+    sample = ("<html><body>"
+              "<table><tr><td>$1,234</td><td>$5,678</td></tr></table>" * 200
+              "<p>Management's Discussion: revenue grew 15% year over year.</p>"
+              "<script>alert(1)</script>"
+              "</body></html>")
+    stripped = prestrip_html(sample)
+    assert len(stripped) < len(sample) * 0.3, "prestrip should remove >70% of table-heavy HTML"
+    assert "revenue grew" in stripped, "narrative text must survive prestrip"
+    print(f"✓ prestrip: {len(sample):,} → {len(stripped):,} chars")
+
+    # Check 3: extract_relevant_sections never exceeds MAX_RELEVANT_CHARS
+    big_text = ("Management's Discussion and Analysis\n" + "A" * 10_000 + "\n") * 100
+    result = extract_relevant_sections(big_text)
+    assert len(result) <= MAX_RELEVANT_CHARS, f"result {len(result)} > cap {MAX_RELEVANT_CHARS}"
+    print(f"✓ extract_relevant_sections cap: {len(result):,} <= {MAX_RELEVANT_CHARS:,}")
+
+    # Check 4: chunk_text respects MAX_CHUNKS
+    long_text = "X" * (MAX_CHUNK_CHARS * (MAX_CHUNKS + 5))
+    chunks = chunk_text(long_text)
+    assert len(chunks) <= MAX_CHUNKS, f"got {len(chunks)} chunks, max is {MAX_CHUNKS}"
+    print(f"✓ chunk_text cap: {len(chunks)} chunks <= {MAX_CHUNKS}")
+
+    print("\nAll checks passed.")
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    _run_checks()

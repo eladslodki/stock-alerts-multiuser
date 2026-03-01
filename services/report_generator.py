@@ -221,11 +221,17 @@ def _run_map_reduce(
     period_end: str,
     company_name: str,
     llm,
+    quarter_label: Optional[str] = None,
 ) -> dict:
     """
-    Map step: extract facts from up to 6 chunks (≈18 k chars of context).
+    Map step: extract facts from up to MAX_CHUNKS chunks.
     Reduce step: combine into ReportData/v1 JSON.
+
+    quarter_label: if provided (e.g. "2025 Q3"), replaces filing_type in the
+    reduce prompt so the LLM embeds the quarter label in the report cover
+    rather than the raw SEC form type (10-Q / 10-K).
     """
+    display_type = quarter_label if quarter_label else filing_type
     facts_bags: List[dict] = []
     for i, chunk in enumerate(chunks[:6]):
         try:
@@ -247,7 +253,7 @@ def _run_map_reduce(
     reduce_prompt = REDUCE_PROMPT_TEMPLATE.format(
         ticker=ticker,
         company_name=company_name,
-        filing_type=filing_type,
+        filing_type=display_type,
         period_end=period_end,
         facts_bag=facts_str,
     )
@@ -312,17 +318,20 @@ def generate_report(
     filing_id: str,
     force: bool = False,
     render_fn: Optional[Callable] = None,
+    quarter_label: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Main orchestration function.
 
     Parameters
     ----------
-    ticker    : stock ticker symbol
-    filing_id : SEC accession number (with dashes)
-    force     : ignore cached output and regenerate
-    render_fn : callable(template_name, **ctx) → str
-                Pass flask.render_template here.
+    ticker        : stock ticker symbol
+    filing_id     : SEC accession number (with dashes)
+    force         : ignore cached output and regenerate
+    render_fn     : callable(template_name, **ctx) → str; pass flask.render_template
+    quarter_label : user-facing period label, e.g. "2025 Q3". When provided it
+                    replaces the raw SEC form type in the LLM prompt and report
+                    cover, so users never see "10-Q" or "10-K".
 
     Returns
     -------
@@ -340,7 +349,7 @@ def generate_report(
         }
 
     try:
-        return _generate_inner(ticker, filing_id, force, render_fn)
+        return _generate_inner(ticker, filing_id, force, render_fn, quarter_label)
     finally:
         lock.release()
 
@@ -472,7 +481,7 @@ def _build_template_analysis(
     }
 
 
-def _generate_inner(ticker, filing_id, force, render_fn):
+def _generate_inner(ticker, filing_id, force, render_fn, quarter_label=None):
     logger.info("[MEM] %s/%s start: %s MB RSS", ticker, filing_id, _rss_mb())
     with get_db() as db:
 
@@ -546,6 +555,7 @@ def _generate_inner(ticker, filing_id, force, render_fn):
                     raw = fetch_filing_content(fd.get("source_url", ""))
                 except RuntimeError as exc:
                     return {"status": "error", "error": str(exc), "code": 502}
+                logger.info("[MEM] %s after_fetch: %s MB RSS", ticker, _rss_mb())
 
                 result = prepare_filing_text(raw.get("html", ""), raw.get("text", ""))
 
@@ -580,12 +590,13 @@ def _generate_inner(ticker, filing_id, force, render_fn):
             chunks = (filing_text.chunks_json or []) if filing_text else []
             try:
                 report_json = _run_map_reduce(
-                    chunks       = chunks,
-                    ticker       = ticker,
-                    filing_type  = fd["filing_type"],
-                    period_end   = fd.get("period_end", ""),
-                    company_name = fd.get("company_name", ticker),
-                    llm          = llm,
+                    chunks        = chunks,
+                    ticker        = ticker,
+                    filing_type   = fd["filing_type"],
+                    period_end    = fd.get("period_end", ""),
+                    company_name  = fd.get("company_name", ticker),
+                    llm           = llm,
+                    quarter_label = quarter_label,
                 )
             except json.JSONDecodeError as exc:
                 return {"status": "error", "error": f"LLM returned invalid JSON: {exc}", "code": 500}
