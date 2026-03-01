@@ -16,6 +16,7 @@ GET  /reports/<ticker>/<filing_id>          – Render cached HTML report
 
 import json
 import logging
+import threading
 
 from flask import (
     Blueprint, jsonify, render_template, render_template_string,
@@ -35,6 +36,40 @@ from services.llm_client import get_llm_client, PRE_EARNINGS_PROMPT
 logger = logging.getLogger(__name__)
 
 fundamentals_bp = Blueprint("fundamentals", __name__)
+
+# --------------------------------------------------------------------------- #
+# Async generation state  (in-process; safe with --workers 1)
+# --------------------------------------------------------------------------- #
+_gen_lock   = threading.Lock()
+_gen_status: dict = {}  # filing_id -> {"status": "generating"|"done"|"error", ...}
+
+
+def _run_generation(app, ticker: str, filing_id: str, force: bool) -> None:
+    """Generate a report in a background thread, updating _gen_status when done."""
+    with app.app_context():
+        try:
+            result = generate_report(
+                ticker=ticker,
+                filing_id=filing_id,
+                force=force,
+                render_fn=render_template,
+            )
+            with _gen_lock:
+                if result.get("status") == "error":
+                    _gen_status[filing_id] = {
+                        "status": "error",
+                        "error":  result.get("error", "Unknown error"),
+                    }
+                else:
+                    _gen_status[filing_id] = {
+                        "status":   "done",
+                        "url_html": result.get("url_html", ""),
+                        "url_json": result.get("url_json", ""),
+                    }
+        except Exception as exc:
+            logger.exception("Background generation failed for %s %s", ticker, filing_id)
+            with _gen_lock:
+                _gen_status[filing_id] = {"status": "error", "error": str(exc)}
 
 
 # =========================================================================== #
@@ -214,8 +249,10 @@ async function searchFilings() {
   }
 }
 
+const _pollTimers = {};
+
 async function generateReport(ticker, filingId) {
-  showStatus('מייצר דוח... <span class="spinner"></span>', 'info');
+  showStatus('שולח בקשה... <span class="spinner"></span>', 'info');
   try {
     const res  = await fetch('/api/reports/generate', {
       method: 'POST',
@@ -224,19 +261,48 @@ async function generateReport(ticker, filingId) {
     });
     const data = await res.json();
 
-    if (!res.ok || data.status === 'error') {
+    if (!res.ok) {
       showStatus('שגיאה: ' + (data.error || 'אירעה שגיאה'), 'error');
       return;
     }
 
-    const lbl = data.status === 'cached' ? '(מהמטמון)' : '(חדש)';
-    showStatus(
-      'הדוח מוכן ' + lbl + ' — <a href="' + data.url_html + '" target="_blank" style="color:inherit;text-decoration:underline">פתח דוח HTML</a>',
-      'success'
-    );
+    if (data.status === 'done') {
+      showStatus(
+        'הדוח מוכן — <a href="' + data.url_html + '" target="_blank" style="color:inherit;text-decoration:underline">פתח דוח HTML</a>',
+        'success'
+      );
+      return;
+    }
+
+    // status === 'generating' → start polling
+    _startPolling(filingId);
   } catch (e) {
     showStatus('שגיאת רשת: ' + e, 'error');
   }
+}
+
+function _startPolling(filingId) {
+  showStatus('מייצר דוח... <span class="spinner"></span>', 'info');
+  if (_pollTimers[filingId]) clearInterval(_pollTimers[filingId]);
+  _pollTimers[filingId] = setInterval(async function () {
+    try {
+      const res  = await fetch('/api/reports/status/' + encodeURIComponent(filingId));
+      const data = await res.json();
+      if (data.status === 'done') {
+        clearInterval(_pollTimers[filingId]);
+        delete _pollTimers[filingId];
+        showStatus(
+          'הדוח מוכן — <a href="' + data.url_html + '" target="_blank" style="color:inherit;text-decoration:underline">פתח דוח HTML</a>',
+          'success'
+        );
+      } else if (data.status === 'error') {
+        clearInterval(_pollTimers[filingId]);
+        delete _pollTimers[filingId];
+        showStatus('שגיאה בייצור הדוח: ' + (data.error || 'שגיאה לא ידועה'), 'error');
+      }
+      // 'generating' or 'not_started' → keep polling
+    } catch (_) { /* network glitch — keep polling */ }
+  }, 3000);
 }
 
 function viewReport(ticker, filingId) {
@@ -315,11 +381,14 @@ def api_generate_report():
     POST /api/reports/generate
     Body: { "ticker": "OKE", "filing_id": "0001...", "force": false }
 
-    Returns:
-        200 { "status": "generated|cached|generating", "url_html": "...", "url_json": "..." }
-        400 / 404 / 500 / 502 { "error": "..." }
+    Returns immediately (HTTP 202) and runs generation in a background thread.
+    The caller should poll GET /api/reports/status/<filing_id> for completion.
+
+        202 { "status": "generating" }
+        200 { "status": "done", "url_html": "...", "url_json": "..." }
+        400 { "error": "..." }
     """
-    body = request.get_json(silent=True) or {}
+    body      = request.get_json(silent=True) or {}
     ticker    = (body.get("ticker") or "").upper().strip()
     filing_id = (body.get("filing_id") or "").strip()
     force     = bool(body.get("force", False))
@@ -327,18 +396,47 @@ def api_generate_report():
     if not ticker or not filing_id:
         return jsonify({"error": "ticker and filing_id are required"}), 400
 
-    result = generate_report(
-        ticker=ticker,
-        filing_id=filing_id,
-        force=force,
-        render_fn=render_template,
+    with _gen_lock:
+        current = _gen_status.get(filing_id)
+
+    # Already finished (and not forcing a re-run) → return cached result immediately
+    if current and current["status"] == "done" and not force:
+        return jsonify(current), 200
+
+    # Already running → tell client to keep polling
+    if current and current["status"] == "generating":
+        return jsonify({"status": "generating"}), 202
+
+    # Start background thread
+    with _gen_lock:
+        _gen_status[filing_id] = {"status": "generating"}
+
+    app = current_app._get_current_object()
+    t   = threading.Thread(
+        target=_run_generation,
+        args=(app, ticker, filing_id, force),
+        daemon=True,
     )
+    t.start()
 
-    code = result.pop("code", 200)
-    if result.get("status") == "error":
-        return jsonify(result), code
+    return jsonify({"status": "generating"}), 202
 
-    return jsonify(result), 200
+
+@fundamentals_bp.route("/api/reports/status/<path:filing_id>")
+@login_required
+def api_report_status(filing_id: str):
+    """
+    GET /api/reports/status/<filing_id>
+
+    Returns current generation status:
+        { "status": "not_started" }
+        { "status": "generating" }
+        { "status": "done", "url_html": "...", "url_json": "..." }
+        { "status": "error", "error": "..." }
+    """
+    with _gen_lock:
+        status = _gen_status.get(filing_id)
+    return jsonify(status or {"status": "not_started"}), 200
 
 
 # =========================================================================== #
@@ -371,7 +469,7 @@ def view_report(ticker: str, filing_id: str):
     GET /reports/<ticker>/<filing_id>
 
     Returns the cached rendered HTML.
-    If not cached, auto-triggers generation (synchronous, may be slow).
+    If not cached, returns a 404 page directing the user to generate via the Fundamentals tab.
     """
     ticker = ticker.upper().strip()
     html   = get_cached_report_html(ticker, filing_id)
@@ -379,30 +477,14 @@ def view_report(ticker: str, filing_id: str):
     if html:
         return html, 200, {"Content-Type": "text/html; charset=utf-8"}
 
-    # Auto-generate if missing
-    result = generate_report(
-        ticker=ticker,
-        filing_id=filing_id,
-        force=False,
-        render_fn=render_template,
-    )
-
-    if result.get("status") == "error":
-        code = result.get("code", 500)
-        return (
-            f"<html><body style='background:#0A0E1A;color:#FF4757;font-family:monospace;padding:40px'>"
-            f"<h2>Error {code}</h2><pre>{result.get('error', 'Unknown error')}</pre></body></html>",
-            code,
-            {"Content-Type": "text/html; charset=utf-8"},
-        )
-
-    html = get_cached_report_html(ticker, filing_id)
-    if html:
-        return html, 200, {"Content-Type": "text/html; charset=utf-8"}
-
     return (
-        "<html><body>Report generation in progress. Refresh in a moment.</body></html>",
-        202,
+        "<html><body style='background:#0A0E1A;color:#E2E8F0;"
+        "font-family:sans-serif;padding:40px;text-align:center'>"
+        "<h2>Report not yet generated</h2>"
+        "<p style='color:#94A3B8'>Use the Fundamentals page to generate this report first.</p>"
+        "<a href='/fundamentals' style='color:#5B7CFF'>&#8592; Back to Fundamentals</a>"
+        "</body></html>",
+        404,
         {"Content-Type": "text/html; charset=utf-8"},
     )
 
