@@ -142,4 +142,152 @@ class EmailSender:
             logger.error("=" * 60)
             return False
 
+    def send_session_break_email(
+        self,
+        to_email: str,
+        symbol: str,
+        session_type: str,
+        session_date: str,
+        direction: str,
+        session_high: float,
+        session_low: float,
+        first_break_ts: str,
+        first_break_level: float,
+        confirm_break_ts: str,
+        confirm_break_level: float,
+    ) -> bool:
+        """Send a Session Break Confirmation alert email."""
+        if not self.enabled:
+            logger.error(
+                "EMAIL NOT SENT (disabled) – would send session break alert to %s "
+                "symbol=%s session=%s/%s direction=%s",
+                to_email, symbol, session_type, session_date, direction,
+            )
+            return False
+
+        dir_emoji  = "⬆️" if direction == "UP" else "⬇️"
+        dir_color  = "#00FFA3" if direction == "UP" else "#FF6B6B"
+        dir_label  = "Bullish (UP)" if direction == "UP" else "Bearish (DOWN)"
+        session_label = session_type.capitalize()
+        subject = f"🚨 Session Break: {symbol} {dir_emoji} {direction} Confirmed ({session_label})"
+
+        try:
+            sh_str  = f"{float(session_high):.5f}"
+            sl_str  = f"{float(session_low):.5f}"
+            fb_str  = f"{float(first_break_level):.5f}"
+            cb_str  = f"{float(confirm_break_level):.5f}"
+        except (TypeError, ValueError):
+            sh_str = str(session_high)
+            sl_str = str(session_low)
+            fb_str = str(first_break_level)
+            cb_str = str(confirm_break_level)
+
+        html_content = f"""
+<html>
+<head>
+  <style>
+    body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+    .container {{ max-width: 620px; margin: 0 auto; padding: 20px; }}
+    .header {{
+        background: linear-gradient(135deg, #1a1f2e 0%, #2d3561 100%);
+        color: white; padding: 30px; text-align: center;
+        border-radius: 10px 10px 0 0;
+    }}
+    .content {{ background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }}
+    .alert-box {{
+        background: white; padding: 20px;
+        border-left: 4px solid {dir_color};
+        margin: 20px 0; border-radius: 5px;
+    }}
+    .level {{ font-size: 20px; font-weight: bold; color: {dir_color}; }}
+    .row {{ display: flex; justify-content: space-between; margin: 6px 0; }}
+    .label {{ color: #888; font-size: 13px; }}
+    .value {{ font-weight: 600; }}
+    .footer {{ font-size: 12px; color: #999; margin-top: 20px; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 style="margin:0;font-size:22px;">{dir_emoji} Session Break Confirmed</h1>
+      <p style="margin:6px 0 0;opacity:.8;font-size:14px;">
+        {symbol} &bull; {session_label} Session &bull; {session_date}
+      </p>
+    </div>
+    <div class="content">
+      <div class="alert-box">
+        <h2 style="margin-top:0;color:{dir_color};">{dir_label} Break on {symbol}</h2>
+
+        <div class="row">
+          <span class="label">Session</span>
+          <span class="value">{session_label} ({session_date})</span>
+        </div>
+        <div class="row">
+          <span class="label">Session High</span>
+          <span class="value">{sh_str}</span>
+        </div>
+        <div class="row">
+          <span class="label">Session Low</span>
+          <span class="value">{sl_str}</span>
+        </div>
+
+        <hr style="border:none;border-top:1px solid #eee;margin:16px 0;">
+
+        <div class="row">
+          <span class="label">First Break Level</span>
+          <span class="level">{fb_str}</span>
+        </div>
+        <div class="row">
+          <span class="label">First Break Time (UTC)</span>
+          <span class="value">{first_break_ts}</span>
+        </div>
+
+        <hr style="border:none;border-top:1px solid #eee;margin:16px 0;">
+
+        <div class="row">
+          <span class="label">Confirm Break Level</span>
+          <span class="level">{cb_str}</span>
+        </div>
+        <div class="row">
+          <span class="label">Confirm Break Time (UTC)</span>
+          <span class="value">{confirm_break_ts}</span>
+        </div>
+      </div>
+
+      <p style="font-size:13px;color:#555;">
+        A second wick beyond the first break level confirmed the session break.
+        All times are UTC. Candle timeframe: 5M.
+      </p>
+      <p class="footer">Sent by PulseAlerts &bull; Session Break Confirmation Alert</p>
+    </div>
+  </div>
+</body>
+</html>
+"""
+        try:
+            import sib_api_v3_sdk
+            from sib_api_v3_sdk.rest import ApiException
+
+            send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
+                to=[{"email": to_email}],
+                sender={"email": "eladslodki@gmail.com", "name": "PulseAlerts"},
+                subject=subject,
+                html_content=html_content,
+            )
+            response = self.api_instance.send_transac_email(send_smtp_email)
+            logger.info(
+                "SESSION BREAK EMAIL SENT to=%s symbol=%s session=%s/%s direction=%s msg_id=%s",
+                to_email, symbol, session_type, session_date, direction,
+                response.message_id,
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                "SESSION BREAK EMAIL FAILED to=%s symbol=%s err=%s",
+                to_email, symbol, e,
+            )
+            return False
+
+
 email_sender = EmailSender()
