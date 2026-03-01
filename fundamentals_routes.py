@@ -19,6 +19,7 @@ GET  /reports/<ticker>/<filing_id>          – Render cached HTML report
 
 import json
 import logging
+import os
 import threading
 
 from flask import (
@@ -569,6 +570,51 @@ def view_report(ticker: str, filing_id: str):
         404,
         {"Content-Type": "text/html; charset=utf-8"},
     )
+
+
+# =========================================================================== #
+# API — Debug / env inspection  (token-protected)
+# =========================================================================== #
+
+@fundamentals_bp.route("/api/debug/env")
+@login_required
+def api_debug_env():
+    """
+    GET /api/debug/env?token=<DEBUG_TOKEN>
+
+    Returns boolean flags for critical env vars — never the values themselves.
+    Protected by DEBUG_TOKEN env var.  If DEBUG_TOKEN is not set this endpoint
+    always returns 403 so it cannot be accidentally exposed in production.
+
+    Response:
+        200 {
+          "ANTHROPIC_API_KEY_set": true,
+          "AI_API_KEY_set": false,
+          "AI_MODEL": "claude-opus-4-6",
+          "LLM_USE_MOCK": "0",
+          "DATABASE_URL_set": true,
+          "SEC_USER_AGENT_set": true
+        }
+        401 { "error": "Invalid or missing token" }
+        403 { "error": "DEBUG_TOKEN not configured" }
+    """
+    expected_token = os.getenv("DEBUG_TOKEN", "").strip()
+    if not expected_token:
+        return jsonify({"error": "DEBUG_TOKEN not configured on this server"}), 403
+
+    provided_token = request.args.get("token", "").strip()
+    if not provided_token or provided_token != expected_token:
+        return jsonify({"error": "Invalid or missing token"}), 401
+
+    return jsonify({
+        "ANTHROPIC_API_KEY_set": bool(os.getenv("ANTHROPIC_API_KEY", "").strip()),
+        "AI_API_KEY_set":        bool(os.getenv("AI_API_KEY", "").strip()),
+        "AI_MODEL":              os.getenv("AI_MODEL", "(not set — default claude-opus-4-6)"),
+        "LLM_USE_MOCK":          os.getenv("LLM_USE_MOCK", "(not set — default off)"),
+        "DATABASE_URL_set":      bool(os.getenv("DATABASE_URL", "").strip()),
+        "SEC_USER_AGENT_set":    bool(os.getenv("SEC_USER_AGENT", "").strip()),
+        "DEBUG_TOKEN_set":       True,   # implied — we got here
+    }), 200
 
 
 # =========================================================================== #

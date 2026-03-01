@@ -60,6 +60,7 @@ from services.extract_text import prepare_filing_text
 from services.generation_lock import acquire_lock, release_lock
 from services.llm_client import (
     get_llm_client,
+    LLMAuthError,
     MAP_PROMPT_TEMPLATE,
     REDUCE_PROMPT_TEMPLATE,
     FIX_SCHEMA_PROMPT,
@@ -233,6 +234,12 @@ def _run_map_reduce(
             facts    = _parse_llm_json(response)
             facts_bags.append(facts)
             logger.info("Map chunk %d/%d: OK", i + 1, min(len(chunks), 6))
+        except LLMAuthError:
+            # Auth failure is unrecoverable — abort immediately, do not try
+            # remaining chunks or proceed to reduce with empty bag.
+            logger.error("Map chunk %d/%d: LLMAuthError — aborting map-reduce",
+                         i + 1, min(len(chunks), 6))
+            raise
         except Exception as exc:
             logger.warning("Map chunk %d failed (%s) — skipping", i + 1, exc)
 
@@ -664,6 +671,18 @@ def _generate_inner(ticker, filing_id, force, render_fn, quarter_label=None):
                     len(report_json.get("sections", [])),
                     time.monotonic() - t8, _rss_mb(),
                 )
+            except LLMAuthError as exc:
+                logger.error(
+                    "STEP 8 failed LLM_AUTH [%.2fs]: %s",
+                    time.monotonic() - t8, exc,
+                )
+                return {
+                    "status":  "error",
+                    "error":   "LLM_AUTH",
+                    "message": str(exc),
+                    "hint":    "Check ANTHROPIC_API_KEY in production env",
+                    "code":    500,
+                }
             except json.JSONDecodeError as exc:
                 logger.error("STEP 8 failed LLM map-reduce (JSON decode) [%.2fs]: %s",
                              time.monotonic() - t8, exc)
