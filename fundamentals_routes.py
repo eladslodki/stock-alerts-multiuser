@@ -7,9 +7,12 @@ Register in app.py:
 
 Routes
 ------
-GET  /fundamentals                          – Tab landing page (ticker search + filing list)
-GET  /api/filings/<ticker>                  – JSON list of available filings
+GET  /fundamentals                          – Tab landing page (ticker search + quarter list)
+GET  /api/quarters/<ticker>                 – JSON list of fiscal quarters (Q1–Q4), newest-first
+GET  /api/filings/<ticker>                  – JSON list of raw SEC filings (legacy)
 POST /api/reports/generate                  – Generate (or return cached) report
+                                              Body: {ticker, year, quarter, force}
+GET  /api/reports/status/<filing_id>        – Poll generation progress
 GET  /api/reports/<ticker>/<filing_id>      – Return cached ReportData/v1 JSON
 GET  /reports/<ticker>/<filing_id>          – Render cached HTML report
 """
@@ -26,6 +29,7 @@ from flask_login import login_required
 
 from providers.sec_provider import list_filings as sec_list_filings
 from providers.consensus_provider import get_consensus
+from services.quarter_service import list_quarters, resolve_quarter_to_filing
 from services.report_generator import (
     generate_report,
     get_cached_report_json,
@@ -44,7 +48,9 @@ _gen_lock   = threading.Lock()
 _gen_status: dict = {}  # filing_id -> {"status": "generating"|"done"|"error", ...}
 
 
-def _run_generation(app, ticker: str, filing_id: str, force: bool) -> None:
+def _run_generation(
+    app, ticker: str, filing_id: str, force: bool, quarter_label: str = None
+) -> None:
     """Generate a report in a background thread, updating _gen_status when done."""
     with app.app_context():
         try:
@@ -53,6 +59,7 @@ def _run_generation(app, ticker: str, filing_id: str, force: bool) -> None:
                 filing_id=filing_id,
                 force=force,
                 render_fn=render_template,
+                quarter_label=quarter_label,
             )
             with _gen_lock:
                 if result.get("status") == "error":
@@ -201,7 +208,7 @@ async function searchFilings() {
   btn.textContent = 'מחפש...';
 
   try {
-    const res  = await fetch('/api/filings/' + encodeURIComponent(ticker));
+    const res  = await fetch('/api/quarters/' + encodeURIComponent(ticker));
     const data = await res.json();
 
     if (!res.ok) {
@@ -210,32 +217,39 @@ async function searchFilings() {
       return;
     }
 
-    const filings = data.filings || [];
+    const quarters = data.quarters || [];
     const sec = document.getElementById('filings-section');
     const hdr = document.getElementById('filings-header');
     const lst = document.getElementById('filings-list');
 
-    hdr.textContent = ticker + ' — ' + filings.length + ' דוחות';
+    hdr.textContent = ticker + ' — ' + quarters.length + ' רבעונים';
     lst.innerHTML   = '';
 
-    if (!filings.length) {
+    if (!quarters.length) {
       lst.innerHTML = '<p style="color:#64748B;font-size:13px;">לא נמצאו דוחות עבור הטיקר הזה.</p>';
     } else {
-      filings.forEach(function (f) {
+      quarters.forEach(function (q) {
         const card = document.createElement('div');
         card.className = 'filing-card';
+        const reportMark = q.has_report ? ' <span style="color:#00D084;font-size:11px;">✓ קיים</span>' : '';
         card.innerHTML =
-          '<span class="filing-badge">' + f.filing_type + '</span>' +
+          '<span class="filing-badge">' + q.label + '</span>' +
           '<div style="flex:1">' +
-            '<div class="filing-title">' + f.title + '</div>' +
-            '<div class="filing-period">הוגש: ' + (f.filed_at || '—') + '</div>' +
+            '<div class="filing-title">' + q.label + '</div>' +
+            '<div class="filing-period">הוגש: ' + (q.filed_at || '—') + reportMark + '</div>' +
           '</div>' +
           '<div class="filing-actions">' +
-            '<button class="btn-sm btn-view _view-btn">צפה</button>' +
+            (q.has_report ? '<button class="btn-sm btn-view _view-btn">צפה</button>' : '') +
             '<button class="btn-sm btn-gen _gen-btn">ייצר</button>' +
           '</div>';
-        card.querySelector('._view-btn').addEventListener('click', function () { viewReport(ticker, f.filing_id); });
-        card.querySelector('._gen-btn').addEventListener('click', function () { generateReport(ticker, f.filing_id); });
+        if (q.has_report) {
+          card.querySelector('._view-btn').addEventListener('click', function () {
+            viewReport(ticker, q.source_filing_id);
+          });
+        }
+        card.querySelector('._gen-btn').addEventListener('click', function () {
+          generateReport(ticker, q.year, q.quarter);
+        });
         lst.appendChild(card);
       });
     }
@@ -251,13 +265,13 @@ async function searchFilings() {
 
 const _pollTimers = {};
 
-async function generateReport(ticker, filingId) {
+async function generateReport(ticker, year, quarter) {
   showStatus('שולח בקשה... <span class="spinner"></span>', 'info');
   try {
     const res  = await fetch('/api/reports/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticker: ticker, filing_id: filingId, force: false }),
+      body: JSON.stringify({ ticker: ticker, year: year, quarter: quarter, force: false }),
     });
     const data = await res.json();
 
@@ -274,8 +288,10 @@ async function generateReport(ticker, filingId) {
       return;
     }
 
-    // status === 'generating' → start polling
-    _startPolling(filingId);
+    // status === 'generating' → poll using filing_id returned by server
+    if (data.filing_id) {
+      _startPolling(data.filing_id);
+    }
   } catch (e) {
     showStatus('שגיאת רשת: ' + e, 'error');
   }
@@ -331,7 +347,51 @@ def fundamentals_tab():
 
 
 # =========================================================================== #
-# API — list filings
+# API — list quarters  (primary UI endpoint)
+# =========================================================================== #
+
+@fundamentals_bp.route("/api/quarters/<ticker>")
+@login_required
+def api_list_quarters(ticker: str):
+    """
+    GET /api/quarters/<ticker>
+
+    Returns fiscal quarters for *ticker*, newest-first.
+
+    Each item:
+        year              – int
+        quarter           – "Q1" | "Q2" | "Q3" | "Q4"
+        label             – "2025 Q3"
+        period_end        – "YYYY-MM-DD"
+        filed_at          – "YYYY-MM-DD"
+        source_filing_id  – SEC accession number (for viewReport / polling)
+        source_filing_type – "10-Q" or "10-K"
+        has_report        – bool
+
+    Q4 entries are sourced from 10-K filings; Q1/Q2/Q3 from 10-Q filings.
+
+    Returns:
+        200 { "ticker": "OKE", "quarters": [...] }
+        400 { "error": "..." }
+        502 { "error": "..." }
+    """
+    ticker = ticker.upper().strip()
+    if not ticker or len(ticker) > 10:
+        return jsonify({"error": "Invalid ticker"}), 400
+
+    try:
+        quarters = list_quarters(ticker)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        logger.error("SEC EDGAR error for %s: %s", ticker, exc)
+        return jsonify({"error": str(exc)}), 502
+
+    return jsonify({"ticker": ticker, "quarters": quarters})
+
+
+# =========================================================================== #
+# API — list filings  (legacy; kept for backward compatibility)
 # =========================================================================== #
 
 @fundamentals_bp.route("/api/filings/<ticker>")
@@ -379,22 +439,44 @@ def api_list_filings(ticker: str):
 def api_generate_report():
     """
     POST /api/reports/generate
-    Body: { "ticker": "OKE", "filing_id": "0001...", "force": false }
+    Body: { "ticker": "OKE", "year": 2025, "quarter": "Q3", "force": false }
 
-    Returns immediately (HTTP 202) and runs generation in a background thread.
-    The caller should poll GET /api/reports/status/<filing_id> for completion.
+    The server resolves (ticker, year, quarter) → filing_id via SEC EDGAR,
+    then starts background generation and returns immediately (HTTP 202).
+    Caller should poll GET /api/reports/status/<filing_id>.
 
-        202 { "status": "generating" }
+        202 { "status": "generating", "filing_id": "..." }
         200 { "status": "done", "url_html": "...", "url_json": "..." }
         400 { "error": "..." }
+        404 { "error": "..." }
+        502 { "error": "..." }
     """
-    body      = request.get_json(silent=True) or {}
-    ticker    = (body.get("ticker") or "").upper().strip()
-    filing_id = (body.get("filing_id") or "").strip()
-    force     = bool(body.get("force", False))
+    body    = request.get_json(silent=True) or {}
+    ticker  = (body.get("ticker") or "").upper().strip()
+    year    = body.get("year")
+    quarter = (body.get("quarter") or "").upper().strip()
+    force   = bool(body.get("force", False))
 
-    if not ticker or not filing_id:
-        return jsonify({"error": "ticker and filing_id are required"}), 400
+    if not ticker or not year or not quarter:
+        return jsonify({"error": "ticker, year, and quarter are required"}), 400
+
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        return jsonify({"error": "year must be an integer"}), 400
+
+    # Resolve (ticker, year, quarter) → SEC filing metadata
+    try:
+        q = resolve_quarter_to_filing(ticker, year, quarter)
+    except Exception as exc:
+        logger.error("resolve_quarter_to_filing failed for %s %s %s: %s", ticker, year, quarter, exc)
+        return jsonify({"error": "Failed to resolve quarter to filing"}), 502
+
+    if q is None:
+        return jsonify({"error": f"No filing found for {ticker} {year} {quarter}"}), 404
+
+    filing_id     = q["source_filing_id"]
+    quarter_label = q["label"]          # e.g. "2025 Q3"
 
     with _gen_lock:
         current = _gen_status.get(filing_id)
@@ -405,7 +487,7 @@ def api_generate_report():
 
     # Already running → tell client to keep polling
     if current and current["status"] == "generating":
-        return jsonify({"status": "generating"}), 202
+        return jsonify({"status": "generating", "filing_id": filing_id}), 202
 
     # Start background thread
     with _gen_lock:
@@ -414,12 +496,12 @@ def api_generate_report():
     app = current_app._get_current_object()
     t   = threading.Thread(
         target=_run_generation,
-        args=(app, ticker, filing_id, force),
+        args=(app, ticker, filing_id, force, quarter_label),
         daemon=True,
     )
     t.start()
 
-    return jsonify({"status": "generating"}), 202
+    return jsonify({"status": "generating", "filing_id": filing_id}), 202
 
 
 @fundamentals_bp.route("/api/reports/status/<path:filing_id>")
