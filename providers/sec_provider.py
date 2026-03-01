@@ -322,3 +322,151 @@ def fetch_filing_content(source_url: str) -> Dict[str, str]:
         return {"html": "", "text": raw_text}
     else:
         return {"html": raw_text, "text": ""}
+
+
+# --------------------------------------------------------------------------- #
+# XBRL company facts  (deterministic numeric extraction)
+# --------------------------------------------------------------------------- #
+
+# Ordered list of XBRL concept names to try for each financial metric.
+# The first concept found for the filing wins.
+_KEY_CONCEPTS: Dict[str, List[str]] = {
+    "revenue": [
+        "Revenues",
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "RevenueFromContractWithCustomerIncludingAssessedTax",
+        "SalesRevenueNet",
+        "SalesRevenueGoodsNet",
+    ],
+    "net_income": [
+        "NetIncomeLoss",
+        "ProfitLoss",
+        "NetIncomeLossAvailableToCommonStockholdersBasic",
+    ],
+    "eps_diluted": [
+        "EarningsPerShareDiluted",
+        "EarningsPerShareBasicAndDiluted",
+    ],
+    "eps_basic": [
+        "EarningsPerShareBasic",
+    ],
+    "operating_income": [
+        "OperatingIncomeLoss",
+    ],
+    "gross_profit": [
+        "GrossProfit",
+    ],
+    "total_assets": [
+        "Assets",
+    ],
+    "cash_and_equivalents": [
+        "CashAndCashEquivalentsAtCarryingValue",
+        "CashCashEquivalentsAndShortTermInvestments",
+    ],
+}
+
+
+def fetch_company_facts(cik: str) -> Dict[str, Any]:
+    """
+    Fetch structured XBRL company facts from the SEC companyfacts endpoint.
+
+    URL: https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json
+
+    Returns the raw companyfacts JSON dict, or {} on any error.  The response
+    can be large (5–20 MB for large companies); callers should process it with
+    extract_facts_for_period() and then discard the full payload.
+
+    Response structure::
+
+        {
+          "cik": int,
+          "entityName": str,
+          "facts": {
+            "us-gaap": {
+              "ConceptName": {
+                "label": str,
+                "units": {
+                  "USD": [{"end": "YYYY-MM-DD", "val": float, "accn": "...", ...}]
+                }
+              }
+            }
+          }
+        }
+    """
+    url = f"{EDGAR_API_BASE}/api/xbrl/companyfacts/CIK{cik}.json"
+    logger.info("fetch_company_facts: CIK=%s", cik)
+    try:
+        data = _get(url, timeout=(10, 45))
+        concept_count = len(data.get("facts", {}).get("us-gaap", {}))
+        logger.info(
+            "fetch_company_facts: CIK=%s entity=%r us-gaap concepts=%d",
+            cik, data.get("entityName", ""), concept_count,
+        )
+        return data
+    except RuntimeError as exc:
+        logger.warning("fetch_company_facts(%s) failed: %s", cik, exc)
+        return {}
+
+
+def extract_facts_for_period(
+    facts_data: Dict[str, Any],
+    accession_number: str,
+) -> Dict[str, Optional[float]]:
+    """
+    Extract key financial metrics from a companyfacts response for one filing.
+
+    Matches entries by accession number (dashes optional — both formats accepted).
+
+    Parameters
+    ----------
+    facts_data       : full response from fetch_company_facts()
+    accession_number : SEC accession number, e.g. "0000012345-24-000010"
+
+    Returns
+    -------
+    Dict mapping metric names (from _KEY_CONCEPTS) to raw numeric values, or
+    None when the concept is not present for this filing.  Monetary values are
+    in USD; EPS values are per-share amounts as reported.
+
+    Example return value::
+
+        {
+            "revenue":            48_000_000_000.0,
+            "net_income":          7_600_000_000.0,
+            "eps_diluted":                    2.45,
+            "eps_basic":                      2.50,
+            "operating_income":    9_800_000_000.0,
+            "gross_profit":       21_000_000_000.0,
+            "total_assets":      450_000_000_000.0,
+            "cash_and_equivalents": 34_000_000_000.0,
+        }
+    """
+    result: Dict[str, Optional[float]] = {k: None for k in _KEY_CONCEPTS}
+    if not facts_data:
+        return result
+
+    accn_norm = accession_number.replace("-", "")
+    us_gaap   = facts_data.get("facts", {}).get("us-gaap", {})
+
+    for metric_key, concepts in _KEY_CONCEPTS.items():
+        for concept_name in concepts:
+            concept_data = us_gaap.get(concept_name)
+            if not concept_data:
+                continue
+            # Search across all unit types (USD, shares, pure)
+            for unit_entries in concept_data.get("units", {}).values():
+                for entry in unit_entries:
+                    if entry.get("accn", "").replace("-", "") == accn_norm:
+                        result[metric_key] = entry.get("val")
+                        break
+                if result[metric_key] is not None:
+                    break
+            if result[metric_key] is not None:
+                break
+
+    found = sum(1 for v in result.values() if v is not None)
+    logger.debug(
+        "extract_facts_for_period: accn=%s found %d/%d metrics",
+        accession_number, found, len(result),
+    )
+    return result

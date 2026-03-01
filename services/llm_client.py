@@ -25,9 +25,22 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# =========================================================================== #
+# Anti-hallucination system prompt  (used for map step extraction calls)
+# =========================================================================== #
+ANTI_HALLUCINATION_SYSTEM_PROMPT = (
+    "You are a financial data extraction system. "
+    "Your ONLY job is to copy facts that exist verbatim in the provided text. "
+    "You MUST NOT infer, estimate, extrapolate, or calculate any numbers. "
+    "If a value is not explicitly written in the excerpt, output null. "
+    "Every number you write must be traceable to an exact character sequence "
+    "in the input text."
+)
 
 
 # =========================================================================== #
@@ -72,7 +85,10 @@ Return ONLY a JSON object with this exact structure (no markdown, no explanation
 }}
 
 RULES:
-- Extract ONLY what is explicitly stated. Do NOT invent or estimate numbers.
+- GROUNDING: Every numeric value you write MUST appear verbatim in the excerpt.
+  If you cannot find the exact number in the text above, use null.
+- Do NOT infer, extrapolate, derive, or calculate numbers from other numbers.
+- Extract ONLY what is explicitly stated in the excerpt.
 - If a field is not present in the excerpt, set it to null or [].
 - Return ONLY the JSON object.
 """
@@ -345,7 +361,12 @@ RULES:
 class LLMClient:
     """Minimal interface for LLM text completion."""
 
-    def complete(self, prompt: str, max_tokens: int = 8_000) -> str:
+    def complete(
+        self,
+        prompt: str,
+        max_tokens: int = 8_000,
+        system_prompt: Optional[str] = None,
+    ) -> str:
         raise NotImplementedError
 
     @property
@@ -363,7 +384,12 @@ class MockLLMClient(LLMClient):
     def model_name(self) -> str:
         return "mock"
 
-    def complete(self, prompt: str, max_tokens: int = 8_000) -> str:
+    def complete(
+        self,
+        prompt: str,
+        max_tokens: int = 8_000,
+        system_prompt: Optional[str] = None,
+    ) -> str:
         logger.info("MockLLMClient: returning stub response")
         p = prompt.lower()
         # Dispatch to the right stub by keyword fingerprints
@@ -740,14 +766,31 @@ class AnthropicLLMClient(LLMClient):
             self._client = anthropic.Anthropic(api_key=self._api_key)
         return self._client
 
-    def complete(self, prompt: str, max_tokens: int = 8_000) -> str:
+    def complete(
+        self,
+        prompt: str,
+        max_tokens: int = 8_000,
+        system_prompt: Optional[str] = None,
+    ) -> str:
         client = self._client_lazy()
+        kwargs: dict = {
+            "model":       self._model,
+            "max_tokens":  max_tokens,
+            "temperature": 0,
+            "messages":    [{"role": "user", "content": prompt}],
+        }
+        if system_prompt:
+            kwargs["system"] = system_prompt
         try:
-            msg = client.messages.create(
-                model=self._model,
-                max_tokens=max_tokens,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            msg = client.messages.create(**kwargs)
+            usage = getattr(msg, "usage", None)
+            if usage:
+                logger.info(
+                    "Anthropic tokens: input=%d output=%d model=%s",
+                    getattr(usage, "input_tokens", 0),
+                    getattr(usage, "output_tokens", 0),
+                    self._model,
+                )
             return msg.content[0].text
         except Exception as exc:
             # Surface 401 / authentication failures as LLMAuthError so callers
