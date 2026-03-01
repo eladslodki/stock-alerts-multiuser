@@ -317,7 +317,7 @@ def dashboard():
         <a href="/alerts/history" class="top-nav-link">📜 History</a>
         <a href="/radar" class="top-nav-link">🚨 Radar</a>
         <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
-        <a href="/forex-amd" class="top-nav-link">🌐 Forex</a>
+        <a href="/forex-sessions" class="top-nav-link">🌐 Forex</a>
         <a href="/fundamentals" class="top-nav-link">📋 Fundamentals</a>
         <span class="top-nav-spacer"></span>
         <button class="top-nav-logout" onclick="logout()">Sign out</button>
@@ -1439,7 +1439,7 @@ def bitcoin_scanner_page():
             <a href="/alerts/history" class="top-nav-link">📜 History</a>
             <a href="/radar" class="top-nav-link">🚨 Radar</a>
             <a href="/bitcoin-scanner" class="top-nav-link active">₿ Bitcoin</a>
-            <a href="/forex-amd" class="top-nav-link">🌐 Forex</a>
+            <a href="/forex-sessions" class="top-nav-link">🌐 Forex</a>
             <a href="/fundamentals" class="top-nav-link">📋 Fundamentals</a>
             <span class="top-nav-spacer"></span>
             <button class="top-nav-logout" onclick="logout()">Sign out</button>
@@ -1744,7 +1744,7 @@ def portfolio_page():
         <a href="/alerts/history" class="top-nav-link">📜 History</a>
         <a href="/radar" class="top-nav-link">🚨 Radar</a>
         <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
-        <a href="/forex-amd" class="top-nav-link">🌐 Forex</a>
+        <a href="/forex-sessions" class="top-nav-link">🌐 Forex</a>
         <a href="/fundamentals" class="top-nav-link">📋 Fundamentals</a>
         <span class="top-nav-spacer"></span>
         <button class="top-nav-logout" onclick="logout()">Sign out</button>
@@ -3040,7 +3040,7 @@ def alert_history_page():
         <a href="/alerts/history" class="top-nav-link active">📜 History</a>
         <a href="/radar" class="top-nav-link">🚨 Radar</a>
         <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
-        <a href="/forex-amd" class="top-nav-link">🌐 Forex</a>
+        <a href="/forex-sessions" class="top-nav-link">🌐 Forex</a>
         <a href="/fundamentals" class="top-nav-link">📋 Fundamentals</a>
         <span class="top-nav-spacer"></span>
         <button class="top-nav-logout" onclick="logout()">Sign out</button>
@@ -3174,7 +3174,7 @@ def radar_page():
         <a href="/alerts/history" class="top-nav-link">📜 History</a>
         <a href="/radar" class="top-nav-link active">🚨 Radar</a>
         <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
-        <a href="/forex-amd" class="top-nav-link">🌐 Forex</a>
+        <a href="/forex-sessions" class="top-nav-link">🌐 Forex</a>
         <a href="/fundamentals" class="top-nav-link">📋 Fundamentals</a>
         <span class="top-nav-spacer"></span>
         <button class="top-nav-logout" onclick="logout()">Sign out</button>
@@ -3245,20 +3245,29 @@ def radar_page():
     return render_template_string(html)
 
 # ============================================
-# FOREX AMD ROUTES
+# SESSION BREAK ALERT ROUTES
+# (replaces former Forex AMD routes)
 # ============================================
 
+# Legacy redirect: keep /forex-amd working
 @app.route('/forex-amd')
 @login_required
-def forex_amd_page():
-    """Forex AMD detection page"""
+def forex_amd_redirect():
+    return redirect(url_for('session_break_page'), code=301)
+
+
+@app.route('/forex-sessions')
+@login_required
+def session_break_page():
+    """Session Break Confirmation alert page (Asia + London)."""
     html = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Forex AMD Scanner</title>
+    <title>Session Break Alerts</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js"></script>
+    <link rel="stylesheet" href="/static/css/theme.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -3268,22 +3277,6 @@ def forex_amd_page():
             color: #FFFFFF;
             padding: 20px;
         }
-        .container { max-width: 1400px; margin: 0 auto; }
-        .nav {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 30px;
-            padding: 15px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 12px;
-        }
-        .nav a {
-            color: #8B92A8;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 14px;
-        }
-        .nav a:hover { color: #5B7CFF; }
         .section {
             background: rgba(255,255,255,0.05);
             backdrop-filter: blur(20px);
@@ -3292,24 +3285,24 @@ def forex_amd_page():
             padding: 24px;
             margin-bottom: 20px;
         }
-        .amd-card {
+        .alert-card {
             background: rgba(255,255,255,0.03);
             border: 1px solid rgba(255,255,255,0.08);
             border-radius: 12px;
             padding: 20px;
             margin-bottom: 16px;
         }
-        .amd-card.bullish { border-left: 4px solid #00FFA3; }
-        .amd-card.bearish { border-left: 4px solid #FF6B6B; }
-        .quality-badge {
+        .alert-card.up   { border-left: 4px solid #00FFA3; }
+        .alert-card.down { border-left: 4px solid #FF6B6B; }
+        .session-badge {
             display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
+            padding: 3px 10px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 700;
+            background: rgba(91,124,255,0.2);
+            color: #5B7CFF;
         }
-        .quality-high { background: rgba(0,255,163,0.2); color: #00FFA3; }
-        .quality-medium { background: rgba(255,184,0,0.2); color: #FFB800; }
         input {
             padding: 12px;
             border: 1px solid rgba(255,255,255,0.1);
@@ -3339,9 +3332,8 @@ def forex_amd_page():
             font-size: 14px;
             cursor: pointer;
         }
-        #amd-chart { border-radius: 8px; overflow: hidden; }
+        #sb-chart { border-radius: 8px; overflow: hidden; }
         #chart-error { color: #FF6B6B; font-size: 13px; margin-top: 8px; display: none; }
-    <link rel="stylesheet" href="/static/css/theme.css">
     </style>
 </head>
 <body>
@@ -3352,75 +3344,71 @@ def forex_amd_page():
         <a href="/alerts/history" class="top-nav-link">📜 History</a>
         <a href="/radar" class="top-nav-link">🚨 Radar</a>
         <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
-        <a href="/forex-amd" class="top-nav-link active">🌐 Forex AMD</a>
+        <a href="/forex-sessions" class="top-nav-link active">🌐 Forex</a>
         <a href="/fundamentals" class="top-nav-link">📋 Fundamentals</a>
         <span class="top-nav-spacer"></span>
         <button class="top-nav-logout" onclick="logout()">Sign out</button>
     </nav>
-    <div class="container" style="max-width:1400px;margin:0 auto;padding:80px 20px 40px">
+    <div style="max-width:1400px;margin:0 auto;padding:80px 20px 40px">
         <div style="margin-bottom:24px">
-            <h1 style="font-size: 28px; font-weight: 800; letter-spacing:-0.5px;">🌐 Forex AMD Scanner</h1>
-            <p style="color: #8B92A8; font-size: 14px; margin-top:4px;">Institutional-grade AMD detection: Accumulation → Manipulation → Displacement → IFVG</p>
+            <h1 style="font-size:28px;font-weight:800;letter-spacing:-0.5px;">🌐 Session Break Alerts</h1>
+            <p style="color:#8B92A8;font-size:14px;margin-top:4px;">
+                Asia (00:00–09:00 UTC) &amp; London (08:00–17:00 UTC) session break confirmation alerts.
+                Wick-only break detection on 5M candles.
+            </p>
         </div>
-        
+
         <div class="section">
-            <h2 style="margin-bottom: 16px;">Watchlist</h2>
-            <div style="display: flex; gap: 12px; margin-bottom: 16px;">
-                <input type="text" id="symbolInput" placeholder="Add symbol (e.g., EURUSD)" style="flex: 1;">
+            <h2 style="margin-bottom:16px;">Watchlist</h2>
+            <div style="display:flex;gap:12px;margin-bottom:16px;">
+                <input type="text" id="symbolInput" placeholder="Add symbol (e.g., EURUSD or XAU/USD)" style="flex:1;">
                 <button onclick="addSymbol()">Add to Watchlist</button>
             </div>
             <div id="watchlistContainer"></div>
         </div>
-        
+
         <div class="section">
-            <h2 style="margin-bottom: 16px;">AMD Setups</h2>
+            <h2 style="margin-bottom:16px;">Session Break Alerts</h2>
             <div id="alertsContainer">
-                <div style="text-align: center; padding: 40px; color: #8B92A8;">
-                    Loading...
-                </div>
+                <div style="text-align:center;padding:40px;color:#8B92A8;">Loading...</div>
             </div>
         </div>
 
-        <!-- ── Candlestick Chart ─────────────────────────────────────────── -->
         <div class="section">
-            <div style="display:flex; align-items:center; gap:16px; margin-bottom:16px; flex-wrap:wrap;">
-                <h2>Chart</h2>
+            <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
+                <h2>Chart (5M)</h2>
                 <select id="chartSymbolSelect" class="chart-select" onchange="loadChart()">
                     <option value="">-- Select symbol --</option>
                 </select>
-                <div style="display:flex; gap:8px;">
-                    <button id="tf-5min"  class="tf-btn" onclick="setTf('5min')">5M</button>
-                    <button id="tf-15min" class="tf-btn active" onclick="setTf('15min')">15M</button>
-                    <button id="tf-1h"    class="tf-btn" onclick="setTf('1h')">1H</button>
-                </div>
-                <span id="chart-state-badge" style="font-size:12px; color:#8B92A8;"></span>
+                <span id="chart-state-badge" style="font-size:12px;color:#8B92A8;"></span>
             </div>
-            <div id="amd-chart" style="height:420px; width:100%;"></div>
+            <div id="sb-chart" style="height:420px;width:100%;"></div>
             <div id="chart-error"></div>
-            <div style="margin-top:10px; font-size:12px; color:#555; line-height:1.6;">
-                <span style="color:#FFB800;">&#9472;&#9472;</span> Accum box &nbsp;
-                <span style="color:#00FFA3;">&#9472;&#9472;</span> Sweep (bull) &nbsp;
-                <span style="color:#FF6B6B;">&#9472;&#9472;</span> Sweep (bear) &nbsp;
-                <span style="color:#5B7CFF;">&#9472;&#9472;</span> IFVG zone &nbsp;
-                &#9650; Trigger
+            <div style="margin-top:10px;font-size:12px;color:#555;line-height:1.6;">
+                <span style="color:#FFB800;">&#9472;&#9472;</span> Session High &nbsp;
+                <span style="color:#5B7CFF;">&#9472;&#9472;</span> Session Low &nbsp;
+                <span style="color:#00FFA3;">&#9650;</span> UP Trigger &nbsp;
+                <span style="color:#FF6B6B;">&#9660;</span> DOWN Trigger
             </div>
         </div>
     </div>
-    
+
     <script>
         // ── Watchlist ────────────────────────────────────────────────────────
         async function loadWatchlist() {
-            const res = await fetch('/api/forex-amd/watchlist');
+            const res = await fetch('/api/session-break/watchlist');
             const data = await res.json();
-
             const container = document.getElementById('watchlistContainer');
-            if (data.symbols.length === 0) {
-                container.innerHTML = '<p style="color: #8B92A8;">No symbols in watchlist. Add some above.</p>';
+            if (!data.symbols || data.symbols.length === 0) {
+                container.innerHTML = '<p style="color:#8B92A8;">No symbols in watchlist. Add some above.</p>';
             } else {
                 container.innerHTML = data.symbols.map(s => `
-                    <span style="display:inline-flex;align-items:center;gap:8px;margin:4px;padding:8px 16px;background:rgba(255,255,255,0.1);border-radius:8px;">
+                    <span style="display:inline-flex;align-items:center;gap:8px;margin:4px;padding:8px 16px;
+                                 background:rgba(255,255,255,0.1);border-radius:8px;">
                         ${s}
-                        <button onclick="removeSymbol('${s}')" style="padding:2px 8px;font-size:12px;background:rgba(255,107,107,0.3);border-radius:4px;cursor:pointer;" title="Remove">&#x2715;</button>
+                        <button onclick="removeSymbol('${s}')"
+                                style="padding:2px 8px;font-size:12px;background:rgba(255,107,107,0.3);
+                                       border-radius:4px;cursor:pointer;" title="Remove">&#x2715;</button>
                     </span>
                 `).join('');
             }
@@ -3428,7 +3416,7 @@ def forex_amd_page():
         }
 
         async function removeSymbol(symbol) {
-            await fetch('/api/forex-amd/watchlist', {
+            await fetch('/api/session-break/watchlist', {
                 method: 'DELETE',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({symbol})
@@ -3440,43 +3428,53 @@ def forex_amd_page():
             const input = document.getElementById('symbolInput');
             const symbol = input.value.trim().toUpperCase();
             if (!symbol) return;
-            await fetch('/api/forex-amd/watchlist', {
+            const res = await fetch('/api/session-break/watchlist', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({symbol})
             });
+            const data = await res.json();
+            if (!data.success) {
+                alert('Error: ' + (data.error || 'Unknown error'));
+                return;
+            }
             input.value = '';
             loadWatchlist();
         }
 
-        // ── AMD Setups ───────────────────────────────────────────────────────
+        // ── Alerts ───────────────────────────────────────────────────────────
         async function loadAlerts() {
-            const res = await fetch('/api/forex-amd/alerts');
+            const res = await fetch('/api/session-break/alerts');
             const data = await res.json();
             const container = document.getElementById('alertsContainer');
-            if (data.alerts.length === 0) {
-                container.innerHTML = '<div style="text-align:center;padding:40px;color:#8B92A8;">No AMD setups detected yet</div>';
+            if (!data.alerts || data.alerts.length === 0) {
+                container.innerHTML = '<div style="text-align:center;padding:40px;color:#8B92A8;">No session break alerts triggered yet</div>';
                 return;
             }
-            container.innerHTML = data.alerts.map(alert => {
-                const qualityClass = alert.setup_quality >= 8 ? 'quality-high' : 'quality-medium';
-                const dirClass = alert.direction === 'bullish' ? 'bullish' : 'bearish';
-                const date = new Date(alert.detected_at).toLocaleString();
+            container.innerHTML = data.alerts.map(a => {
+                const dirClass = a.direction === 'UP' ? 'up' : 'down';
+                const dirColor = a.direction === 'UP' ? '#00FFA3' : '#FF6B6B';
+                const dt = new Date(a.triggered_at).toLocaleString();
+                const fb = a.first_break_level ? parseFloat(a.first_break_level).toFixed(5) : '—';
+                const cb = a.confirm_break_level ? parseFloat(a.confirm_break_level).toFixed(5) : '—';
+                const sh = a.session_high ? parseFloat(a.session_high).toFixed(5) : '—';
+                const sl = a.session_low  ? parseFloat(a.session_low).toFixed(5)  : '—';
                 return `
-                    <div class="amd-card ${dirClass}">
-                        <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
-                            <span style="font-size:20px;font-weight:700;">${alert.symbol}</span>
-                            <span class="quality-badge ${qualityClass}">Quality: ${alert.setup_quality}/10</span>
+                    <div class="alert-card ${dirClass}">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                            <span style="font-size:20px;font-weight:700;">${a.symbol}</span>
+                            <span class="session-badge">${a.session_type.toUpperCase()} / ${a.session_date}</span>
                         </div>
                         <div style="margin-bottom:8px;">
-                            <strong style="color:${alert.direction==='bullish'?'#00FFA3':'#FF6B6B'};">
-                                ${alert.direction.toUpperCase()}
-                            </strong> setup detected during ${alert.session} session
+                            <strong style="color:${dirColor};">${a.direction}</strong>
+                            &nbsp;Session Break Confirmed
                         </div>
-                        <div style="font-size:13px;color:#8B92A8;">
-                            Sweep: ${alert.sweep_level} | IFVG: ${alert.ifvg_low} - ${alert.ifvg_high}
+                        <div style="font-size:13px;color:#8B92A8;line-height:1.8;">
+                            Session High: <strong>${sh}</strong> &nbsp;|&nbsp; Session Low: <strong>${sl}</strong><br>
+                            First Break: <strong>${fb}</strong> @ ${a.first_break_ts ? new Date(a.first_break_ts).toLocaleTimeString() : '—'}<br>
+                            Confirm Break: <strong>${cb}</strong> @ ${a.confirm_break_ts ? new Date(a.confirm_break_ts).toLocaleTimeString() : '—'}
                         </div>
-                        <div style="font-size:12px;color:#666;margin-top:8px;">${date}</div>
+                        <div style="font-size:12px;color:#666;margin-top:8px;">Triggered: ${dt}</div>
                     </div>
                 `;
             }).join('');
@@ -3490,51 +3488,29 @@ def forex_amd_page():
         // ── Candlestick Chart ────────────────────────────────────────────────
         let _chart = null;
         let _candleSeries = null;
-        let _currentTf = '15min';
         let _priceLines = [];
 
         function initChart() {
-            const el = document.getElementById('amd-chart');
+            const el = document.getElementById('sb-chart');
             if (!el || typeof LightweightCharts === 'undefined') return;
             _chart = LightweightCharts.createChart(el, {
                 width: el.clientWidth,
                 height: 420,
-                layout: {
-                    background: { color: '#0d1117' },
-                    textColor: '#8B92A8',
-                },
+                layout: { background: { color: '#0d1117' }, textColor: '#8B92A8' },
                 grid: {
                     vertLines: { color: 'rgba(255,255,255,0.04)' },
                     horzLines: { color: 'rgba(255,255,255,0.04)' },
                 },
                 crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
                 rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
-                timeScale: {
-                    borderColor: 'rgba(255,255,255,0.1)',
-                    timeVisible: true,
-                    secondsVisible: false,
-                },
+                timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: true, secondsVisible: false },
             });
             _candleSeries = _chart.addCandlestickSeries({
-                upColor:        '#00FFA3',
-                downColor:      '#FF6B6B',
-                borderUpColor:  '#00FFA3',
-                borderDownColor:'#FF6B6B',
-                wickUpColor:    '#00FFA3',
-                wickDownColor:  '#FF6B6B',
+                upColor: '#00FFA3', downColor: '#FF6B6B',
+                borderUpColor: '#00FFA3', borderDownColor: '#FF6B6B',
+                wickUpColor: '#00FFA3', wickDownColor: '#FF6B6B',
             });
-            new ResizeObserver(() => {
-                if (_chart) _chart.applyOptions({ width: el.clientWidth });
-            }).observe(el);
-        }
-
-        function setTf(tf) {
-            _currentTf = tf;
-            ['5min','15min','1h'].forEach(t => {
-                const b = document.getElementById('tf-' + t);
-                if (b) b.className = 'tf-btn' + (t === tf ? ' active' : '');
-            });
-            loadChart();
+            new ResizeObserver(() => { if (_chart) _chart.applyOptions({ width: el.clientWidth }); }).observe(el);
         }
 
         function updateChartSymbolSelect(symbols) {
@@ -3547,10 +3523,7 @@ def forex_amd_page():
                 if (s === prev) opt.selected = true;
                 sel.appendChild(opt);
             });
-            if (!sel.value && symbols.length) {
-                sel.value = symbols[0];
-                loadChart();
-            }
+            if (!sel.value && symbols.length) { sel.value = symbols[0]; loadChart(); }
         }
 
         async function loadChart() {
@@ -3559,16 +3532,9 @@ def forex_amd_page():
             errEl.style.display = 'none';
             if (!sym) return;
             if (!_chart) initChart();
-            if (!_chart) {
-                errEl.textContent = 'LightweightCharts library not loaded.';
-                errEl.style.display = 'block';
-                return;
-            }
+            if (!_chart) { errEl.textContent = 'LightweightCharts library not loaded.'; errEl.style.display = 'block'; return; }
             try {
-                const res = await fetch(
-                    '/api/forex-amd/candles?symbol=' + encodeURIComponent(sym) +
-                    '&interval=' + _currentTf + '&limit=200'
-                );
+                const res = await fetch('/api/session-break/candles?symbol=' + encodeURIComponent(sym) + '&limit=288');
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
                 _candleSeries.setData(data);
@@ -3581,71 +3547,58 @@ def forex_amd_page():
         }
 
         async function loadOverlays(sym) {
-            // Remove old price lines
             _priceLines.forEach(pl => { try { _candleSeries.removePriceLine(pl); } catch(_) {} });
             _priceLines = [];
             _candleSeries.setMarkers([]);
-
             const badge = document.getElementById('chart-state-badge');
             if (badge) badge.textContent = '';
-
             try {
-                const res = await fetch('/api/forex-amd/overlay?symbol=' + encodeURIComponent(sym));
+                const res = await fetch('/api/session-break/overlay?symbol=' + encodeURIComponent(sym));
                 const data = await res.json();
-                if (!data.success) return;
-                const ov = data.overlay;
+                if (!data.success || !data.sessions) return;
 
-                if (badge && ov.state) badge.textContent = 'State: ' + ov.state;
-
-                // Accumulation box – two dotted lines
-                if (ov.accumulation && ov.accumulation.high != null) {
-                    _priceLines.push(_candleSeries.createPriceLine({
-                        price: ov.accumulation.high, color: '#FFB800', lineWidth: 1,
-                        lineStyle: LightweightCharts.LineStyle.Dotted,
-                        axisLabelVisible: true, title: 'Accum H',
-                    }));
-                    _priceLines.push(_candleSeries.createPriceLine({
-                        price: ov.accumulation.low, color: '#FFB800', lineWidth: 1,
-                        lineStyle: LightweightCharts.LineStyle.Dotted,
-                        axisLabelVisible: true, title: 'Accum L',
-                    }));
-                }
-
-                // Sweep level – dashed line
-                if (ov.sweep && ov.sweep.level != null) {
-                    const sweepColor = ov.sweep.direction === 'bullish' ? '#00FFA3' : '#FF6B6B';
-                    _priceLines.push(_candleSeries.createPriceLine({
-                        price: ov.sweep.level, color: sweepColor, lineWidth: 2,
-                        lineStyle: LightweightCharts.LineStyle.Dashed,
-                        axisLabelVisible: true,
-                        title: 'Sweep (' + (ov.sweep.direction || '') + ')',
-                    }));
-                }
-
-                // IFVG zone – two dashed blue lines
-                if (ov.ifvg && ov.ifvg.high != null) {
-                    _priceLines.push(_candleSeries.createPriceLine({
-                        price: ov.ifvg.high, color: '#5B7CFF', lineWidth: 1,
-                        lineStyle: LightweightCharts.LineStyle.Dashed,
-                        axisLabelVisible: true, title: 'IFVG H',
-                    }));
-                    _priceLines.push(_candleSeries.createPriceLine({
-                        price: ov.ifvg.low, color: '#5B7CFF', lineWidth: 1,
-                        lineStyle: LightweightCharts.LineStyle.Dashed,
-                        axisLabelVisible: true, title: 'IFVG L',
-                    }));
-                }
-
-                // Trigger marker
-                if (ov.trigger && ov.trigger.time) {
-                    const ts = Math.floor(new Date(ov.trigger.time).getTime() / 1000);
-                    _candleSeries.setMarkers([{
-                        time:     ts,
-                        position: ov.trigger.direction === 'bullish' ? 'belowBar' : 'aboveBar',
-                        color:    ov.trigger.direction === 'bullish' ? '#00FFA3' : '#FF6B6B',
-                        shape:    ov.trigger.direction === 'bullish' ? 'arrowUp' : 'arrowDown',
-                        text:     'AMD',
-                    }]);
+                const markers = [];
+                data.sessions.forEach(s => {
+                    if (s.session_high) {
+                        _priceLines.push(_candleSeries.createPriceLine({
+                            price: parseFloat(s.session_high), color: '#FFB800', lineWidth: 1,
+                            lineStyle: LightweightCharts.LineStyle.Dotted,
+                            axisLabelVisible: true,
+                            title: s.session_type.toUpperCase() + ' H',
+                        }));
+                    }
+                    if (s.session_low) {
+                        _priceLines.push(_candleSeries.createPriceLine({
+                            price: parseFloat(s.session_low), color: '#5B7CFF', lineWidth: 1,
+                            lineStyle: LightweightCharts.LineStyle.Dotted,
+                            axisLabelVisible: true,
+                            title: s.session_type.toUpperCase() + ' L',
+                        }));
+                    }
+                    if (s.first_break_level) {
+                        const col = s.direction === 'UP' ? '#00FFA3' : '#FF6B6B';
+                        _priceLines.push(_candleSeries.createPriceLine({
+                            price: parseFloat(s.first_break_level), color: col, lineWidth: 2,
+                            lineStyle: LightweightCharts.LineStyle.Dashed,
+                            axisLabelVisible: true,
+                            title: 'First Break',
+                        }));
+                    }
+                    if (s.triggered_at && s.confirm_break_ts) {
+                        const ts = Math.floor(new Date(s.confirm_break_ts).getTime() / 1000);
+                        markers.push({
+                            time: ts,
+                            position: s.direction === 'UP' ? 'belowBar' : 'aboveBar',
+                            color: s.direction === 'UP' ? '#00FFA3' : '#FF6B6B',
+                            shape: s.direction === 'UP' ? 'arrowUp' : 'arrowDown',
+                            text: s.session_type.toUpperCase() + ' ' + s.direction,
+                        });
+                    }
+                });
+                if (markers.length) _candleSeries.setMarkers(markers.sort((a,b) => a.time - b.time));
+                if (badge && data.sessions.length) {
+                    const latest = data.sessions[data.sessions.length - 1];
+                    badge.textContent = 'State: ' + (latest.state || '—');
                 }
             } catch(_) { /* overlay errors are non-fatal */ }
         }
@@ -3661,13 +3614,12 @@ def forex_amd_page():
     return render_template_string(html)
 
 
-@app.route('/api/forex-amd/watchlist', methods=['GET', 'POST', 'DELETE'])
+@app.route('/api/session-break/watchlist', methods=['GET', 'POST', 'DELETE'])
 @login_required
-def manage_forex_watchlist():
-    """Manage user's forex watchlist"""
+def manage_session_break_watchlist():
+    """Manage user's forex watchlist for session break alerts."""
     if request.method == 'POST':
         raw_symbol = request.json.get('symbol', '').strip()
-
         if not raw_symbol:
             return jsonify({'success': False, 'error': 'Symbol required'}), 400
 
@@ -3677,101 +3629,94 @@ def manage_forex_watchlist():
             return jsonify({'success': False, 'error': norm_err}), 400
 
         try:
-            db.execute("""
+            db.execute(
+                """
                 INSERT INTO forex_watchlist (user_id, symbol)
                 VALUES (%s, %s)
                 ON CONFLICT (user_id, symbol) DO NOTHING
-            """, (current_user.id, symbol))
-
+                """,
+                (current_user.id, symbol),
+            )
             return jsonify({'success': True, 'symbol': symbol})
         except Exception as e:
-            logger.error(f"Error adding to watchlist: {e}")
+            logger.error(f"[SESSION_BREAK] watchlist add error: {e}")
             return jsonify({'success': False, 'error': str(e)}), 500
-    
+
     elif request.method == 'DELETE':
         symbol = request.json.get('symbol')
-        db.execute("""
-            DELETE FROM forex_watchlist
-            WHERE user_id = %s AND symbol = %s
-        """, (current_user.id, symbol))
+        db.execute(
+            "DELETE FROM forex_watchlist WHERE user_id = %s AND symbol = %s",
+            (current_user.id, symbol),
+        )
         return jsonify({'success': True})
-    
+
     else:  # GET
-        watchlist = db.execute("""
-            SELECT symbol FROM forex_watchlist
-            WHERE user_id = %s
-            ORDER BY added_at DESC
-        """, (current_user.id,), fetchall=True)
-        
+        watchlist = db.execute(
+            "SELECT symbol FROM forex_watchlist WHERE user_id = %s ORDER BY added_at DESC",
+            (current_user.id,),
+            fetchall=True,
+        )
         return jsonify({
             'success': True,
-            'symbols': [w['symbol'] for w in watchlist] if watchlist else []
+            'symbols': [w['symbol'] for w in watchlist] if watchlist else [],
         })
 
 
-@app.route('/api/forex-amd/alerts')
+# Keep legacy endpoint working (old clients may call it)
+@app.route('/api/forex-amd/watchlist', methods=['GET', 'POST', 'DELETE'])
 @login_required
-def get_forex_amd_alerts():
-    """Get user's AMD alerts"""
+def manage_forex_watchlist_legacy():
+    """Legacy alias – delegates to session break watchlist."""
+    return manage_session_break_watchlist()
+
+
+@app.route('/api/session-break/alerts')
+@login_required
+def get_session_break_alerts():
+    """Get user's session break alert history (last 50 triggers)."""
     try:
-        alerts = db.execute("""
-            SELECT * FROM forex_amd_alerts
+        rows = db.execute(
+            """
+            SELECT symbol, session_type, session_date, direction,
+                   session_high, session_low,
+                   first_break_ts, first_break_level,
+                   confirm_break_ts, confirm_break_level,
+                   triggered_at
+            FROM session_break_history
             WHERE user_id = %s
-            ORDER BY detected_at DESC
+            ORDER BY triggered_at DESC
             LIMIT 50
-        """, (current_user.id,), fetchall=True)
-        
-        return jsonify({
-            'success': True,
-            'alerts': alerts if alerts else []
-        })
+            """,
+            (current_user.id,),
+            fetchall=True,
+        )
+        alerts = []
+        for r in (rows or []):
+            d = dict(r)
+            for k in ('first_break_ts', 'confirm_break_ts', 'triggered_at'):
+                if d.get(k):
+                    d[k] = d[k].isoformat()
+            if d.get('session_date'):
+                d['session_date'] = str(d['session_date'])
+            alerts.append(d)
+        return jsonify({'success': True, 'alerts': alerts})
     except Exception as e:
-        logger.error(f"Error fetching AMD alerts: {e}")
+        logger.error(f"[SESSION_BREAK] alerts endpoint error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/forex-amd/debug-run')
+
+@app.route('/api/session-break/health')
 @login_required
-def forex_amd_debug_run():
-    """
-    Dry-run the AMD state machine for the current user + symbol.
-
-    Query params
-    ------------
-    symbol : str   Required. Accepts any normalized format (EURUSD, EUR/USD, …)
-
-    Returns a JSON debug report with current state, computed metrics, and
-    per-step decisions — without modifying any DB state.
-    """
-    raw_symbol = request.args.get('symbol', '').strip()
-    if not raw_symbol:
-        return jsonify({'error': 'symbol query parameter is required'}), 400
-
-    from services.forex_data_provider import normalize_symbol
-    symbol, norm_err = normalize_symbol(raw_symbol)
-    if norm_err:
-        return jsonify({'error': norm_err}), 400
-
+def session_break_health():
+    """Session Break scanner health – last run timestamps + error info."""
     try:
-        from services.forex_amd_detector import forex_amd_detector
-        report = forex_amd_detector.debug_run(current_user.id, symbol)
-        return jsonify(report)
-    except Exception as exc:
-        logger.error(f"[AMD_FOREX][DEBUG_RUN] symbol={symbol} user={current_user.id} err={exc}", exc_info=True)
-        return jsonify({'error': str(exc)}), 500
-
-
-@app.route('/api/forex-amd/health')
-@login_required
-def forex_amd_health():
-    """AMD scanner health — last run timestamps + error info."""
-    try:
+        from datetime import datetime, timezone
+        from services.session_break_detector import SessionBreakConfig
         row = db.execute(
-            "SELECT * FROM forex_amd_health WHERE id = 1",
+            "SELECT * FROM session_break_health WHERE id = 1",
             fetchone=True,
         )
-        from services.forex_amd_detector import AMDConfig
-        from datetime import datetime, timezone
-        threshold_min = AMDConfig.UNHEALTHY_THRESHOLD_MINUTES
+        threshold_min = SessionBreakConfig.UNHEALTHY_THRESHOLD_MINUTES
         healthy = False
         age_min = None
         if row and row.get('last_ok_at'):
@@ -3781,10 +3726,10 @@ def forex_amd_health():
             age_min = (datetime.now(timezone.utc) - last_ok).total_seconds() / 60
             healthy = age_min <= threshold_min
         return jsonify({
-            'success': True,
-            'healthy': healthy,
-            'threshold_minutes': threshold_min,
-            'age_minutes': round(age_min, 1) if age_min is not None else None,
+            'success':            True,
+            'healthy':            healthy,
+            'threshold_minutes':  threshold_min,
+            'age_minutes':        round(age_min, 1) if age_min is not None else None,
             'last_run_at':    row['last_run_at'].isoformat()    if row and row['last_run_at']    else None,
             'last_ok_at':     row['last_ok_at'].isoformat()     if row and row['last_ok_at']     else None,
             'last_error_at':  row['last_error_at'].isoformat()  if row and row['last_error_at']  else None,
@@ -3792,60 +3737,40 @@ def forex_amd_health():
             'last_symbols_count': row['last_symbols_count']     if row else 0,
         })
     except Exception as e:
-        logger.error(f"[AMD_FOREX] health endpoint error: {e}")
+        logger.error(f"[SESSION_BREAK] health endpoint error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/forex-amd/state')
+@app.route('/api/session-break/state')
 @login_required
-def forex_amd_state_snapshot():
-    """Current state-machine snapshot per symbol for the logged-in user."""
+def session_break_state_snapshot():
+    """Current session-break state per (symbol, session_type, session_date)."""
     try:
-        STATE_NAMES = {
-            0: 'IDLE', 1: 'ACCUMULATION', 2: 'SWEEP_DETECTED',
-            3: 'DISPLACEMENT_CONFIRMED', 4: 'WAIT_IFVG',
-        }
-        rows = db.execute("""
-            SELECT symbol, current_state, last_update
-            FROM forex_amd_state
+        rows = db.execute(
+            """
+            SELECT symbol, session_type, session_date, state, direction,
+                   session_high, session_low, first_break_ts, first_break_level,
+                   triggered_at, updated_at
+            FROM session_break_state
             WHERE user_id = %s
-            ORDER BY symbol
-        """, (current_user.id,), fetchall=True)
-        states = [
-            {
-                'symbol':      r['symbol'],
-                'state_id':    r['current_state'],
-                'state_name':  STATE_NAMES.get(r['current_state'], 'UNKNOWN'),
-                'last_update': r['last_update'].isoformat() if r['last_update'] else None,
-            }
-            for r in (rows or [])
-        ]
+            ORDER BY session_date DESC, symbol, session_type
+            LIMIT 100
+            """,
+            (current_user.id,),
+            fetchall=True,
+        )
+        states = []
+        for r in (rows or []):
+            d = dict(r)
+            for k in ('first_break_ts', 'triggered_at', 'updated_at'):
+                if d.get(k):
+                    d[k] = d[k].isoformat()
+            if d.get('session_date'):
+                d['session_date'] = str(d['session_date'])
+            states.append(d)
         return jsonify({'success': True, 'states': states, 'count': len(states)})
     except Exception as e:
-        logger.error(f"[AMD_FOREX] state endpoint error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/forex-amd/recent-events')
-@login_required
-def forex_amd_recent_events():
-    """Last 20 AMD alerts/triggers for the logged-in user (read-only history)."""
-    try:
-        rows = db.execute("""
-            SELECT symbol, direction, session, setup_quality,
-                   sweep_level, ifvg_high, ifvg_low, detected_at
-            FROM forex_amd_alerts
-            WHERE user_id = %s
-            ORDER BY detected_at DESC
-            LIMIT 20
-        """, (current_user.id,), fetchall=True)
-        events = [dict(r) for r in (rows or [])]
-        for ev in events:
-            if ev.get('detected_at'):
-                ev['detected_at'] = ev['detected_at'].isoformat()
-        return jsonify({'success': True, 'events': events})
-    except Exception as e:
-        logger.error(f"[AMD_FOREX] recent-events endpoint error: {e}")
+        logger.error(f"[SESSION_BREAK] state endpoint error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -3853,42 +3778,34 @@ def forex_amd_recent_events():
 # In-memory candle cache: cache_key -> (monotonic_timestamp, data_list)
 # ---------------------------------------------------------------------------
 _candle_cache: dict = {}
-_CANDLE_CACHE_TTL = 60  # seconds – refresh at most once per minute per symbol+tf
+_CANDLE_CACHE_TTL = 60  # seconds
 
 
-@app.route('/api/forex-amd/candles')
+@app.route('/api/session-break/candles')
 @login_required
-def forex_amd_candles():
-    """OHLC candles for LightweightCharts.
-    GET /api/forex-amd/candles?symbol=EURUSD&interval=15min&limit=200
-    Returns [{time, open, high, low, close}, …] sorted ascending by time.
+def session_break_candles():
+    """OHLC 5M candles for LightweightCharts.
+    GET /api/session-break/candles?symbol=EURUSD&limit=288
+    Returns [{time, open, high, low, close}, …] ascending.
     """
     from services.forex_data_provider import forex_data_provider
 
     symbol = request.args.get('symbol', '').strip().upper()
-    interval = request.args.get('interval', '15min').strip().lower()
     try:
-        limit = min(int(request.args.get('limit', 200)), 500)
+        limit = min(int(request.args.get('limit', 288)), 576)
     except ValueError:
-        limit = 200
+        limit = 288
 
     if not symbol:
         return jsonify({'error': 'symbol required'}), 400
 
-    _IV = {
-        '5m': '5m', '5min': '5m',
-        '15m': '15m', '15min': '15m',
-        '1h': '1h', '1hour': '1h',
-    }
-    tf = _IV.get(interval, '15m')
-
-    cache_key = f"{symbol}:{tf}"
+    cache_key = f"{symbol}:5m"
     now_mono = time.monotonic()
     cached = _candle_cache.get(cache_key)
     if cached and (now_mono - cached[0]) < _CANDLE_CACHE_TTL:
         return jsonify(cached[1])
 
-    candles = forex_data_provider.get_recent_candles(symbol, timeframe=tf, count=limit)
+    candles = forex_data_provider.get_recent_candles(symbol, timeframe='5m', count=limit)
     if not candles:
         return jsonify({'error': f'No candle data available for {symbol}'}), 404
 
@@ -3905,95 +3822,74 @@ def forex_amd_candles():
         ],
         key=lambda x: x['time'],
     )
-
     _candle_cache[cache_key] = (now_mono, result)
     return jsonify(result)
 
 
-@app.route('/api/forex-amd/overlay')
+@app.route('/api/session-break/overlay')
 @login_required
-def forex_amd_overlay():
-    """Current state-machine overlay data for drawing on the chart.
-    Returns accumulation box, sweep level, IFVG zone, and trigger marker.
-    GET /api/forex-amd/overlay?symbol=EURUSD
+def session_break_overlay():
+    """Session-break overlay data for chart annotations.
+    GET /api/session-break/overlay?symbol=EURUSD
+    Returns recent session states (session_high/low, first_break, trigger).
     """
     symbol = request.args.get('symbol', '').strip().upper()
     if not symbol:
         return jsonify({'error': 'symbol required'}), 400
 
     try:
-        state_row = db.execute(
-            """SELECT current_state, accumulation_data, sweep_data, last_update
-               FROM forex_amd_state
-               WHERE user_id = %s AND symbol = %s""",
-            (current_user.id, symbol), fetchone=True,
+        rows = db.execute(
+            """
+            SELECT session_type, session_date, state, direction,
+                   session_high, session_low,
+                   first_break_ts, first_break_level,
+                   confirm_break_ts, triggered_at
+            FROM session_break_state
+            WHERE user_id = %s AND symbol = %s
+            ORDER BY session_date DESC, session_type
+            LIMIT 10
+            """,
+            (current_user.id, symbol),
+            fetchone=False,
         )
-        alert_row = db.execute(
-            """SELECT sweep_level, sweep_time, ifvg_high, ifvg_low, ifvg_time,
-                      direction, detected_at
-               FROM forex_amd_alerts
-               WHERE user_id = %s AND symbol = %s
-               ORDER BY detected_at DESC LIMIT 1""",
-            (current_user.id, symbol), fetchone=True,
+        # rows is None when fetchone=False and no fetchall – call with fetchall
+        rows = db.execute(
+            """
+            SELECT session_type, session_date, state, direction,
+                   session_high, session_low,
+                   first_break_ts, first_break_level,
+                   confirm_break_ts, triggered_at
+            FROM session_break_state
+            WHERE user_id = %s AND symbol = %s
+            ORDER BY session_date DESC, session_type
+            LIMIT 10
+            """,
+            (current_user.id, symbol),
+            fetchall=True,
         )
-
-        STATE_NAMES = {
-            0: 'IDLE', 1: 'ACCUMULATION', 2: 'SWEEP_DETECTED',
-            3: 'DISPLACEMENT_CONFIRMED', 4: 'WAIT_IFVG',
-        }
-
-        overlay = {'state': None, 'accumulation': None, 'sweep': None,
-                   'ifvg': None, 'trigger': None}
-
-        if state_row:
-            overlay['state'] = STATE_NAMES.get(state_row['current_state'], 'UNKNOWN')
-
-            if state_row['accumulation_data']:
-                raw = state_row['accumulation_data']
-                accum = json.loads(raw) if isinstance(raw, str) else raw
-                overlay['accumulation'] = {
-                    'high': accum.get('high'),
-                    'low':  accum.get('low'),
-                }
-
-            if state_row['sweep_data']:
-                raw = state_row['sweep_data']
-                sweep = json.loads(raw) if isinstance(raw, str) else raw
-                overlay['sweep'] = {
-                    'level':     sweep.get('level'),
-                    'direction': sweep.get('direction'),
-                }
-
-        if alert_row:
-            overlay['ifvg'] = {
-                'high': float(alert_row['ifvg_high']) if alert_row.get('ifvg_high') else None,
-                'low':  float(alert_row['ifvg_low'])  if alert_row.get('ifvg_low')  else None,
-                'time': alert_row['ifvg_time'].isoformat() if alert_row.get('ifvg_time') else None,
-            }
-            overlay['trigger'] = {
-                'time':      alert_row['detected_at'].isoformat() if alert_row.get('detected_at') else None,
-                'direction': alert_row.get('direction'),
-            }
-            if alert_row.get('sweep_level') and not overlay['sweep']:
-                overlay['sweep'] = {
-                    'level':     float(alert_row['sweep_level']),
-                    'direction': alert_row.get('direction'),
-                }
-
-        return jsonify({'success': True, 'symbol': symbol, 'overlay': overlay})
+        sessions = []
+        for r in (rows or []):
+            d = dict(r)
+            for k in ('first_break_ts', 'confirm_break_ts', 'triggered_at'):
+                if d.get(k):
+                    d[k] = d[k].isoformat()
+            if d.get('session_date'):
+                d['session_date'] = str(d['session_date'])
+            sessions.append(d)
+        return jsonify({'success': True, 'symbol': symbol, 'sessions': sessions})
     except Exception as e:
-        logger.error(f"[AMD_FOREX] overlay endpoint error: {e}")
+        logger.error(f"[SESSION_BREAK] overlay endpoint error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/forex-amd/debug')
+@app.route('/forex-sessions/debug')
 @login_required
-def forex_amd_debug_page():
-    """Read-only AMD debug/monitoring page."""
+def session_break_debug_page():
+    """Read-only session break debug / monitoring page."""
     html = """<!DOCTYPE html>
 <html>
 <head>
-  <title>AMD Debug</title>
+  <title>Session Break Debug</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="/static/css/theme.css">
   <style>
@@ -4004,16 +3900,12 @@ def forex_amd_debug_page():
            border-radius:10px; padding:16px; margin-bottom:16px; }
     .ok   { color:#00FFA3; }
     .err  { color:#FF6B6B; }
-    .warn { color:#FFB800; }
     table { width:100%; border-collapse:collapse; font-size:13px; }
-    th,td { text-align:left; padding:6px 10px;
-            border-bottom:1px solid rgba(255,255,255,.07); }
+    th,td { text-align:left; padding:6px 10px; border-bottom:1px solid rgba(255,255,255,.07); }
     th    { color:#5B7CFF; }
     pre   { white-space:pre-wrap; font-size:12px; color:#aaa; }
-    .badge-ok  { background:rgba(0,255,163,.15); color:#00FFA3; }
-    .badge-err { background:rgba(255,107,107,.15); color:#FF6B6B; }
-    .refresh-note { font-size:11px; color:var(--text-secondary); margin-left:auto; }
     .debug-content { max-width:1200px; margin:0 auto; padding:80px 20px 40px; }
+    .refresh-note { font-size:11px; color:#8B92A8; margin-left:auto; }
   </style>
 </head>
 <body>
@@ -4021,109 +3913,106 @@ def forex_amd_debug_page():
     <span class="top-nav-brand">📈 PulseAlerts</span>
     <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
     <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
-    <a href="/alerts/history" class="top-nav-link">📜 History</a>
-    <a href="/radar" class="top-nav-link">🚨 Radar</a>
-    <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
-    <a href="/forex-amd" class="top-nav-link active">🌐 Forex AMD</a>
+    <a href="/forex-sessions" class="top-nav-link active">🌐 Forex</a>
     <a href="/fundamentals" class="top-nav-link">📋 Fundamentals</a>
     <span class="top-nav-spacer"></span>
     <button class="top-nav-logout" onclick="window.location='/logout'">Sign out</button>
   </nav>
   <div class="debug-content">
-  <div style="margin-bottom:20px;display:flex;align-items:center;gap:16px;">
-    <h2 style="margin-bottom:0">AMD Debug Dashboard</h2>
-    <span class="refresh-note" id="last-refresh"></span>
-  </div>
+    <div style="margin-bottom:20px;display:flex;align-items:center;gap:16px;">
+      <h2 style="margin-bottom:0">Session Break Debug Dashboard</h2>
+      <span class="refresh-note" id="last-refresh"></span>
+    </div>
 
-  <div class="debug-card" id="health-card">
-    <h3>Scanner Health <span id="health-badge"></span></h3>
-    <pre id="health-data">Loading...</pre>
-  </div>
+    <div class="debug-card">
+      <h3>Scanner Health</h3>
+      <pre id="health-data">Loading...</pre>
+    </div>
 
-  <div class="debug-card">
-    <h3>State Machine Snapshot</h3>
-    <table>
-      <thead><tr><th>Symbol</th><th>State</th><th>Last Update</th></tr></thead>
-      <tbody id="state-rows"><tr><td colspan="3">Loading...</td></tr></tbody>
-    </table>
-  </div>
+    <div class="debug-card">
+      <h3>Current States</h3>
+      <table>
+        <thead><tr>
+          <th>Symbol</th><th>Session</th><th>Date</th><th>State</th>
+          <th>Direction</th><th>Session H/L</th><th>First Break</th><th>Updated</th>
+        </tr></thead>
+        <tbody id="state-rows"><tr><td colspan="8">Loading...</td></tr></tbody>
+      </table>
+    </div>
 
-  <div class="debug-card">
-    <h3>Recent Triggers (last 20)</h3>
-    <table>
-      <thead><tr>
-        <th>Symbol</th><th>Direction</th><th>Quality</th>
-        <th>Session</th><th>Detected At</th>
-      </tr></thead>
-      <tbody id="event-rows"><tr><td colspan="5">Loading...</td></tr></tbody>
-    </table>
+    <div class="debug-card">
+      <h3>Recent Triggers (last 20)</h3>
+      <table>
+        <thead><tr>
+          <th>Symbol</th><th>Session</th><th>Date</th>
+          <th>Dir</th><th>First Break</th><th>Confirm</th><th>Triggered At</th>
+        </tr></thead>
+        <tbody id="event-rows"><tr><td colspan="7">Loading...</td></tr></tbody>
+      </table>
+    </div>
   </div>
-  </div><!-- /debug-content -->
 
 <script>
-const STATE_COLOR = {
-  IDLE: '#8B92A8',
-  ACCUMULATION: '#FFB800',
-  SWEEP_DETECTED: '#5B7CFF',
-  DISPLACEMENT_CONFIRMED: '#00FFA3',
-  WAIT_IFVG: '#FF6B6B'
-};
-
 async function load() {
   try {
-    const h = await fetch('/api/forex-amd/health').then(r => r.json());
-    const badge = document.getElementById('health-badge');
-    badge.innerHTML = h.healthy
-      ? '<span class="badge badge-ok">HEALTHY</span>'
-      : '<span class="badge badge-err">UNHEALTHY</span>';
-    document.getElementById('health-data').textContent = JSON.stringify({
-      healthy:            h.healthy,
-      age_minutes:        h.age_minutes,
-      threshold_minutes:  h.threshold_minutes,
-      last_run_at:        h.last_run_at,
-      last_ok_at:         h.last_ok_at,
-      last_error_at:      h.last_error_at,
-      last_error_msg:     h.last_error_msg,
-      last_symbols_count: h.last_symbols_count
-    }, null, 2);
-  } catch(e) {
-    document.getElementById('health-data').textContent = 'Error: ' + e;
-  }
+    const h = await fetch('/api/session-break/health').then(r => r.json());
+    document.getElementById('health-data').textContent = JSON.stringify(h, null, 2);
+  } catch(e) { document.getElementById('health-data').textContent = 'Error: ' + e; }
 
   try {
-    const s = await fetch('/api/forex-amd/state').then(r => r.json());
+    const s = await fetch('/api/session-break/state').then(r => r.json());
     document.getElementById('state-rows').innerHTML =
       (s.states && s.states.length)
         ? s.states.map(r =>
-            '<tr><td>' + r.symbol + '</td>' +
-            '<td style="color:' + (STATE_COLOR[r.state_name] || '#ccc') + '">' + r.state_name + '</td>' +
-            '<td>' + (r.last_update || '-') + '</td></tr>'
+            '<tr>' +
+            '<td>' + r.symbol + '</td>' +
+            '<td>' + r.session_type + '</td>' +
+            '<td>' + r.session_date + '</td>' +
+            '<td style="color:' + stateColor(r.state) + '">' + (r.state || '—') + '</td>' +
+            '<td>' + (r.direction || '—') + '</td>' +
+            '<td>' + (r.session_high ? parseFloat(r.session_high).toFixed(5) : '—') + ' / ' +
+                     (r.session_low  ? parseFloat(r.session_low).toFixed(5)  : '—') + '</td>' +
+            '<td>' + (r.first_break_level ? parseFloat(r.first_break_level).toFixed(5) : '—') + '</td>' +
+            '<td>' + (r.updated_at || '—') + '</td>' +
+            '</tr>'
           ).join('')
-        : '<tr><td colspan="3" style="color:#555">No symbols in watchlist</td></tr>';
+        : '<tr><td colspan="8" style="color:#555">No state records yet</td></tr>';
   } catch(e) {
-    document.getElementById('state-rows').innerHTML =
-      '<tr><td colspan="3" class="err">Error: ' + e + '</td></tr>';
+    document.getElementById('state-rows').innerHTML = '<tr><td colspan="8" class="err">Error: ' + e + '</td></tr>';
   }
 
   try {
-    const ev = await fetch('/api/forex-amd/recent-events').then(r => r.json());
+    const ev = await fetch('/api/session-break/alerts').then(r => r.json());
     document.getElementById('event-rows').innerHTML =
-      (ev.events && ev.events.length)
-        ? ev.events.map(e =>
-            '<tr><td>' + e.symbol + '</td>' +
-            '<td class="' + (e.direction === 'bullish' ? 'ok' : 'err') + '">' + e.direction + '</td>' +
-            '<td>' + e.setup_quality + '/10</td>' +
-            '<td>' + e.session + '</td>' +
-            '<td>' + e.detected_at + '</td></tr>'
+      (ev.alerts && ev.alerts.length)
+        ? ev.alerts.slice(0, 20).map(e =>
+            '<tr>' +
+            '<td>' + e.symbol + '</td>' +
+            '<td>' + e.session_type + '</td>' +
+            '<td>' + e.session_date + '</td>' +
+            '<td class="' + (e.direction === 'UP' ? 'ok' : 'err') + '">' + e.direction + '</td>' +
+            '<td>' + (e.first_break_level ? parseFloat(e.first_break_level).toFixed(5) : '—') + '</td>' +
+            '<td>' + (e.confirm_break_level ? parseFloat(e.confirm_break_level).toFixed(5) : '—') + '</td>' +
+            '<td>' + (e.triggered_at || '—') + '</td>' +
+            '</tr>'
           ).join('')
-        : '<tr><td colspan="5" style="color:#555">No triggers yet</td></tr>';
+        : '<tr><td colspan="7" style="color:#555">No triggers yet</td></tr>';
   } catch(e) {
-    document.getElementById('event-rows').innerHTML =
-      '<tr><td colspan="5" class="err">Error: ' + e + '</td></tr>';
+    document.getElementById('event-rows').innerHTML = '<tr><td colspan="7" class="err">Error: ' + e + '</td></tr>';
   }
 
   document.getElementById('last-refresh').textContent =
-    'Auto-refreshes every 30s — Last: ' + new Date().toLocaleTimeString();
+    'Auto-refresh 30s — Last: ' + new Date().toLocaleTimeString();
+}
+
+function stateColor(s) {
+  const m = {
+    POST_SESSION: '#8B92A8',
+    WAIT_CONFIRM_UP: '#00FFA3',
+    WAIT_CONFIRM_DOWN: '#FF6B6B',
+    TRIGGERED: '#FFB800',
+  };
+  return m[s] || '#ccc';
 }
 
 load();

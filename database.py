@@ -187,6 +187,69 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_forex_amd_state_user
                 ON forex_amd_state(user_id);
             """,
+            # ── Session Break Confirmation tables ──────────────────────────────
+            """
+            CREATE TABLE IF NOT EXISTS session_break_state (
+                id              SERIAL PRIMARY KEY,
+                user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                symbol          VARCHAR(20) NOT NULL,
+                session_type    VARCHAR(10) NOT NULL,
+                session_date    DATE NOT NULL,
+                session_high    DECIMAL(15, 5),
+                session_low     DECIMAL(15, 5),
+                state           VARCHAR(30) DEFAULT 'POST_SESSION',
+                direction       VARCHAR(5),
+                first_break_ts        TIMESTAMP,
+                first_break_level     DECIMAL(15, 5),
+                confirm_break_ts      TIMESTAMP,
+                confirm_break_level   DECIMAL(15, 5),
+                triggered_at    TIMESTAMP,
+                last_processed_candle_ts TIMESTAMP,
+                created_at      TIMESTAMP DEFAULT NOW(),
+                updated_at      TIMESTAMP DEFAULT NOW(),
+                UNIQUE(user_id, symbol, session_type, session_date)
+            );
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sb_state_user_symbol
+                ON session_break_state(user_id, symbol);
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sb_state_date
+                ON session_break_state(session_date DESC);
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS session_break_history (
+                id              SERIAL PRIMARY KEY,
+                user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                symbol          VARCHAR(20) NOT NULL,
+                session_type    VARCHAR(10) NOT NULL,
+                session_date    DATE NOT NULL,
+                direction       VARCHAR(5) NOT NULL,
+                session_high    DECIMAL(15, 5) NOT NULL,
+                session_low     DECIMAL(15, 5) NOT NULL,
+                first_break_ts        TIMESTAMP NOT NULL,
+                first_break_level     DECIMAL(15, 5) NOT NULL,
+                confirm_break_ts      TIMESTAMP NOT NULL,
+                confirm_break_level   DECIMAL(15, 5) NOT NULL,
+                triggered_at    TIMESTAMP DEFAULT NOW()
+            );
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sb_history_user_symbol
+                ON session_break_history(user_id, symbol, triggered_at DESC);
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS session_break_health (
+                id              INTEGER PRIMARY KEY DEFAULT 1,
+                last_run_at     TIMESTAMP,
+                last_ok_at      TIMESTAMP,
+                last_error_at   TIMESTAMP,
+                last_error_msg  TEXT,
+                last_symbols_count INTEGER DEFAULT 0
+            );
+            INSERT INTO session_break_health (id) VALUES (1) ON CONFLICT DO NOTHING;
+            """,
         ]
         
         try:
