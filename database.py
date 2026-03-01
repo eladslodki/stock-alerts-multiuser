@@ -250,8 +250,22 @@ class Database:
             );
             INSERT INTO session_break_health (id) VALUES (1) ON CONFLICT DO NOTHING;
             """,
+            # ── Session Break v2: reentry tracking ────────────────────────────
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS reentered  BOOLEAN   DEFAULT FALSE;
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS reentry_ts TIMESTAMP;
+            """,
+            """
+            ALTER TABLE session_break_history
+                ADD CONSTRAINT IF NOT EXISTS uq_sb_history_session
+                UNIQUE (user_id, symbol, session_type, session_date);
+            """,
         ]
-        
+
         try:
             with self.get_connection() as conn:
                 with conn.cursor() as cur:

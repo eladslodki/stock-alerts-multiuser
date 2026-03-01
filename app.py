@@ -3259,12 +3259,12 @@ def forex_amd_redirect():
 @app.route('/forex-sessions')
 @login_required
 def session_break_page():
-    """Session Break Confirmation alert page (Asia + London)."""
+    """Session Liquidity Sweep + Confirmation alerts (Asia + London, Israel time)."""
     html = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Session Break Alerts</title>
+    <title>Session Sweep Alerts</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js"></script>
     <link rel="stylesheet" href="/static/css/theme.css">
@@ -3351,10 +3351,10 @@ def session_break_page():
     </nav>
     <div style="max-width:1400px;margin:0 auto;padding:80px 20px 40px">
         <div style="margin-bottom:24px">
-            <h1 style="font-size:28px;font-weight:800;letter-spacing:-0.5px;">🌐 Session Break Alerts</h1>
+            <h1 style="font-size:28px;font-weight:800;letter-spacing:-0.5px;">🌐 Session Sweep Alerts</h1>
             <p style="color:#8B92A8;font-size:14px;margin-top:4px;">
-                Asia (00:00–09:00 UTC) &amp; London (08:00–17:00 UTC) session break confirmation alerts.
-                Wick-only break detection on 5M candles.
+                Asia (03:00–07:00 IL) &amp; London (09:00–12:00 IL) &bull;
+                Sweep → Reentry → Confirm on 5M wick-only candles
             </p>
         </div>
 
@@ -3368,7 +3368,14 @@ def session_break_page():
         </div>
 
         <div class="section">
-            <h2 style="margin-bottom:16px;">Session Break Alerts</h2>
+            <h2 style="margin-bottom:16px;">Current Session State</h2>
+            <div id="stateContainer">
+                <div style="text-align:center;padding:20px;color:#8B92A8;">Loading...</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 style="margin-bottom:16px;">Recent Sweep Triggers</h2>
             <div id="alertsContainer">
                 <div style="text-align:center;padding:40px;color:#8B92A8;">Loading...</div>
             </div>
@@ -3387,8 +3394,10 @@ def session_break_page():
             <div style="margin-top:10px;font-size:12px;color:#555;line-height:1.6;">
                 <span style="color:#FFB800;">&#9472;&#9472;</span> Session High &nbsp;
                 <span style="color:#5B7CFF;">&#9472;&#9472;</span> Session Low &nbsp;
-                <span style="color:#00FFA3;">&#9650;</span> UP Trigger &nbsp;
-                <span style="color:#FF6B6B;">&#9660;</span> DOWN Trigger
+                <span style="color:#00FFA3;">&#9472;&#9472;</span> UP Sweep level &nbsp;
+                <span style="color:#FF6B6B;">&#9472;&#9472;</span> DOWN Sweep level &nbsp;
+                <span style="color:#00FFA3;">&#9650;</span> UP Confirm &nbsp;
+                <span style="color:#FF6B6B;">&#9660;</span> DOWN Confirm
             </div>
         </div>
     </div>
@@ -3442,37 +3451,82 @@ def session_break_page():
             loadWatchlist();
         }
 
-        // ── Alerts ───────────────────────────────────────────────────────────
+        // ── Current State ────────────────────────────────────────────────────
+        const STATE_LABELS = {
+            WAIT_FIRST_SWEEP:   { label: 'Waiting for Sweep',       color: '#8B92A8' },
+            REQUIRE_REENTRY:    { label: 'Waiting for Reentry',      color: '#FFB800' },
+            WAIT_CONFIRM_BREAK: { label: 'Waiting for Confirm',      color: '#5B7CFF' },
+            TRIGGERED:          { label: 'Triggered',                color: '#00FFA3' },
+        };
+        async function loadState() {
+            const res = await fetch('/api/session-break/state');
+            const data = await res.json();
+            const container = document.getElementById('stateContainer');
+            if (!data.states || data.states.length === 0) {
+                container.innerHTML = '<p style="color:#8B92A8;font-size:13px;">No active sessions yet.</p>';
+                return;
+            }
+            container.innerHTML = data.states.map(s => {
+                const si = STATE_LABELS[s.state] || { label: s.state, color: '#ccc' };
+                const sh = s.session_high ? parseFloat(s.session_high).toFixed(5) : '—';
+                const sl = s.session_low  ? parseFloat(s.session_low).toFixed(5)  : '—';
+                const sw = s.first_break_level ? parseFloat(s.first_break_level).toFixed(5) : '—';
+                const swt = s.first_break_ts ? new Date(s.first_break_ts).toLocaleTimeString() : '—';
+                const reent = s.reentered ? '<span style="color:#00FFA3;">✓ Yes</span>' : '<span style="color:#FFB800;">✗ No</span>';
+                return `
+                    <div style="display:flex;flex-wrap:wrap;gap:20px;padding:12px 16px;
+                                background:rgba(255,255,255,0.03);border-radius:10px;
+                                border:1px solid rgba(255,255,255,0.07);margin-bottom:10px;
+                                align-items:center;">
+                        <span style="font-weight:700;min-width:90px;">${s.symbol}</span>
+                        <span class="session-badge">${(s.session_type||'').toUpperCase()} ${s.session_date||''}</span>
+                        <span style="color:${si.color};font-weight:600;font-size:13px;">${si.label}</span>
+                        <span style="font-size:13px;color:#8B92A8;">
+                            H <strong style="color:#FFB800;">${sh}</strong>
+                            &nbsp;L <strong style="color:#5B7CFF;">${sl}</strong>
+                        </span>
+                        ${s.first_break_level ? `<span style="font-size:13px;color:#8B92A8;">
+                            Sweep <strong style="color:${s.direction==='UP'?'#00FFA3':'#FF6B6B'}">${s.direction||''} ${sw}</strong>
+                            @${swt}</span>` : ''}
+                        ${s.first_break_level ? `<span style="font-size:13px;color:#8B92A8;">Reentry: ${reent}</span>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // ── Sweep Triggers ───────────────────────────────────────────────────
         async function loadAlerts() {
             const res = await fetch('/api/session-break/alerts');
             const data = await res.json();
             const container = document.getElementById('alertsContainer');
             if (!data.alerts || data.alerts.length === 0) {
-                container.innerHTML = '<div style="text-align:center;padding:40px;color:#8B92A8;">No session break alerts triggered yet</div>';
+                container.innerHTML = '<div style="text-align:center;padding:40px;color:#8B92A8;">No sweep triggers yet</div>';
                 return;
             }
             container.innerHTML = data.alerts.map(a => {
                 const dirClass = a.direction === 'UP' ? 'up' : 'down';
                 const dirColor = a.direction === 'UP' ? '#00FFA3' : '#FF6B6B';
-                const dt = new Date(a.triggered_at).toLocaleString();
-                const fb = a.first_break_level ? parseFloat(a.first_break_level).toFixed(5) : '—';
-                const cb = a.confirm_break_level ? parseFloat(a.confirm_break_level).toFixed(5) : '—';
-                const sh = a.session_high ? parseFloat(a.session_high).toFixed(5) : '—';
-                const sl = a.session_low  ? parseFloat(a.session_low).toFixed(5)  : '—';
+                const dt  = new Date(a.triggered_at).toLocaleString();
+                const sw  = a.first_break_level   ? parseFloat(a.first_break_level).toFixed(5)   : '—';
+                const cb  = a.confirm_break_level  ? parseFloat(a.confirm_break_level).toFixed(5)  : '—';
+                const sh  = a.session_high ? parseFloat(a.session_high).toFixed(5) : '—';
+                const sl  = a.session_low  ? parseFloat(a.session_low).toFixed(5)  : '—';
+                const swt = a.first_break_ts   ? new Date(a.first_break_ts).toLocaleTimeString()  : '—';
+                const cbt = a.confirm_break_ts ? new Date(a.confirm_break_ts).toLocaleTimeString(): '—';
                 return `
                     <div class="alert-card ${dirClass}">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                             <span style="font-size:20px;font-weight:700;">${a.symbol}</span>
-                            <span class="session-badge">${a.session_type.toUpperCase()} / ${a.session_date}</span>
+                            <span class="session-badge">${(a.session_type||'').toUpperCase()} / ${a.session_date||''}</span>
                         </div>
                         <div style="margin-bottom:8px;">
                             <strong style="color:${dirColor};">${a.direction}</strong>
-                            &nbsp;Session Break Confirmed
+                            &nbsp;Sweep Confirmed
                         </div>
                         <div style="font-size:13px;color:#8B92A8;line-height:1.8;">
                             Session High: <strong>${sh}</strong> &nbsp;|&nbsp; Session Low: <strong>${sl}</strong><br>
-                            First Break: <strong>${fb}</strong> @ ${a.first_break_ts ? new Date(a.first_break_ts).toLocaleTimeString() : '—'}<br>
-                            Confirm Break: <strong>${cb}</strong> @ ${a.confirm_break_ts ? new Date(a.confirm_break_ts).toLocaleTimeString() : '—'}
+                            1st Sweep: <strong>${sw}</strong> @ ${swt}<br>
+                            Confirm:   <strong>${cb}</strong> @ ${cbt}
                         </div>
                         <div style="font-size:12px;color:#666;margin-top:8px;">Triggered: ${dt}</div>
                     </div>
@@ -3559,54 +3613,59 @@ def session_break_page():
 
                 const markers = [];
                 data.sessions.forEach(s => {
+                    const tag = (s.session_type || '').toUpperCase();
+                    // Session High (orange dotted)
                     if (s.session_high) {
                         _priceLines.push(_candleSeries.createPriceLine({
                             price: parseFloat(s.session_high), color: '#FFB800', lineWidth: 1,
                             lineStyle: LightweightCharts.LineStyle.Dotted,
-                            axisLabelVisible: true,
-                            title: s.session_type.toUpperCase() + ' H',
+                            axisLabelVisible: true, title: tag + ' H',
                         }));
                     }
+                    // Session Low (blue dotted)
                     if (s.session_low) {
                         _priceLines.push(_candleSeries.createPriceLine({
                             price: parseFloat(s.session_low), color: '#5B7CFF', lineWidth: 1,
                             lineStyle: LightweightCharts.LineStyle.Dotted,
-                            axisLabelVisible: true,
-                            title: s.session_type.toUpperCase() + ' L',
+                            axisLabelVisible: true, title: tag + ' L',
                         }));
                     }
-                    if (s.first_break_level) {
+                    // First Sweep level (green/red dashed)
+                    if (s.first_sweep_level) {
                         const col = s.direction === 'UP' ? '#00FFA3' : '#FF6B6B';
                         _priceLines.push(_candleSeries.createPriceLine({
-                            price: parseFloat(s.first_break_level), color: col, lineWidth: 2,
+                            price: parseFloat(s.first_sweep_level), color: col, lineWidth: 2,
                             lineStyle: LightweightCharts.LineStyle.Dashed,
                             axisLabelVisible: true,
-                            title: 'First Break',
+                            title: 'Sweep ' + (s.direction || ''),
                         }));
                     }
+                    // Trigger marker at confirm candle
                     if (s.triggered_at && s.confirm_break_ts) {
                         const ts = Math.floor(new Date(s.confirm_break_ts).getTime() / 1000);
                         markers.push({
-                            time: ts,
+                            time:     ts,
                             position: s.direction === 'UP' ? 'belowBar' : 'aboveBar',
-                            color: s.direction === 'UP' ? '#00FFA3' : '#FF6B6B',
-                            shape: s.direction === 'UP' ? 'arrowUp' : 'arrowDown',
-                            text: s.session_type.toUpperCase() + ' ' + s.direction,
+                            color:    s.direction === 'UP' ? '#00FFA3' : '#FF6B6B',
+                            shape:    s.direction === 'UP' ? 'arrowUp'  : 'arrowDown',
+                            text:     tag + ' ' + (s.direction || ''),
                         });
                     }
                 });
-                if (markers.length) _candleSeries.setMarkers(markers.sort((a,b) => a.time - b.time));
+                if (markers.length) _candleSeries.setMarkers(markers.sort((a, b) => a.time - b.time));
                 if (badge && data.sessions.length) {
-                    const latest = data.sessions[data.sessions.length - 1];
-                    badge.textContent = 'State: ' + (latest.state || '—');
+                    const latest = data.sessions[0]; // most recent
+                    badge.textContent = 'State: ' + (latest.state || '—') +
+                        (latest.reentered ? ' ✓re-entered' : '');
                 }
             } catch(_) { /* overlay errors are non-fatal */ }
         }
 
         // ── Boot ─────────────────────────────────────────────────────────────
         loadWatchlist();
+        loadState();
         loadAlerts();
-        setInterval(loadAlerts, 60000);
+        setInterval(() => { loadState(); loadAlerts(); }, 60000);
     </script>
 </body>
 </html>
@@ -3749,7 +3808,10 @@ def session_break_state_snapshot():
         rows = db.execute(
             """
             SELECT symbol, session_type, session_date, state, direction,
-                   session_high, session_low, first_break_ts, first_break_level,
+                   session_high, session_low,
+                   first_break_ts   AS first_break_ts,
+                   first_break_level AS first_break_level,
+                   reentered, reentry_ts,
                    triggered_at, updated_at
             FROM session_break_state
             WHERE user_id = %s
@@ -3762,7 +3824,7 @@ def session_break_state_snapshot():
         states = []
         for r in (rows or []):
             d = dict(r)
-            for k in ('first_break_ts', 'triggered_at', 'updated_at'):
+            for k in ('first_break_ts', 'reentry_ts', 'triggered_at', 'updated_at'):
                 if d.get(k):
                     d[k] = d[k].isoformat()
             if d.get('session_date'):
@@ -3829,9 +3891,9 @@ def session_break_candles():
 @app.route('/api/session-break/overlay')
 @login_required
 def session_break_overlay():
-    """Session-break overlay data for chart annotations.
+    """Session-sweep overlay data for chart annotations.
     GET /api/session-break/overlay?symbol=EURUSD
-    Returns recent session states (session_high/low, first_break, trigger).
+    Returns recent session states including sweep level, reentry flag.
     """
     symbol = request.args.get('symbol', '').strip().upper()
     if not symbol:
@@ -3842,22 +3904,9 @@ def session_break_overlay():
             """
             SELECT session_type, session_date, state, direction,
                    session_high, session_low,
-                   first_break_ts, first_break_level,
-                   confirm_break_ts, triggered_at
-            FROM session_break_state
-            WHERE user_id = %s AND symbol = %s
-            ORDER BY session_date DESC, session_type
-            LIMIT 10
-            """,
-            (current_user.id, symbol),
-            fetchone=False,
-        )
-        # rows is None when fetchone=False and no fetchall – call with fetchall
-        rows = db.execute(
-            """
-            SELECT session_type, session_date, state, direction,
-                   session_high, session_low,
-                   first_break_ts, first_break_level,
+                   first_break_ts   AS first_sweep_ts,
+                   first_break_level AS first_sweep_level,
+                   reentered, reentry_ts,
                    confirm_break_ts, triggered_at
             FROM session_break_state
             WHERE user_id = %s AND symbol = %s
@@ -3870,7 +3919,7 @@ def session_break_overlay():
         sessions = []
         for r in (rows or []):
             d = dict(r)
-            for k in ('first_break_ts', 'confirm_break_ts', 'triggered_at'):
+            for k in ('first_sweep_ts', 'reentry_ts', 'confirm_break_ts', 'triggered_at'):
                 if d.get(k):
                     d[k] = d[k].isoformat()
             if d.get('session_date'):
@@ -3878,7 +3927,7 @@ def session_break_overlay():
             sessions.append(d)
         return jsonify({'success': True, 'symbol': symbol, 'sessions': sessions})
     except Exception as e:
-        logger.error(f"[SESSION_BREAK] overlay endpoint error: {e}")
+        logger.error(f"[SESSION_SWEEP] overlay endpoint error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -3934,7 +3983,7 @@ def session_break_debug_page():
       <table>
         <thead><tr>
           <th>Symbol</th><th>Session</th><th>Date</th><th>State</th>
-          <th>Direction</th><th>Session H/L</th><th>First Break</th><th>Updated</th>
+          <th>Dir</th><th>Session H/L</th><th>Sweep Level</th><th>Reentered</th><th>Updated</th>
         </tr></thead>
         <tbody id="state-rows"><tr><td colspan="8">Loading...</td></tr></tbody>
       </table>
@@ -3973,6 +4022,7 @@ async function load() {
             '<td>' + (r.session_high ? parseFloat(r.session_high).toFixed(5) : '—') + ' / ' +
                      (r.session_low  ? parseFloat(r.session_low).toFixed(5)  : '—') + '</td>' +
             '<td>' + (r.first_break_level ? parseFloat(r.first_break_level).toFixed(5) : '—') + '</td>' +
+            '<td class="' + (r.reentered ? 'ok' : 'warn') + '">' + (r.reentered ? '✓' : '✗') + '</td>' +
             '<td>' + (r.updated_at || '—') + '</td>' +
             '</tr>'
           ).join('')
@@ -4007,10 +4057,14 @@ async function load() {
 
 function stateColor(s) {
   const m = {
-    POST_SESSION: '#8B92A8',
-    WAIT_CONFIRM_UP: '#00FFA3',
-    WAIT_CONFIRM_DOWN: '#FF6B6B',
-    TRIGGERED: '#FFB800',
+    WAIT_FIRST_SWEEP:   '#8B92A8',
+    REQUIRE_REENTRY:    '#FFB800',
+    WAIT_CONFIRM_BREAK: '#5B7CFF',
+    TRIGGERED:          '#00FFA3',
+    // legacy names
+    POST_SESSION:       '#8B92A8',
+    WAIT_CONFIRM_UP:    '#00FFA3',
+    WAIT_CONFIRM_DOWN:  '#FF6B6B',
   };
   return m[s] || '#ccc';
 }

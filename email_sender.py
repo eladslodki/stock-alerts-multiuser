@@ -169,7 +169,7 @@ class EmailSender:
         dir_color  = "#00FFA3" if direction == "UP" else "#FF6B6B"
         dir_label  = "Bullish (UP)" if direction == "UP" else "Bearish (DOWN)"
         session_label = session_type.capitalize()
-        subject = f"🚨 Session Break: {symbol} {dir_emoji} {direction} Confirmed ({session_label})"
+        subject = f"🚨 Session Sweep: {symbol} {dir_emoji} {direction} Confirmed ({session_label})"
 
         try:
             sh_str  = f"{float(session_high):.5f}"
@@ -209,14 +209,14 @@ class EmailSender:
 <body>
   <div class="container">
     <div class="header">
-      <h1 style="margin:0;font-size:22px;">{dir_emoji} Session Break Confirmed</h1>
+      <h1 style="margin:0;font-size:22px;">{dir_emoji} Session Sweep Confirmed</h1>
       <p style="margin:6px 0 0;opacity:.8;font-size:14px;">
         {symbol} &bull; {session_label} Session &bull; {session_date}
       </p>
     </div>
     <div class="content">
       <div class="alert-box">
-        <h2 style="margin-top:0;color:{dir_color};">{dir_label} Break on {symbol}</h2>
+        <h2 style="margin-top:0;color:{dir_color};">{dir_label} Sweep on {symbol}</h2>
 
         <div class="row">
           <span class="label">Session</span>
@@ -234,11 +234,11 @@ class EmailSender:
         <hr style="border:none;border-top:1px solid #eee;margin:16px 0;">
 
         <div class="row">
-          <span class="label">First Break Level</span>
+          <span class="label">First Sweep Level</span>
           <span class="level">{fb_str}</span>
         </div>
         <div class="row">
-          <span class="label">First Break Time (UTC)</span>
+          <span class="label">First Sweep Time (UTC)</span>
           <span class="value">{first_break_ts}</span>
         </div>
 
@@ -255,10 +255,10 @@ class EmailSender:
       </div>
 
       <p style="font-size:13px;color:#555;">
-        A second wick beyond the first break level confirmed the session break.
-        All times are UTC. Candle timeframe: 5M.
+        Price swept the session level, pulled back (reentry), then confirmed with another wick.
+        Sessions are in Israel time (Asia/Jerusalem). All timestamps in UTC. Candle timeframe: 5M.
       </p>
-      <p class="footer">Sent by PulseAlerts &bull; Session Break Confirmation Alert</p>
+      <p class="footer">Sent by PulseAlerts &bull; Session Sweep Confirmation Alert</p>
     </div>
   </div>
 </body>
