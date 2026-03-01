@@ -1022,10 +1022,10 @@
 <div class="report-body">
 
   {# --- TOC SIDEBAR --- #}
-  {% if report.toc and report.toc.items %}
+  {% if report.toc and report.toc['items'] %}
   <nav class="toc-sidebar" aria-label="תוכן עניינים">
     <div class="toc-header">תוכן עניינים</div>
-    {% for item in report.toc.items %}
+    {% for item in report.toc['items'] %}
     <a class="toc-link" href="#{{ item.id }}">
       <span class="toc-num">{{ loop.index }}</span>
       <span>{{ item.title }}</span>
@@ -1159,7 +1159,7 @@
             {% endif %}
 
             {# Donut chart #}
-            {% if section.donut and section.donut.items %}
+            {% if section.donut and section.donut['items'] %}
             {% set donut = section.donut %}
             <div class="donut-wrapper">
               {% if donut.title %}
@@ -1169,7 +1169,7 @@
               {# Build conic-gradient from pct values #}
               {% set ns = namespace(cum=0) %}
               {% set stops = [] %}
-              {% for item in donut.items %}
+              {% for item in donut['items'] %}
                 {% set end = ns.cum + item.pct %}
                 {% set _ = stops.append(item.color ~ ' ' ~ ns.cum|string ~ '% ' ~ end|string ~ '%') %}
                 {% set ns.cum = end %}
@@ -1179,7 +1179,7 @@
               </div>
 
               <div class="donut-legend">
-                {% for item in donut.items %}
+                {% for item in donut['items'] %}
                 <div class="donut-legend-item">
                   <span class="donut-dot" style="background:{{ item.color }};"></span>
                   <span>{{ item.label }}</span>
@@ -1195,9 +1195,9 @@
            s5 — CASH FLOW TIMELINE
            ============================================================ #}
         {% elif section.type == 'cash_flow_timeline' %}
-          {% if section.items %}
+          {% if section['items'] %}
           <div class="cf-list">
-            {% for item in section.items %}
+            {% for item in section['items'] %}
             {% if item.positive is not none %}
               {% if item.positive == true %}{% set cf_class = 'pos' %}
               {% elif item.positive == false %}{% set cf_class = 'neg' %}
@@ -1264,9 +1264,9 @@
           <p class="narrative">{{ section.narrative }}</p>
           {% endif %}
 
-          {% if section.items %}
+          {% if section['items'] %}
           <div class="guidance-items">
-            {% for item in section.items %}
+            {% for item in section['items'] %}
             <div class="guidance-item">
               <span class="guidance-dot {{ item.type if item.type else 'neutral' }}"></span>
               <div>
