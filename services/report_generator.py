@@ -530,17 +530,28 @@ def _generate_inner(ticker, filing_id, force, render_fn):
                     return {"status": "error", "error": str(exc), "code": 502}
 
                 result = prepare_filing_text(raw.get("html", ""), raw.get("text", ""))
+
+                # Only keep the small derived artifacts (relevant_text ~55 KB,
+                # chunks ~56 KB). Storing the full clean_text (2+ MB) in the ORM
+                # session keeps it pinned in memory for the entire request lifetime.
+                _relevant = result["relevant_text"]
+                _chunks   = result["chunks"]
+
+                # Release the large raw HTML and full clean_text NOW so Python can
+                # GC them before the expensive LLM calls and rendering steps.
+                raw = result = None  # noqa: F841
+
                 if filing_text:
-                    filing_text.raw_html     = (raw.get("html") or "")[:100_000]
-                    filing_text.clean_text   = result["clean_text"]
-                    filing_text.chunks_json  = result["chunks"]
+                    filing_text.raw_html     = ""          # never read back; don't waste RAM
+                    filing_text.clean_text   = _relevant   # ~55 KB instead of ~2 MB
+                    filing_text.chunks_json  = _chunks
                     filing_text.extracted_at = datetime.now(timezone.utc)
                 else:
                     filing_text = FilingText(
                         filing_id   = filing_rec.id,
-                        raw_html    = (raw.get("html") or "")[:100_000],
-                        clean_text  = result["clean_text"],
-                        chunks_json = result["chunks"],
+                        raw_html    = "",
+                        clean_text  = _relevant,
+                        chunks_json = _chunks,
                     )
                     db.add(filing_text)
                 db.flush()
