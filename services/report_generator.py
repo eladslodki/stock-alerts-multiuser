@@ -523,6 +523,9 @@ def _generate_inner(ticker, filing_id, force, render_fn):
                 return {"status": "error", "error": str(exc), "code": 502}
 
             fd = next((f for f in filings if f["filing_id"] == filing_id), None)
+            # Free the full submissions list immediately — it can be 2-4 MB of parsed JSON
+            # for large companies and has no further use after fd is extracted.
+            del filings
             if not fd:
                 return {
                     "status": "error",
