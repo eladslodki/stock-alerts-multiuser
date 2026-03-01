@@ -294,21 +294,40 @@ def prepare_filing_text(html: str, raw_text: str = "") -> Dict:
             "chunks":        list[str],  # <= MAX_CHUNKS items
         }
     """
-    log_mem("start")
+    import time as _time
+    t_pipe = _time.monotonic()
+    log_mem("pipeline_start")
     n_raw = len(html or raw_text)
 
     if html:
-        # Step 1 — prestrip (removes tables, scripts, styles; truncates to 600 KB)
+        # STEP 4 — prestrip (removes tables, scripts, styles; truncates to 600 KB)
+        n_html = len(html)
+        logger.info("STEP 4 begin prestrip_html: input %d chars", n_html)
+        t4 = _time.monotonic()
         stripped = prestrip_html(html)
         html     = None            # free original HTML (~2.5 MB)
+        logger.info(
+            "STEP 4 done prestrip_html: %d → %d chars (%.0f%% reduction) [%.2fs]",
+            n_html, len(stripped),
+            100.0 * (1 - len(stripped) / max(n_html, 1)),
+            _time.monotonic() - t4,
+        )
         log_mem("after_prestrip")
 
-        # Step 2 — HTML → plain text
+        # STEP 5 — HTML → plain text
+        n_stripped = len(stripped)
+        logger.info("STEP 5 begin html_to_text: input %d chars", n_stripped)
+        t5 = _time.monotonic()
         clean_text = html_to_text(stripped)
         stripped   = None          # free stripped HTML (~600 KB)
+        logger.info(
+            "STEP 5 done html_to_text: %d → %d chars [%.2fs]",
+            n_stripped, len(clean_text), _time.monotonic() - t5,
+        )
         log_mem("after_html_to_text")
 
     elif raw_text:
+        logger.info("STEP 4/5 skip (plain text input): %d chars", len(raw_text))
         clean_text = raw_text
         log_mem("after_html_to_text")
     else:
@@ -316,18 +335,31 @@ def prepare_filing_text(html: str, raw_text: str = "") -> Dict:
 
     n_clean = len(clean_text)
 
-    # Step 3 — extract relevant sections
+    # STEP 6 — extract relevant sections
+    logger.info("STEP 6 begin extract_relevant_sections: input %d chars", n_clean)
+    t6 = _time.monotonic()
     relevant_text = extract_relevant_sections(clean_text)
     clean_text    = None           # free full plain-text (~1-2 MB)
+    logger.info(
+        "STEP 6 done extract_relevant_sections: %d → %d chars [%.2fs]",
+        n_clean, len(relevant_text), _time.monotonic() - t6,
+    )
     log_mem("after_extract_relevant")
 
-    # Step 4 — chunk
+    # STEP 7 — chunk
+    logger.info("STEP 7 begin chunk_text: input %d chars", len(relevant_text))
+    t7 = _time.monotonic()
     chunks = chunk_text(relevant_text)
+    logger.info(
+        "STEP 7 done chunk_text: %d chunks, %d total chars [%.2fs]",
+        len(chunks), sum(len(c) for c in chunks), _time.monotonic() - t7,
+    )
     log_mem("after_chunking")
 
     logger.info(
-        "Text pipeline: %d raw → %d clean → %d relevant → %d chunks",
+        "Text pipeline total: %d raw → %d clean → %d relevant → %d chunks [%.2fs]",
         n_raw, n_clean, len(relevant_text), len(chunks),
+        _time.monotonic() - t_pipe,
     )
     return {
         "relevant_text": relevant_text,

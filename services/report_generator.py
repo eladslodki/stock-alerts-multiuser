@@ -28,6 +28,7 @@ import json
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -56,6 +57,7 @@ from providers.sec_provider import (
     get_company_info,
 )
 from services.extract_text import prepare_filing_text
+from services.generation_lock import acquire_lock, release_lock
 from services.llm_client import (
     get_llm_client,
     MAP_PROMPT_TEMPLATE,
@@ -78,16 +80,7 @@ logger = logging.getLogger(__name__)
 ALLOWED_TAGS       = ["strong", "mark", "br", "em"]
 ALLOWED_ATTRIBUTES = {}   # no attributes on any allowed tag
 
-# ---- generation locks (one per filing_id string) -------------------------- #
-_locks: Dict[str, threading.Lock] = {}
-_locks_mutex = threading.Lock()
-
-
-def _get_lock(filing_id: str) -> threading.Lock:
-    with _locks_mutex:
-        if filing_id not in _locks:
-            _locks[filing_id] = threading.Lock()
-        return _locks[filing_id]
+# (in-process threading.Lock replaced by DB-backed GenerationLock with TTL)
 
 
 # =========================================================================== #
@@ -339,19 +332,29 @@ def generate_report(
               or  : status, error, code
     """
     ticker = ticker.upper().strip()
-    lock   = _get_lock(filing_id)
 
-    if not lock.acquire(blocking=False):
+    logger.info(
+        "STEP 0 begin generate_report: ticker=%s filing_id=%s force=%s "
+        "quarter_label=%r [MEM: %s MB]",
+        ticker, filing_id, force, quarter_label, _rss_mb(),
+    )
+
+    # STEP 2: acquire DB generation lock (5-minute TTL)
+    logger.info("STEP 2 begin acquire_lock: key=%s", filing_id)
+    if not acquire_lock(filing_id, ttl_seconds=300):
+        logger.warning("STEP 2 lock busy: filing_id=%s", filing_id)
         return {
-            "status":    "generating",
-            "filing_id": filing_id,
-            "message":   "Report generation already in progress for this filing.",
+            "status":      "error",
+            "error":       "Generation already in progress for this filing",
+            "code":        409,
+            "retry_after": 15,
         }
+    logger.info("STEP 2 done acquire_lock: key=%s", filing_id)
 
     try:
         return _generate_inner(ticker, filing_id, force, render_fn, quarter_label)
     finally:
-        lock.release()
+        release_lock(filing_id)
 
 
 # =========================================================================== #
@@ -482,12 +485,18 @@ def _build_template_analysis(
 
 
 def _generate_inner(ticker, filing_id, force, render_fn, quarter_label=None):
-    logger.info("[MEM] %s/%s start: %s MB RSS", ticker, filing_id, _rss_mb())
+    t_total = time.monotonic()
+    logger.info(
+        "STEP 0 done / _generate_inner begin: ticker=%s filing_id=%s [MEM: %s MB]",
+        ticker, filing_id, _rss_mb(),
+    )
     with get_db() as db:
 
         # ------------------------------------------------------------------ #
-        # 1. Layered cache check
+        # STEP 1: DB layered cache check
         # ------------------------------------------------------------------ #
+        logger.info("STEP 1 begin DB cache check: ticker=%s filing_id=%s", ticker, filing_id)
+        t1 = time.monotonic()
         filing_rec = db.query(Filing).filter_by(filing_id=filing_id).first()
         existing_output = None
         if filing_rec:
@@ -503,6 +512,10 @@ def _generate_inner(ticker, filing_id, force, render_fn, quarter_label=None):
             if (existing_output.report_json
                     and existing_output.rendered_html
                     and existing_output.market_analysis_json is not None):
+                logger.info(
+                    "STEP 1 done DB cache check: full cache hit → early return [%.2fs]",
+                    time.monotonic() - t1,
+                )
                 return {
                     "status":    "cached",
                     "filing_id": filing_id,
@@ -510,69 +523,110 @@ def _generate_inner(ticker, filing_id, force, render_fn, quarter_label=None):
                     "url_json":  f"/api/reports/{ticker}/{filing_id}",
                 }
 
-        # Determine what work needs to be done
         skip_llm      = (not force
                          and existing_output is not None
                          and existing_output.report_json is not None)
         skip_analysis = (not force
                          and existing_output is not None
                          and existing_output.market_analysis_json is not None)
+        logger.info(
+            "STEP 1 done DB cache check: skip_llm=%s skip_analysis=%s [%.2fs]",
+            skip_llm, skip_analysis, time.monotonic() - t1,
+        )
 
         # ------------------------------------------------------------------ #
-        # 2–4. SEC fetch + text extraction + LLM  (skipped when cached)
+        # STEP 2 (SEC fetch + text extraction + LLM) — skipped when cached
         # ------------------------------------------------------------------ #
-        fd          = None   # filing metadata dict from SEC
+        fd          = None
         company     = None
         filing_text = None
 
         if not skip_llm:
+            # Resolve filing metadata (cache hit expected here)
+            logger.info(
+                "STEP 2 begin list_filings: ticker=%s (looking for filing_id=%s)",
+                ticker, filing_id,
+            )
+            t2 = time.monotonic()
             try:
                 filings = sec_list_filings(ticker)
             except (ValueError, RuntimeError) as exc:
+                logger.error("STEP 2 failed list_filings [%.2fs]: %s",
+                             time.monotonic() - t2, exc)
                 return {"status": "error", "error": str(exc), "code": 502}
 
             fd = next((f for f in filings if f["filing_id"] == filing_id), None)
-            # Free the full submissions list immediately — it can be 2-4 MB of parsed JSON
-            # for large companies and has no further use after fd is extracted.
-            del filings
+            del filings   # free 2-4 MB submissions list immediately
             if not fd:
+                logger.error(
+                    "STEP 2 failed: filing '%s' not found for ticker '%s'",
+                    filing_id, ticker,
+                )
                 return {
                     "status": "error",
                     "error":  f"Filing '{filing_id}' not found for ticker '{ticker}'.",
                     "code":   404,
                 }
+            logger.info(
+                "STEP 2 done list_filings: filing_type=%s period_end=%s "
+                "source_url=%.80s [%.2fs]",
+                fd["filing_type"], fd.get("period_end"), fd.get("source_url", ""),
+                time.monotonic() - t2,
+            )
 
+            # DB upsert company + filing, check FilingText cache
+            logger.info("STEP 3 begin DB upsert + FilingText check")
+            t3 = time.monotonic()
             company    = _upsert_company(db, ticker,
                                          cik=fd.get("cik"),
                                          name=fd.get("company_name"),
                                          exchange=fd.get("exchange"))
             filing_rec = _upsert_filing(db, company, fd)
-
-            # Fetch filing text
             filing_text = db.query(FilingText).filter_by(filing_id=filing_rec.id).first()
-            if not filing_text or force:
-                try:
-                    raw = fetch_filing_content(fd.get("source_url", ""))
-                except RuntimeError as exc:
-                    return {"status": "error", "error": str(exc), "code": 502}
-                logger.info("[MEM] %s after_fetch: %s MB RSS", ticker, _rss_mb())
+            filing_text_cached = filing_text is not None and not force
+            logger.info(
+                "STEP 3 done DB upsert + FilingText check: filing_text_cached=%s [%.2fs]",
+                filing_text_cached, time.monotonic() - t3,
+            )
 
+            if not filing_text or force:
+                # STEP 3b: Fetch filing content from SEC
+                source_url = fd.get("source_url", "")
+                logger.info(
+                    "STEP 3b begin fetch_filing_content [MEM: %s MB]: url=%.120s",
+                    _rss_mb(), source_url,
+                )
+                t3b = time.monotonic()
+                try:
+                    raw = fetch_filing_content(source_url)
+                except RuntimeError as exc:
+                    logger.error(
+                        "STEP 3b failed fetch_filing_content [%.2fs]: %s",
+                        time.monotonic() - t3b, exc,
+                    )
+                    return {"status": "error", "error": str(exc), "code": 502}
+                logger.info(
+                    "STEP 3b done fetch_filing_content: html=%d chars text=%d chars "
+                    "[%.2fs] [MEM: %s MB]",
+                    len(raw.get("html", "")), len(raw.get("text", "")),
+                    time.monotonic() - t3b, _rss_mb(),
+                )
+
+                # STEP 4-7: prestrip → html_to_text → extract → chunk
+                # (detailed STEP 4-7 logs emitted by extract_text.prepare_filing_text)
                 result = prepare_filing_text(raw.get("html", ""), raw.get("text", ""))
 
-                # Only keep the small derived artifacts (relevant_text ~55 KB,
-                # chunks ~56 KB). Storing the full clean_text (2+ MB) in the ORM
-                # session keeps it pinned in memory for the entire request lifetime.
                 _relevant = result["relevant_text"]
                 _chunks   = result["chunks"]
-
-                # Release the large raw HTML and full clean_text NOW so Python can
-                # GC them before the expensive LLM calls and rendering steps.
-                raw = result = None  # noqa: F841
-                logger.info("[MEM] %s after extraction (freed): %s MB RSS", ticker, _rss_mb())
+                raw = result = None  # noqa: F841  — free raw HTML + full clean_text
+                logger.info(
+                    "STEP 7 done (pipeline): relevant=%d chars chunks=%d [MEM: %s MB]",
+                    len(_relevant), len(_chunks), _rss_mb(),
+                )
 
                 if filing_text:
-                    filing_text.raw_html     = ""          # never read back; don't waste RAM
-                    filing_text.clean_text   = _relevant   # ~55 KB instead of ~2 MB
+                    filing_text.raw_html     = ""
+                    filing_text.clean_text   = _relevant
                     filing_text.chunks_json  = _chunks
                     filing_text.extracted_at = datetime.now(timezone.utc)
                 else:
@@ -585,9 +639,16 @@ def _generate_inner(ticker, filing_id, force, render_fn, quarter_label=None):
                     db.add(filing_text)
                 db.flush()
 
-            # LLM map-reduce
+            # STEP 8: LLM map-reduce
             llm    = get_llm_client()
             chunks = (filing_text.chunks_json or []) if filing_text else []
+            logger.info(
+                "STEP 8 begin LLM map-reduce: model=%s chunks=%d ticker=%s "
+                "filing_type=%s [MEM: %s MB]",
+                os.getenv("AI_MODEL", "mock"), len(chunks), ticker,
+                fd["filing_type"], _rss_mb(),
+            )
+            t8 = time.monotonic()
             try:
                 report_json = _run_map_reduce(
                     chunks        = chunks,
@@ -598,16 +659,28 @@ def _generate_inner(ticker, filing_id, force, render_fn, quarter_label=None):
                     llm           = llm,
                     quarter_label = quarter_label,
                 )
+                logger.info(
+                    "STEP 8 done LLM map-reduce: sections=%d [%.2fs] [MEM: %s MB]",
+                    len(report_json.get("sections", [])),
+                    time.monotonic() - t8, _rss_mb(),
+                )
             except json.JSONDecodeError as exc:
+                logger.error("STEP 8 failed LLM map-reduce (JSON decode) [%.2fs]: %s",
+                             time.monotonic() - t8, exc)
                 return {"status": "error", "error": f"LLM returned invalid JSON: {exc}", "code": 500}
             except Exception as exc:
-                logger.exception("LLM generation failed")
+                logger.exception("STEP 8 failed LLM map-reduce [%.2fs]: %s",
+                                 time.monotonic() - t8, exc)
                 return {"status": "error", "error": f"LLM error: {exc}", "code": 500}
 
-            # Validate + one-shot fix
+            # STEP 9: validate JSON schema
+            logger.info("STEP 9 begin schema validation")
+            t9 = time.monotonic()
             errors = validate_report_json(report_json)
             if errors:
-                logger.warning("Schema errors — attempting fix: %s", errors)
+                logger.warning(
+                    "STEP 9 schema errors (attempting 1-shot fix): %s", errors
+                )
                 try:
                     fix_prompt  = FIX_SCHEMA_PROMPT.format(
                         errors="\n".join(errors),
@@ -616,17 +689,31 @@ def _generate_inner(ticker, filing_id, force, render_fn, quarter_label=None):
                     report_json = _parse_llm_json(llm.complete(fix_prompt, max_tokens=8_000))
                     errors      = validate_report_json(report_json)
                 except Exception as fix_exc:
-                    logger.error("Fix attempt failed: %s", fix_exc)
+                    logger.error("STEP 9 fix attempt failed: %s", fix_exc)
                 if errors:
-                    logger.error("Report still invalid after fix: %s", errors)
+                    logger.error("STEP 9 still invalid after fix: %s", errors)
+                else:
+                    logger.info("STEP 9 fix succeeded")
+            else:
+                logger.info("STEP 9 done schema validation: OK [%.2fs]",
+                            time.monotonic() - t9)
 
+            # STEP 10: sanitize insights HTML
+            logger.info("STEP 10 begin sanitize_report_json")
+            t10 = time.monotonic()
+            insight_count = sum(
+                len(s.get("insights", [])) for s in report_json.get("sections", [])
+            )
             report_json = sanitize_report_json(report_json)
-            logger.info("[MEM] %s after LLM map-reduce: %s MB RSS", ticker, _rss_mb())
+            logger.info(
+                "STEP 10 done sanitize_report_json: %d insights sanitized [%.2fs] [MEM: %s MB]",
+                insight_count, time.monotonic() - t10, _rss_mb(),
+            )
 
         else:
-            # Use cached report JSON
             report_json = existing_output.report_json
-            llm         = get_llm_client()   # needed for analysis LLM calls
+            llm         = get_llm_client()
+            logger.info("STEP 8-10 skipped (report_json cached)")
 
         # Ensure filing_rec and company are loaded even in skip_llm path
         if filing_rec is None:
@@ -635,49 +722,52 @@ def _generate_inner(ticker, filing_id, force, render_fn, quarter_label=None):
             company = filing_rec.company
 
         # ------------------------------------------------------------------ #
-        # 5b–5f. Earnings Expectations & Market Reaction Engine
+        # STEP 11 (part a): Earnings Expectations & Market Reaction Engine
         # ------------------------------------------------------------------ #
         if not skip_analysis:
-            # 5b. Consensus
+            logger.info("STEP 11a begin earnings/market analysis: ticker=%s", ticker)
+            t11a = time.monotonic()
+
             consensus = _fetch_consensus_safe(ticker)
+            actuals   = extract_actuals(report_json)
+            surprise  = compute_all_surprises(actuals, consensus)
 
-            # 5c. Extract actuals (deterministic)
-            actuals = extract_actuals(report_json)
-
-            # 5d. Surprise
-            surprise = compute_all_surprises(actuals, consensus)
-
-            # 5e. Market reaction LLM
             market_reaction = _run_market_reaction(
                 actuals, consensus, surprise, report_json, llm
             )
 
-            # 5f. Narrative change (only if prior report exists)
             narrative_change = None
             if filing_rec and company:
                 narrative_change = run_narrative_change(
-                    db              = db,
-                    company_id      = company.id,
+                    db                   = db,
+                    company_id           = company.id,
                     current_filing_db_id = filing_rec.id,
                     current_report_json  = report_json,
-                    llm             = llm,
+                    llm                  = llm,
                 )
+
+            logger.info(
+                "STEP 11a done earnings/market analysis [%.2fs] [MEM: %s MB]",
+                time.monotonic() - t11a, _rss_mb(),
+            )
         else:
-            # Reconstruct from cached columns
             consensus        = existing_output.consensus_json or {}
-            actuals          = extract_actuals(report_json)   # fast, no LLM
+            actuals          = extract_actuals(report_json)
             surprise         = existing_output.surprise_json or {}
             market_reaction  = existing_output.market_analysis_json or {}
             narrative_change = existing_output.narrative_change_json
+            logger.info("STEP 11a skipped (analysis cached)")
 
         # ------------------------------------------------------------------ #
-        # 6. Render HTML  (always re-render if LLM ran or analysis ran)
+        # STEP 11 (part b): Render HTML
         # ------------------------------------------------------------------ #
         need_render = not skip_llm or not skip_analysis or not (
             existing_output and existing_output.rendered_html
         )
 
         if need_render:
+            logger.info("STEP 11b begin render_template: ticker=%s", ticker)
+            t11b = time.monotonic()
             if render_fn is None:
                 from flask import render_template as render_fn  # type: ignore
 
@@ -690,23 +780,30 @@ def _generate_inner(ticker, filing_id, force, render_fn, quarter_label=None):
                     report=report_json,
                     analysis=template_analysis,
                 )
+                logger.info(
+                    "STEP 11b done render_template: %d chars [%.2fs]",
+                    len(rendered_html), time.monotonic() - t11b,
+                )
             except Exception as exc:
-                logger.error("Template rendering error: %s", exc)
+                logger.error("STEP 11b failed render_template [%.2fs]: %s",
+                             time.monotonic() - t11b, exc)
                 rendered_html = (
                     f"<html><body><pre>Rendering error: {exc}</pre></body></html>"
                 )
         else:
             rendered_html = existing_output.rendered_html
+            logger.info("STEP 11b skipped (rendered_html cached)")
 
         # ------------------------------------------------------------------ #
-        # 7. Persist everything
+        # STEP 12: Persist everything to DB
         # ------------------------------------------------------------------ #
+        logger.info("STEP 12 begin DB persist: ticker=%s filing_id=%s", ticker, filing_id)
+        t12 = time.monotonic()
         llm_model = "mock"
         if os.getenv("AI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"):
             llm_model = os.getenv("AI_MODEL", "claude-opus-4-6")
 
         if existing_output and (force or skip_llm):
-            # Update in place
             if not skip_llm:
                 existing_output.report_json   = report_json
                 existing_output.llm_model     = llm_model
@@ -731,9 +828,13 @@ def _generate_inner(ticker, filing_id, force, render_fn, quarter_label=None):
             )
             db.add(new_output)
 
-        logger.info("[MEM] %s/%s done (%s): %s MB RSS", ticker, filing_id,
-                    "generated" if not skip_llm else "cached", _rss_mb())
         status = "generated" if not skip_llm else ("enriched" if not skip_analysis else "cached")
+        logger.info(
+            "STEP 12 done DB persist: status=%s [%.2fs] [MEM: %s MB] "
+            "[total elapsed: %.1fs]",
+            status, time.monotonic() - t12, _rss_mb(),
+            time.monotonic() - t_total,
+        )
         return {
             "status":    status,
             "filing_id": filing_id,

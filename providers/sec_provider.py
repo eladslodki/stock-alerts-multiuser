@@ -54,26 +54,40 @@ _RETRIES = 3
 _BACKOFF  = [1.5, 3.0, 6.0]
 
 
-def _get(url: str, *, as_json: bool = True, timeout: int = 30) -> Any:
+def _get(
+    url: str,
+    *,
+    as_json: bool = True,
+    timeout: tuple = (10, 30),  # (connect_s, read_s)
+) -> Any:
     """GET with automatic retry / backoff. Raises RuntimeError on failure."""
     last_exc: Exception = RuntimeError("Unknown error")
     for attempt in range(_RETRIES):
         try:
+            logger.debug("SEC GET attempt %d/%d: %s", attempt + 1, _RETRIES, url)
             resp = _session.get(url, timeout=timeout)
             resp.raise_for_status()
             return resp.json() if as_json else resp
         except requests.exceptions.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else 0
+            logger.warning("SEC GET HTTP %d (attempt %d): %s", status, attempt + 1, url)
             if status == 404:
                 raise RuntimeError(f"SEC returned 404 for {url}") from exc
             last_exc = exc
+        except requests.exceptions.Timeout as exc:
+            logger.warning("SEC GET timeout (attempt %d): %s — %s", attempt + 1, url, exc)
+            last_exc = exc
         except requests.exceptions.RequestException as exc:
+            logger.warning("SEC GET %s (attempt %d): %s — %s",
+                           type(exc).__name__, attempt + 1, url, exc)
             last_exc = exc
 
         if attempt < _RETRIES - 1:
             time.sleep(_BACKOFF[attempt])
 
-    raise RuntimeError(f"SEC EDGAR unavailable after {_RETRIES} attempts: {last_exc}") from last_exc
+    raise RuntimeError(
+        f"SEC EDGAR unavailable after {_RETRIES} attempts: {last_exc}"
+    ) from last_exc
 
 
 # --------------------------------------------------------------------------- #
@@ -247,35 +261,60 @@ def fetch_filing_content(source_url: str) -> Dict[str, str]:
     if not source_url:
         return {"html": "", "text": ""}
 
+    # (connect_timeout=10s, read_timeout=60s per chunk)
+    logger.info("FETCH begin: url=%s", source_url)
+    resp = None
     try:
-        resp = _session.get(source_url, timeout=90, stream=True)
-        resp.raise_for_status()
-    except requests.exceptions.RequestException as exc:
-        raise RuntimeError(f"Cannot fetch filing document: {exc}") from exc
+        try:
+            resp = _session.get(source_url, timeout=(10, 60), stream=True)
+            resp.raise_for_status()
+        except requests.exceptions.Timeout as exc:
+            raise RuntimeError(
+                f"SEC filing fetch timed out ({type(exc).__name__}): {source_url}"
+            ) from exc
+        except requests.exceptions.RequestException as exc:
+            raise RuntimeError(
+                f"Cannot fetch filing document ({type(exc).__name__}): {exc}"
+            ) from exc
 
-    # Decode each 64 KB chunk into StringIO immediately — avoids the
-    # bytes-list → joined-bytes → decoded-str triple allocation.
-    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-    buf     = io.StringIO()
-    total   = 0
+        content_type   = resp.headers.get("content-type", "").lower()
+        content_length = resp.headers.get("content-length", "unknown")
+        logger.info(
+            "FETCH headers: status=%d content-type=%r content-length=%s url=%s",
+            resp.status_code, content_type, content_length, source_url,
+        )
 
-    for chunk in resp.iter_content(chunk_size=65_536):
-        buf.write(decoder.decode(chunk, final=False))
-        total += len(chunk)
-        if total >= MAX_FILING_BYTES:
+        # Decode each 64 KB chunk into StringIO immediately — avoids the
+        # bytes-list → joined-bytes → decoded-str triple allocation.
+        decoder   = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        buf       = io.StringIO()
+        total     = 0
+        truncated = False
+
+        for chunk in resp.iter_content(chunk_size=65_536):
+            buf.write(decoder.decode(chunk, final=False))
+            total += len(chunk)
+            if total >= MAX_FILING_BYTES:
+                truncated = True
+                break
+
+        buf.write(decoder.decode(b"", final=True))   # flush partial multibyte char
+
+        raw_text = buf.getvalue()
+        buf.close()
+
+        if truncated:
             logger.warning(
-                "Filing download truncated at %d bytes (cap: %d): %s",
+                "FETCH truncated at %d bytes (cap=%d): %s",
                 total, MAX_FILING_BYTES, source_url,
             )
-            break
+        else:
+            logger.info("FETCH done: %d bytes read, %d chars decoded: %s",
+                        total, len(raw_text), source_url)
 
-    buf.write(decoder.decode(b"", final=True))   # flush partial multibyte char
-    resp.close()
-
-    raw_text = buf.getvalue()
-    buf.close()
-
-    content_type = resp.headers.get("content-type", "").lower()
+    finally:
+        if resp is not None:
+            resp.close()
 
     if "html" in content_type or re.search(r"\.(htm|html)$", source_url, re.I):
         return {"html": raw_text, "text": ""}
