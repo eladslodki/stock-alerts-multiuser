@@ -458,7 +458,9 @@ def dashboard():
               const data = await res.json();
         
         if (data.success) {
-            allTickers = data.tickers;
+            allTickers = data.tickers.slice().sort((a, b) =>
+                a.symbol.localeCompare(b.symbol, undefined, {sensitivity: 'base'})
+            );
             console.log(`✅ Loaded ${allTickers.length} tickers`);
         } else {
             console.error('❌ Failed to load tickers:', data);
@@ -467,10 +469,10 @@ def dashboard():
         console.error('❌ Error loading tickers:', error);
         // Fallback: add some basic tickers so autocomplete still works
         allTickers = [
-            {symbol: 'AAPL', name: 'Apple Inc.', type: 'Stock'},
-            {symbol: 'TSLA', name: 'Tesla Inc.', type: 'Stock'},
-            {symbol: 'MSFT', name: 'Microsoft Corporation', type: 'Stock'},
-            {symbol: 'BTC-USD', name: 'Bitcoin USD', type: 'Crypto'}
+            {symbol: 'AAPL',    name: 'Apple Inc.',             type: 'Stock'},
+            {symbol: 'BTC-USD', name: 'Bitcoin USD',            type: 'Crypto'},
+            {symbol: 'MSFT',    name: 'Microsoft Corporation',  type: 'Stock'},
+            {symbol: 'TSLA',    name: 'Tesla Inc.',             type: 'Stock'}
         ];
         console.log('Using fallback ticker list');
     }
@@ -499,10 +501,13 @@ def dashboard():
         return;
     }
     
-    const matches = allTickers.filter(t => 
-        t.symbol.toUpperCase().includes(query) || 
-        t.name.toUpperCase().includes(query)
-    ).slice(0, 10);
+    const matches = allTickers
+        .filter(t =>
+            t.symbol.toUpperCase().includes(query) ||
+            t.name.toUpperCase().includes(query)
+        )
+        .sort((a, b) => a.symbol.localeCompare(b.symbol, undefined, {sensitivity: 'base'}))
+        .slice(0, 10);
     
     console.log(`Found ${matches.length} matches`);
     
