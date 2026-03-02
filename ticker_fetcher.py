@@ -76,6 +76,8 @@ class TickerFetcher:
         ]
         
         logger.info(f"✅ Loaded {len(tickers)} tickers instantly")
-        return sorted(tickers, key=lambda x: x['symbol'])
+        # Case-insensitive A→Z sort — single source of truth for backend order.
+        # Matches the JS frontend's localeCompare(…, {sensitivity:'base'}).
+        return sorted(tickers, key=lambda x: x['symbol'].upper())
 
 ticker_fetcher = TickerFetcher()
