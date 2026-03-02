@@ -624,7 +624,9 @@ def dashboard():
             return;
         }
         
-        const active = data.alerts.filter(a => a.active);
+        const active = data.alerts
+            .filter(a => a.active)
+            .sort((a, b) => a.ticker.localeCompare(b.ticker, undefined, {sensitivity: 'base'}));
         
         if (active.length === 0) {
             alertsEl.innerHTML = '<div class="empty">No active alerts. Create one to get started!</div>';
