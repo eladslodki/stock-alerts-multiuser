@@ -127,6 +127,41 @@ class TestTickerSortOrder(unittest.TestCase):
             "JS fallback ticker list must be in alphabetical order",
         )
 
+    # ── 5. Active alerts list is A→Z (mirrors the dashboard JS sort) ─────
+
+    def test_active_alerts_rendered_alphabetically(self):
+        """
+        The dashboard's loadAlerts() filters active alerts then sorts by
+        ticker with localeCompare(sensitivity:'base').  Replicate that here
+        to prove mixed-order alerts land in correct A→Z display order.
+        """
+        # Simulate what the JS fetch('/api/alerts') might return (unsorted).
+        raw_alerts = [
+            {"ticker": "UUUU", "active": True,  "alert_type": "price"},
+            {"ticker": "IGV",  "active": True,  "alert_type": "price"},
+            {"ticker": "TOL",  "active": False, "alert_type": "price"},  # inactive
+            {"ticker": "AAPL", "active": True,  "alert_type": "price"},
+            {"ticker": "TOL",  "active": True,  "alert_type": "ma"},
+        ]
+
+        # Replicate: .filter(a => a.active).sort(localeCompare case-insensitive)
+        active = [a for a in raw_alerts if a["active"]]
+        rendered = sorted(active, key=lambda a: js_sort_key(a["ticker"]))
+        symbols = [a["ticker"] for a in rendered]
+
+        self.assertEqual(symbols, ["AAPL", "IGV", "TOL", "UUUU"],
+                         "Active alerts must render in A→Z ticker order")
+
+    def test_active_alerts_case_insensitive_order(self):
+        """Lower-case tickers in the alerts list sort the same as upper-case."""
+        alerts = [
+            {"ticker": "tsla", "active": True},
+            {"ticker": "AAPL", "active": True},
+            {"ticker": "msft", "active": True},
+        ]
+        rendered = sorted(alerts, key=lambda a: js_sort_key(a["ticker"]))
+        self.assertEqual([a["ticker"] for a in rendered], ["AAPL", "msft", "tsla"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
