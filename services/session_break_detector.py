@@ -1,57 +1,99 @@
 """
-Session Break Confirmation Detector – Asia + London
+Session Liquidity Sweep Detector – Asia + London (Israel time)
 
-Replaces the old AMD/IFVG/sweep logic with a single, clearly-defined alert:
-  "Session Break Confirmation" – when price first breaks a session's high/low
-  by WICK and then a later candle confirms that break with another wick.
+Detects ICT-style "Session Liquidity Sweep" setups:
+  1. Session builds a high/low during the session window (tracked by wick).
+  2. After the session a candle wicks beyond the session level → sweep starts.
+  3. Additional candles continue to extend the sweep extreme (first_sweep_level
+     = the HIGHEST wick for UP, LOWEST wick for DOWN across the *entire* sweep
+     move – not just the first breakout candle).
+  4. Sweep ends (re-entry) when a later candle wicks back inside the session
+     level: low <= session_high (UP) or high >= session_low (DOWN).
+  5. Confirmation: a strictly-later candle breaks the locked first_sweep_level.
 
 Data source : Twelve Data – 5M candles (OHLC)
-Sessions    : Asia (00:00–09:00 UTC) and London (08:00–17:00 UTC)
+Timezone    : Asia/Jerusalem (DST-aware).  Sessions are in Israel local time.
+Sessions    : ASIA   03:00–07:00 IL
+              LONDON 09:00–12:00 IL
 Break def.  : WICK only  (candle.high / candle.low – NOT close)
 
 State per (user_id, symbol, session_type, session_date):
-  - session_high / session_low : tracked from session candles
-  - direction                  : UP or DOWN (locked on first break)
-  - first_break_ts / level     : first wick that exceeds the session extreme
-  - triggered_at               : set when confirm break is detected
-  - Anti-spam: only 1 trigger per (user_id, symbol, session_type, session_date)
+  - session_high / session_low  : tracked from session candles (wicks)
+  - direction                   : UP or DOWN (locked on first sweep)
+  - sweep_start_ts              : first candle whose wick broke session level
+  - first_sweep_level           : aggregated extreme of the entire sweep move
+  - sweep_end_ts                : re-entry candle (sweep locked here)
+  - confirm_break_ts / level    : trigger candle
+  - triggered_at                : set when confirmation is detected
+  - Anti-spam: only 1 trigger per (user_id, symbol, session_type, session_date, direction)
 
 Logging tags used:
-  [SESSION_BREAK][RUN_START]
-  [SESSION_BREAK][SESSION_TRACK]
-  [SESSION_BREAK][SESSION_END]
-  [SESSION_BREAK][FIRST_BREAK]
-  [SESSION_BREAK][CONFIRM_BREAK]
-  [SESSION_BREAK][TRIGGER]
-  [SESSION_BREAK][HEARTBEAT]
+  [SESSION_SWEEP][RUN_START]
+  [SESSION_SWEEP][SESSION_TRACK]
+  [SESSION_SWEEP][SESSION_END]
+  [SESSION_SWEEP][SWEEP_START]
+  [SESSION_SWEEP][SWEEP_UPDATE]
+  [SESSION_SWEEP][SWEEP_END]
+  [SESSION_SWEEP][CONFIRM]
+  [SESSION_SWEEP][TRIGGER]
+  [SESSION_SWEEP][HEARTBEAT]
 """
 
 from __future__ import annotations
 
 import logging
 import time as _time
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
+
+# ---------------------------------------------------------------------------
+# Timezone support – prefer stdlib zoneinfo (Python 3.9+), fall back to pytz
+# ---------------------------------------------------------------------------
+try:
+    from zoneinfo import ZoneInfo                    # Python 3.9+
+    _IL_TZ = ZoneInfo("Asia/Jerusalem")
+
+    def _utc_to_il(dt: datetime) -> datetime:
+        """Convert a naive-UTC datetime to a timezone-aware Israel datetime."""
+        return dt.replace(tzinfo=timezone.utc).astimezone(_IL_TZ)
+
+    def _il_to_utc_naive(dt_il) -> datetime:
+        """Convert a tzinfo-aware Israel datetime to naive UTC."""
+        return dt_il.astimezone(timezone.utc).replace(tzinfo=None)
+
+except ImportError:
+    import pytz as _pytz
+    _IL_TZ = _pytz.timezone("Asia/Jerusalem")
+
+    def _utc_to_il(dt: datetime) -> datetime:
+        return _pytz.utc.localize(dt).astimezone(_IL_TZ)
+
+    def _il_to_utc_naive(dt_il) -> datetime:
+        return dt_il.astimezone(_pytz.utc).replace(tzinfo=None)
+
 
 from database import db
 from services.forex_data_provider import forex_data_provider, normalize_symbol
 
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
-# Configuration – all session times in UTC
+# Configuration – sessions defined in Israel local time (DST-aware)
 # ---------------------------------------------------------------------------
 
-class SessionBreakConfig:
-    # Session windows (UTC)
+class SessionSweepConfig:
+    """Configuration for the Session Liquidity Sweep detector."""
+
+    # Sessions defined in Israel local time (hour, minute)
     SESSIONS: Dict[str, Dict] = {
         "asia": {
-            "start": time(0, 0),   # 00:00 UTC
-            "end":   time(9, 0),   # 09:00 UTC
+            "start_h": 3,  "start_m": 0,   # 03:00 IL
+            "end_h":   7,  "end_m":   0,   # 07:00 IL
         },
         "london": {
-            "start": time(8, 0),   # 08:00 UTC
-            "end":   time(17, 0),  # 17:00 UTC
+            "start_h": 9,  "start_m": 0,   # 09:00 IL
+            "end_h":  12,  "end_m":   0,   # 12:00 IL
         },
     }
 
@@ -62,23 +104,60 @@ class SessionBreakConfig:
     # Health monitoring
     UNHEALTHY_THRESHOLD_MINUTES = 30
 
-    LOG_PREFIX = "[SESSION_BREAK]"
+    LOG_PREFIX = "[SESSION_SWEEP]"
+
+
+# Backward-compat alias used by alert_processor.py
+SessionBreakConfig = SessionSweepConfig
 
 
 # ---------------------------------------------------------------------------
 # Pure helper functions (no DB, no I/O – easy to test)
 # ---------------------------------------------------------------------------
 
-def _session_window(session_type: str, session_date: date) -> Tuple[datetime, datetime]:
-    """Return (start_dt, end_dt) UTC datetimes for a session on a given date."""
-    cfg = SessionBreakConfig.SESSIONS[session_type]
-    start_dt = datetime.combine(session_date, cfg["start"])
-    end_dt   = datetime.combine(session_date, cfg["end"])
-    return start_dt, end_dt
+def _session_window_utc(session_type: str, session_date: date) -> Tuple[datetime, datetime]:
+    """
+    Return (start_dt_utc, end_dt_utc) as naive-UTC datetimes for a session on
+    a given *Israel local* date.  Handles DST automatically.
+    """
+    cfg = SessionSweepConfig.SESSIONS[session_type]
+
+    # Build timezone-aware datetimes in Israel local time
+    import datetime as _dt_mod
+    # We need to construct the local datetime carefully to get DST right.
+    # Use ZoneInfo / pytz localize.
+    try:
+        from zoneinfo import ZoneInfo
+        il = ZoneInfo("Asia/Jerusalem")
+        start_il = _dt_mod.datetime(
+            session_date.year, session_date.month, session_date.day,
+            cfg["start_h"], cfg["start_m"],
+            tzinfo=il,
+        )
+        end_il = _dt_mod.datetime(
+            session_date.year, session_date.month, session_date.day,
+            cfg["end_h"], cfg["end_m"],
+            tzinfo=il,
+        )
+    except ImportError:
+        import pytz
+        il = pytz.timezone("Asia/Jerusalem")
+        start_il = il.localize(_dt_mod.datetime(
+            session_date.year, session_date.month, session_date.day,
+            cfg["start_h"], cfg["start_m"],
+        ))
+        end_il = il.localize(_dt_mod.datetime(
+            session_date.year, session_date.month, session_date.day,
+            cfg["end_h"], cfg["end_m"],
+        ))
+
+    start_utc = _il_to_utc_naive(start_il)
+    end_utc   = _il_to_utc_naive(end_il)
+    return start_utc, end_utc
 
 
 def _session_candles(candles: List[Dict], start_dt: datetime, end_dt: datetime) -> List[Dict]:
-    """Return candles whose timestamp is in [start_dt, end_dt)."""
+    """Return candles whose timestamp (naive UTC) is in [start_dt, end_dt)."""
     return [c for c in candles if start_dt <= c["timestamp"] < end_dt]
 
 
@@ -90,114 +169,189 @@ def _post_session_candles(candles: List[Dict], end_dt: datetime) -> List[Dict]:
     )
 
 
-def compute_session_result(
+def compute_sweep_result(
     session_candles: List[Dict],
     post_candles: List[Dict],
 ) -> Optional[Dict]:
     """
-    Pure functional computation of the session-break state.
+    Pure functional implementation of the Session Liquidity Sweep state machine.
+
+    State machine progression (virtual – evaluated per run from raw candles):
+      STATE 1: IN_SESSION_TRACK  → builds session_high / session_low from wicks
+      STATE 2: POST_SESSION_WAIT_SWEEP_START → watches for first wick beyond session level
+      STATE 3_UP/DOWN_IN_SWEEP   → aggregates the sweep extreme (KEY FIX)
+      STATE 4_UP/DOWN_WAIT_CONFIRM → waits for re-entry then confirm break
 
     Parameters
     ----------
-    session_candles : candles during the session window
-    post_candles    : candles after the session window (ordered oldest→newest)
+    session_candles : candles during the session window (used for session_high/low)
+    post_candles    : candles after the session window, sorted oldest→newest
 
-    Returns None if no trigger, otherwise a dict with:
-      {
-        "session_high": float,
-        "session_low":  float,
-        "direction":    "UP" | "DOWN",
-        "first_break_ts":    datetime,
-        "first_break_level": float,
-        "confirm_break_ts":    datetime,
-        "confirm_break_level": float,
-      }
-    Returns a partial dict (without confirm_* keys) when only the first break
-    was found but not yet confirmed, to allow state persistence.
-    Returns {"session_high": .., "session_low": .., "no_break": True}
-    when no break was found.
+    Returns None if session_candles is empty.
+
+    Otherwise returns a dict containing at least:
+      session_high, session_low
+
+    Plus additional keys depending on progress:
+      no_break=True            → no sweep started
+      direction, sweep_start_ts, first_sweep_level
+      reentered=False          → sweep started but no re-entry yet
+      sweep_end_ts, reentered=True
+      confirmed=True, confirm_break_ts, confirm_break_level  → full trigger
     """
     if not session_candles:
         return None
 
+    # ── STATE 1: build session extremes from wicks ──────────────────────────
     session_high = max(c["high"] for c in session_candles)
     session_low  = min(c["low"]  for c in session_candles)
 
     if not post_candles:
-        # Session just ended, no post-session data yet
         return {"session_high": session_high, "session_low": session_low, "no_break": True}
 
-    # ------------------------------------------------------------------
-    # Step 1: find first break (wick only, chronologically)
-    # ------------------------------------------------------------------
-    first_up_break: Optional[Tuple[datetime, float]] = None    # (ts, level)
-    first_down_break: Optional[Tuple[datetime, float]] = None
+    # ── STATE 2: POST_SESSION_WAIT_SWEEP_START ───────────────────────────────
+    # Find the first UP sweep start and DOWN sweep start chronologically.
+    first_up_ts:   Optional[datetime] = None
+    first_down_ts: Optional[datetime] = None
 
     for c in post_candles:
-        if first_up_break is None and c["high"] > session_high:
-            first_up_break = (c["timestamp"], c["high"])
-        if first_down_break is None and c["low"] < session_low:
-            first_down_break = (c["timestamp"], c["low"])
-        if first_up_break and first_down_break:
-            break  # Found both, stop scanning
+        if first_up_ts is None and c["high"] > session_high:
+            first_up_ts = c["timestamp"]
+        if first_down_ts is None and c["low"] < session_low:
+            first_down_ts = c["timestamp"]
+        if first_up_ts is not None and first_down_ts is not None:
+            break
 
-    if first_up_break is None and first_down_break is None:
+    if first_up_ts is None and first_down_ts is None:
         return {"session_high": session_high, "session_low": session_low, "no_break": True}
 
-    # Choose first break chronologically; tiebreak: UP wins
-    if first_up_break and first_down_break:
-        if first_up_break[0] <= first_down_break[0]:
+    # Choose direction: earliest sweep start wins; tie → UP
+    if first_up_ts is not None and first_down_ts is not None:
+        if first_up_ts <= first_down_ts:
             direction = "UP"
-            first_break_ts, first_break_level = first_up_break
+            sweep_start_ts = first_up_ts
         else:
             direction = "DOWN"
-            first_break_ts, first_break_level = first_down_break
-    elif first_up_break:
+            sweep_start_ts = first_down_ts
+    elif first_up_ts is not None:
         direction = "UP"
-        first_break_ts, first_break_level = first_up_break
+        sweep_start_ts = first_up_ts
     else:
         direction = "DOWN"
-        first_break_ts, first_break_level = first_down_break
+        sweep_start_ts = first_down_ts
 
-    # ------------------------------------------------------------------
-    # Step 2: find confirmation break (must be a LATER candle)
-    # ------------------------------------------------------------------
-    confirm_ts: Optional[datetime] = None
-    confirm_level: Optional[float] = None
+    # ── STATE 3: IN_SWEEP – aggregate the extreme across the whole sweep ─────
+    # KEY FIX: first_sweep_level = MAX(high) for UP, MIN(low) for DOWN,
+    # computed across ALL candles from sweep_start until re-entry.
+    # Re-entry: a LATER candle (ts > sweep_start_ts) whose low <= session_high (UP)
+    #           or high >= session_low (DOWN).
+    sweep_end_ts: Optional[datetime] = None
 
-    for c in post_candles:
-        if c["timestamp"] <= first_break_ts:
-            continue  # Must be strictly after first break
-        if direction == "UP" and c["high"] > first_break_level:
-            confirm_ts    = c["timestamp"]
-            confirm_level = c["high"]
-            break
-        if direction == "DOWN" and c["low"] < first_break_level:
-            confirm_ts    = c["timestamp"]
-            confirm_level = c["low"]
-            break
+    if direction == "UP":
+        sweep_high = -float("inf")
+        for c in post_candles:
+            if c["timestamp"] < sweep_start_ts:
+                continue                        # strictly before sweep – skip
+            sweep_high = max(sweep_high, c["high"])
+            # Re-entry check: strictly after sweep_start_ts
+            if c["timestamp"] > sweep_start_ts and c["low"] <= session_high:
+                sweep_end_ts = c["timestamp"]
+                break
+        first_sweep_level = sweep_high          # locked extreme of entire sweep
 
-    if confirm_ts is None:
-        # First break found but not yet confirmed
+        if sweep_end_ts is None:
+            # Sweep started but re-entry hasn't happened yet
+            return {
+                "session_high":      session_high,
+                "session_low":       session_low,
+                "direction":         "UP",
+                "sweep_start_ts":    sweep_start_ts,
+                "first_sweep_level": first_sweep_level,
+                "reentered":         False,
+                "confirmed":         False,
+            }
+
+        # ── STATE 4_UP: WAIT_CONFIRM after re-entry ──────────────────────────
+        for c in post_candles:
+            if c["timestamp"] <= sweep_end_ts:
+                continue          # must be strictly after sweep_end (re-entry) candle
+            if c["high"] > first_sweep_level:
+                return {
+                    "session_high":        session_high,
+                    "session_low":         session_low,
+                    "direction":           "UP",
+                    "sweep_start_ts":      sweep_start_ts,
+                    "first_sweep_level":   first_sweep_level,
+                    "sweep_end_ts":        sweep_end_ts,
+                    "reentered":           True,
+                    "confirm_break_ts":    c["timestamp"],
+                    "confirm_break_level": c["high"],
+                    "confirmed":           True,
+                }
+
+        # Re-entry happened but no confirm break yet
         return {
-            "session_high":       session_high,
-            "session_low":        session_low,
-            "direction":          direction,
-            "first_break_ts":     first_break_ts,
-            "first_break_level":  first_break_level,
-            "confirmed":          False,
+            "session_high":      session_high,
+            "session_low":       session_low,
+            "direction":         "UP",
+            "sweep_start_ts":    sweep_start_ts,
+            "first_sweep_level": first_sweep_level,
+            "sweep_end_ts":      sweep_end_ts,
+            "reentered":         True,
+            "confirmed":         False,
         }
 
-    return {
-        "session_high":         session_high,
-        "session_low":          session_low,
-        "direction":            direction,
-        "first_break_ts":       first_break_ts,
-        "first_break_level":    first_break_level,
-        "confirm_break_ts":     confirm_ts,
-        "confirm_break_level":  confirm_level,
-        "confirmed":            True,
-    }
+    else:  # direction == "DOWN"
+        sweep_low = float("inf")
+        for c in post_candles:
+            if c["timestamp"] < sweep_start_ts:
+                continue
+            sweep_low = min(sweep_low, c["low"])
+            # Re-entry check: strictly after sweep_start_ts
+            if c["timestamp"] > sweep_start_ts and c["high"] >= session_low:
+                sweep_end_ts = c["timestamp"]
+                break
+        first_sweep_level = sweep_low           # locked extreme of entire sweep
+
+        if sweep_end_ts is None:
+            return {
+                "session_high":      session_high,
+                "session_low":       session_low,
+                "direction":         "DOWN",
+                "sweep_start_ts":    sweep_start_ts,
+                "first_sweep_level": first_sweep_level,
+                "reentered":         False,
+                "confirmed":         False,
+            }
+
+        # ── STATE 4_DOWN: WAIT_CONFIRM after re-entry ────────────────────────
+        for c in post_candles:
+            if c["timestamp"] <= sweep_end_ts:
+                continue
+            if c["low"] < first_sweep_level:
+                return {
+                    "session_high":        session_high,
+                    "session_low":         session_low,
+                    "direction":           "DOWN",
+                    "sweep_start_ts":      sweep_start_ts,
+                    "first_sweep_level":   first_sweep_level,
+                    "sweep_end_ts":        sweep_end_ts,
+                    "reentered":           True,
+                    "confirm_break_ts":    c["timestamp"],
+                    "confirm_break_level": c["low"],
+                    "confirmed":           True,
+                }
+
+        return {
+            "session_high":      session_high,
+            "session_low":       session_low,
+            "direction":         "DOWN",
+            "sweep_start_ts":    sweep_start_ts,
+            "first_sweep_level": first_sweep_level,
+            "sweep_end_ts":      sweep_end_ts,
+            "reentered":         True,
+            "confirmed":         False,
+        }
 
 
 def find_relevant_sessions(
@@ -205,28 +359,33 @@ def find_relevant_sessions(
     now_utc: datetime,
 ) -> List[Tuple[str, date]]:
     """
-    Return all (session_type, session_date) pairs that:
-      - have at least one session candle in the data, AND
-      - the session has already ended (end_dt <= now_utc).
+    Return all (session_type, session_date) pairs where:
+      - session_date is the Israel local date
+      - The session has at least one candle inside the session window, AND
+      - The session has ended (session_end_utc <= now_utc).
+
+    Candle timestamps are treated as naive UTC.
     """
     results: List[Tuple[str, date]] = []
 
-    # Gather all unique dates present in candle data
-    all_dates = sorted({c["timestamp"].date() for c in candles})
+    # Discover unique Israel local dates from candle timestamps
+    il_dates: set = set()
+    for c in candles:
+        il_dt = _utc_to_il(c["timestamp"])
+        il_dates.add(il_dt.date())
 
-    for session_type in SessionBreakConfig.SESSIONS:
-        for d in all_dates:
-            start_dt, end_dt = _session_window(session_type, d)
+    for session_type in SessionSweepConfig.SESSIONS:
+        for d in sorted(il_dates):
+            start_utc, end_utc = _session_window_utc(session_type, d)
             # Session must have ended
-            if now_utc < end_dt:
+            if now_utc < end_utc:
                 continue
-            # Must have at least one session candle (otherwise not meaningful)
-            ses_candles = _session_candles(candles, start_dt, end_dt)
+            # Must have at least one candle inside the session window
+            ses_candles = _session_candles(candles, start_utc, end_utc)
             if not ses_candles:
                 continue
             results.append((session_type, d))
 
-    # Sort by (session_type, date) to process consistently
     return sorted(results, key=lambda x: (x[1], x[0]))
 
 
@@ -252,7 +411,6 @@ def _load_state(user_id: int, symbol: str, session_type: str, session_date: date
 def _upsert_state(user_id: int, symbol: str, session_type: str, session_date: date,
                   **fields) -> None:
     """Insert or update state row."""
-    # Build SET clause from fields
     set_parts = ", ".join(f"{k} = %s" for k in fields)
     values = list(fields.values())
 
@@ -276,17 +434,19 @@ def _save_history(user_id: int, symbol: str, session_type: str,
             user_id, symbol, session_type, session_date,
             direction,
             session_high, session_low,
-            first_break_ts, first_break_level,
+            sweep_start_ts, first_sweep_level,
+            sweep_end_ts,
             confirm_break_ts, confirm_break_level,
             triggered_at
-        ) VALUES (%s,%s,%s,%s, %s, %s,%s, %s,%s, %s,%s, NOW())
+        ) VALUES (%s,%s,%s,%s, %s, %s,%s, %s,%s, %s, %s,%s, NOW())
         ON CONFLICT DO NOTHING
         """,
         (
             user_id, symbol, session_type, str(session_date),
             result["direction"],
             result["session_high"], result["session_low"],
-            result["first_break_ts"], result["first_break_level"],
+            result["sweep_start_ts"], result["first_sweep_level"],
+            result["sweep_end_ts"],
             result["confirm_break_ts"], result["confirm_break_level"],
         ),
     )
@@ -298,9 +458,9 @@ def _save_history(user_id: int, symbol: str, session_type: str,
 
 def _send_alert_email(user_email: str, symbol: str, session_type: str,
                       session_date: date, result: Dict) -> bool:
-    """Send the session-break confirmation alert email."""
+    """Send the session liquidity sweep alert email."""
     from email_sender import email_sender
-    return email_sender.send_session_break_email(
+    return email_sender.send_session_sweep_email(
         to_email=user_email,
         symbol=symbol,
         session_type=session_type,
@@ -308,8 +468,9 @@ def _send_alert_email(user_email: str, symbol: str, session_type: str,
         direction=result["direction"],
         session_high=result["session_high"],
         session_low=result["session_low"],
-        first_break_ts=result["first_break_ts"].isoformat(),
-        first_break_level=result["first_break_level"],
+        sweep_start_ts=result["sweep_start_ts"].isoformat(),
+        first_sweep_level=result["first_sweep_level"],
+        sweep_end_ts=result["sweep_end_ts"].isoformat(),
         confirm_break_ts=result["confirm_break_ts"].isoformat(),
         confirm_break_level=result["confirm_break_level"],
     )
@@ -321,8 +482,8 @@ def _send_alert_email(user_email: str, symbol: str, session_type: str,
 
 class SessionBreakDetector:
     """
-    Orchestrates session-break detection across all users and their watchlists.
-    Designed to be called periodically by the scheduler.
+    Orchestrates Session Liquidity Sweep detection across all users and their
+    watchlists.  Designed to be called periodically by the scheduler.
     """
 
     def detect_for_user(
@@ -343,10 +504,9 @@ class SessionBreakDetector:
 
         Returns a metrics dict: {symbols, triggers, states_advanced, errors}
         """
-        LP = SessionBreakConfig.LOG_PREFIX
+        LP = SessionSweepConfig.LOG_PREFIX
         metrics = {"symbols": 0, "triggers": 0, "states_advanced": 0, "errors": 0}
 
-        # Fetch user's watchlist
         watchlist = db.execute(
             "SELECT symbol FROM forex_watchlist WHERE user_id = %s ORDER BY added_at",
             (user_id,),
@@ -363,14 +523,13 @@ class SessionBreakDetector:
 
         for symbol in symbols:
             try:
-                # Fetch (or reuse cached) candles
                 if symbol not in candle_cache:
                     logger.debug(
                         "%s[SESSION_TRACK] user=%s symbol=%s fetching_candles count=%d",
-                        LP, user_id, symbol, SessionBreakConfig.CANDLE_COUNT,
+                        LP, user_id, symbol, SessionSweepConfig.CANDLE_COUNT,
                     )
                     candles = forex_data_provider.get_recent_candles(
-                        symbol, timeframe="5m", count=SessionBreakConfig.CANDLE_COUNT
+                        symbol, timeframe="5m", count=SessionSweepConfig.CANDLE_COUNT
                     )
                     candle_cache[symbol] = candles
                 else:
@@ -383,11 +542,10 @@ class SessionBreakDetector:
                     )
                     continue
 
-                # Process all relevant sessions
                 result = self._process_symbol(
                     user_id, user_email, symbol, candles, now_utc, run_id
                 )
-                metrics["triggers"]       += result["triggers"]
+                metrics["triggers"]        += result["triggers"]
                 metrics["states_advanced"] += result["states_advanced"]
 
             except Exception as exc:
@@ -409,7 +567,7 @@ class SessionBreakDetector:
         run_id: str,
     ) -> Dict:
         """Process all relevant sessions for one (user, symbol)."""
-        LP = SessionBreakConfig.LOG_PREFIX
+        LP = SessionSweepConfig.LOG_PREFIX
         result = {"triggers": 0, "states_advanced": 0}
 
         relevant = find_relevant_sessions(candles, now_utc)
@@ -450,13 +608,13 @@ class SessionBreakDetector:
 
         Returns (triggered: bool, state_advanced: bool).
         """
-        LP = SessionBreakConfig.LOG_PREFIX
-        triggered = False
+        LP = SessionSweepConfig.LOG_PREFIX
+        triggered     = False
         state_advanced = False
 
-        start_dt, end_dt = _session_window(session_type, session_date)
+        start_utc, end_utc = _session_window_utc(session_type, session_date)
 
-        # ---- 1. Check anti-spam ----
+        # ── 1. Anti-spam: skip if already triggered ──────────────────────────
         existing = _load_state(user_id, symbol, session_type, session_date)
         if existing and existing.get("triggered_at"):
             logger.debug(
@@ -465,56 +623,80 @@ class SessionBreakDetector:
             )
             return False, False
 
-        # ---- 2. Extract session candles + post-session candles ----
-        ses_candles  = _session_candles(all_candles, start_dt, end_dt)
-        post_candles = _post_session_candles(all_candles, end_dt)
+        # ── 2. Extract session and post-session candles ──────────────────────
+        ses_candles  = _session_candles(all_candles, start_utc, end_utc)
+        post_candles = _post_session_candles(all_candles, end_utc)
 
         if not ses_candles:
-            return False, False  # No session data in our window
+            return False, False
 
         session_high = max(c["high"] for c in ses_candles)
         session_low  = min(c["low"]  for c in ses_candles)
 
         logger.debug(
             "%s[SESSION_END] user=%s symbol=%s session=%s/%s "
-            "session_high=%.5f session_low=%.5f post_candles=%d",
+            "session_high=%.5f session_low=%.5f "
+            "session_start_utc=%s session_end_utc=%s post_candles=%d",
             LP, user_id, symbol, session_type, session_date,
-            session_high, session_low, len(post_candles),
+            session_high, session_low,
+            start_utc.isoformat(), end_utc.isoformat(),
+            len(post_candles),
         )
 
-        # ---- 3. Compute result from candles ----
-        computation = compute_session_result(ses_candles, post_candles)
+        # ── 3. Run the sweep state machine ───────────────────────────────────
+        computation = compute_sweep_result(ses_candles, post_candles)
         if computation is None:
             return False, False
 
-        # Update state in DB with session high/low
+        # Always persist session high/low
         state_fields: Dict = {
             "session_high": session_high,
             "session_low":  session_low,
-            "state":        "POST_SESSION",
+            "state":        "WAIT_SWEEP_START",
         }
 
         if computation.get("no_break"):
             _upsert_state(user_id, symbol, session_type, session_date, **state_fields)
             return False, False
 
-        # First break found
-        direction         = computation["direction"]
-        first_break_ts    = computation["first_break_ts"]
-        first_break_level = computation["first_break_level"]
+        # Sweep has started
+        direction        = computation["direction"]
+        sweep_start_ts   = computation["sweep_start_ts"]
+        first_sweep_level = computation["first_sweep_level"]
+        reentered        = computation.get("reentered", False)
 
         logger.info(
-            "%s[FIRST_BREAK] user=%s symbol=%s session=%s/%s "
-            "direction=%s ts=%s level=%.5f",
+            "%s[SWEEP_START] user=%s symbol=%s session=%s/%s "
+            "direction=%s sweep_start_ts=%s session_level=%.5f",
             LP, user_id, symbol, session_type, session_date,
-            direction, first_break_ts.isoformat(), first_break_level,
+            direction, sweep_start_ts.isoformat(),
+            session_high if direction == "UP" else session_low,
         )
 
+        if reentered:
+            sweep_end_ts = computation["sweep_end_ts"]
+            logger.info(
+                "%s[SWEEP_END] user=%s symbol=%s session=%s/%s "
+                "direction=%s first_sweep_level=%.5f sweep_end_ts=%s reentered=True",
+                LP, user_id, symbol, session_type, session_date,
+                direction, first_sweep_level, sweep_end_ts.isoformat(),
+            )
+        else:
+            sweep_end_ts = None
+            logger.debug(
+                "%s[SWEEP_UPDATE] user=%s symbol=%s session=%s/%s "
+                "direction=%s current_sweep_level=%.5f sweep_start_ts=%s reentered=False",
+                LP, user_id, symbol, session_type, session_date,
+                direction, first_sweep_level, sweep_start_ts.isoformat(),
+            )
+
+        state_name = f"{direction}_IN_SWEEP" if not reentered else f"{direction}_WAIT_CONFIRM"
         state_fields.update({
-            "state":             "WAIT_CONFIRM_" + direction,
+            "state":             state_name,
             "direction":         direction,
-            "first_break_ts":    first_break_ts,
-            "first_break_level": first_break_level,
+            "sweep_start_ts":    sweep_start_ts,
+            "first_sweep_level": first_sweep_level,
+            "sweep_end_ts":      sweep_end_ts,
         })
         state_advanced = True
 
@@ -522,23 +704,23 @@ class SessionBreakDetector:
             _upsert_state(user_id, symbol, session_type, session_date, **state_fields)
             return False, state_advanced
 
-        # ---- 4. Confirmation break – TRIGGER ----
+        # ── 4. Confirmation – TRIGGER ────────────────────────────────────────
         confirm_ts    = computation["confirm_break_ts"]
         confirm_level = computation["confirm_break_level"]
 
         logger.info(
-            "%s[CONFIRM_BREAK] user=%s symbol=%s session=%s/%s "
-            "direction=%s confirm_ts=%s confirm_level=%.5f",
+            "%s[CONFIRM] user=%s symbol=%s session=%s/%s "
+            "direction=%s confirm_level=%.5f confirm_ts=%s",
             LP, user_id, symbol, session_type, session_date,
-            direction, confirm_ts.isoformat(), confirm_level,
+            direction, confirm_level, confirm_ts.isoformat(),
         )
 
-        # Final anti-spam check (race condition guard): re-check DB
+        # Race-condition guard: re-check DB before writing triggered_at
         existing_now = _load_state(user_id, symbol, session_type, session_date)
         if existing_now and existing_now.get("triggered_at"):
-            return False, state_advanced  # Another run already fired
+            return False, state_advanced
 
-        # Mark triggered in DB BEFORE sending email (idempotency)
+        # Mark triggered BEFORE sending email (idempotency)
         trigger_time = datetime.utcnow()
         state_fields.update({
             "state":               "TRIGGERED",
@@ -551,16 +733,19 @@ class SessionBreakDetector:
         # Save history
         _save_history(user_id, symbol, session_type, session_date, {
             **computation,
-            "session_high": session_high,
-            "session_low":  session_low,
+            "session_high":    session_high,
+            "session_low":     session_low,
+            "sweep_end_ts":    sweep_end_ts,
         })
 
         logger.info(
             "%s[TRIGGER] user=%s symbol=%s session=%s/%s "
-            "direction=%s first_break=%.5f@%s confirm=%.5f@%s",
+            "direction=%s sweep_start_ts=%s first_sweep_level=%.5f "
+            "sweep_end_ts=%s confirm_level=%.5f@%s",
             LP, user_id, symbol, session_type, session_date,
             direction,
-            first_break_level, first_break_ts.isoformat(),
+            sweep_start_ts.isoformat(), first_sweep_level,
+            sweep_end_ts.isoformat() if sweep_end_ts else "None",
             confirm_level, confirm_ts.isoformat(),
         )
 
@@ -568,8 +753,9 @@ class SessionBreakDetector:
         try:
             _send_alert_email(user_email, symbol, session_type, session_date, {
                 **computation,
-                "session_high": session_high,
-                "session_low":  session_low,
+                "session_high":    session_high,
+                "session_low":     session_low,
+                "sweep_end_ts":    sweep_end_ts,
             })
         except Exception as email_exc:
             logger.error(
