@@ -4023,6 +4023,136 @@ setInterval(load, 30000);
     return html
 
 
+# ---------------------------------------------------------------------------
+# Session Sweep Replay API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/session-sweep/replay')
+@login_required
+def session_sweep_replay():
+    """
+    Run the Session Liquidity Sweep detector step-by-step on historical
+    candles and return a structured event timeline.
+
+    Query parameters
+    ----------------
+    symbol        required  e.g. EURUSD or XAU/USD
+    session_type  required  asia | london
+    date          required  YYYY-MM-DD  (Israel local date)
+    format        optional  json (default) | table
+    show_updates  optional  0 | 1 (default 1) – include SWEEP_UPDATE events
+    candles       optional  integer, default 500 (max 1000)
+
+    Returns JSON (or plain-text table) with event timeline.
+    """
+    from services.session_break_detector import (
+        _session_window_utc,
+        _session_candles,
+        _post_session_candles,
+    )
+    from services.session_sweep_replay import replay_sweep, render_table
+    from services.forex_data_provider import forex_data_provider
+    import uuid as _uuid
+
+    # ── parse params ──────────────────────────────────────────────────────
+    symbol = request.args.get('symbol', '').strip().upper()
+    session_type = request.args.get('session_type', '').strip().lower()
+    date_str = request.args.get('date', '').strip()
+    output_format = request.args.get('format', 'json').strip().lower()
+    show_updates = request.args.get('show_updates', '1').strip() != '0'
+    try:
+        candle_count = min(int(request.args.get('candles', 500)), 1000)
+    except (ValueError, TypeError):
+        candle_count = 500
+
+    errors = []
+    if not symbol:
+        errors.append("'symbol' is required (e.g. EURUSD)")
+    if session_type not in ('asia', 'london'):
+        errors.append("'session_type' must be 'asia' or 'london'")
+    if not date_str:
+        errors.append("'date' is required (YYYY-MM-DD)")
+    else:
+        try:
+            from datetime import datetime as _dt
+            session_date = _dt.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            errors.append(f"'date' must be YYYY-MM-DD, got '{date_str}'")
+            session_date = None
+
+    if errors:
+        return jsonify({'success': False, 'errors': errors}), 400
+
+    # ── session UTC window ────────────────────────────────────────────────
+    try:
+        start_utc, end_utc = _session_window_utc(session_type, session_date)
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Session window error: {e}'}), 500
+
+    # ── fetch candles ─────────────────────────────────────────────────────
+    try:
+        all_candles = forex_data_provider.get_recent_candles(
+            symbol, timeframe='5m', count=candle_count
+        )
+    except Exception as e:
+        logger.error('[SESSION_SWEEP] replay candle fetch error symbol=%s err=%s', symbol, e)
+        return jsonify({'success': False, 'error': f'Candle fetch failed: {e}'}), 502
+
+    if not all_candles:
+        return jsonify({
+            'success': False,
+            'error': f'No candles returned for {symbol}. '
+                     'Check symbol, API key and rate limits.',
+        }), 404
+
+    # ── partition ─────────────────────────────────────────────────────────
+    ses_candles  = _session_candles(all_candles, start_utc, end_utc)
+    post_candles = _post_session_candles(all_candles, end_utc)
+
+    if not ses_candles:
+        return jsonify({
+            'success': False,
+            'error': (
+                f'No candles found inside session window '
+                f'{start_utc.isoformat()} → {end_utc.isoformat()}. '
+                f'Try a more recent date or fetch more candles.'
+            ),
+            'fetched_candles': len(all_candles),
+            'session_start_utc': start_utc.isoformat(),
+            'session_end_utc':   end_utc.isoformat(),
+        }), 404
+
+    # ── replay ────────────────────────────────────────────────────────────
+    run_id = _uuid.uuid4().hex[:12]
+    try:
+        result = replay_sweep(
+            session_candles    = ses_candles,
+            post_candles       = post_candles,
+            session_type       = session_type,
+            session_date       = session_date,
+            session_start_utc  = start_utc,
+            session_end_utc    = end_utc,
+            show_sweep_updates = show_updates,
+            run_id             = run_id,
+        )
+    except Exception as e:
+        logger.error('[SESSION_SWEEP] replay engine error symbol=%s err=%s', symbol, e,
+                     exc_info=True)
+        return jsonify({'success': False, 'error': f'Replay engine error: {e}'}), 500
+
+    result['symbol']         = symbol
+    result['fetched_candles'] = len(all_candles)
+
+    if output_format == 'table':
+        try:
+            table_str = render_table(result, show_sweep_updates=show_updates)
+        except Exception as e:
+            table_str = f'[render error: {e}]'
+        return table_str, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+    return jsonify({'success': True, **result})
+
+
 # Gunicorn will run the app, this is only for local testing
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 8080))
