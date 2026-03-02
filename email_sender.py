@@ -156,10 +156,41 @@ class EmailSender:
         confirm_break_ts: str,
         confirm_break_level: float,
     ) -> bool:
-        """Send a Session Break Confirmation alert email."""
+        """Legacy wrapper – delegates to send_session_sweep_email."""
+        return self.send_session_sweep_email(
+            to_email=to_email,
+            symbol=symbol,
+            session_type=session_type,
+            session_date=session_date,
+            direction=direction,
+            session_high=session_high,
+            session_low=session_low,
+            sweep_start_ts=first_break_ts,
+            first_sweep_level=first_break_level,
+            sweep_end_ts=first_break_ts,          # not available in old callers
+            confirm_break_ts=confirm_break_ts,
+            confirm_break_level=confirm_break_level,
+        )
+
+    def send_session_sweep_email(
+        self,
+        to_email: str,
+        symbol: str,
+        session_type: str,
+        session_date: str,
+        direction: str,
+        session_high: float,
+        session_low: float,
+        sweep_start_ts: str,
+        first_sweep_level: float,
+        sweep_end_ts: str,
+        confirm_break_ts: str,
+        confirm_break_level: float,
+    ) -> bool:
+        """Send a Session Liquidity Sweep alert email."""
         if not self.enabled:
             logger.error(
-                "EMAIL NOT SENT (disabled) – would send session break alert to %s "
+                "EMAIL NOT SENT (disabled) – would send session sweep alert to %s "
                 "symbol=%s session=%s/%s direction=%s",
                 to_email, symbol, session_type, session_date, direction,
             )
@@ -169,18 +200,18 @@ class EmailSender:
         dir_color  = "#00FFA3" if direction == "UP" else "#FF6B6B"
         dir_label  = "Bullish (UP)" if direction == "UP" else "Bearish (DOWN)"
         session_label = session_type.capitalize()
-        subject = f"🚨 Session Break: {symbol} {dir_emoji} {direction} Confirmed ({session_label})"
+        subject = f"🚨 Sweep Confirmed: {symbol} {dir_emoji} {direction} ({session_label})"
 
         try:
             sh_str  = f"{float(session_high):.5f}"
             sl_str  = f"{float(session_low):.5f}"
-            fb_str  = f"{float(first_break_level):.5f}"
+            sl_lvl  = f"{float(first_sweep_level):.5f}"
             cb_str  = f"{float(confirm_break_level):.5f}"
         except (TypeError, ValueError):
-            sh_str = str(session_high)
-            sl_str = str(session_low)
-            fb_str = str(first_break_level)
-            cb_str = str(confirm_break_level)
+            sh_str  = str(session_high)
+            sl_str  = str(session_low)
+            sl_lvl  = str(first_sweep_level)
+            cb_str  = str(confirm_break_level)
 
         html_content = f"""
 <html>
@@ -203,21 +234,24 @@ class EmailSender:
     .row {{ display: flex; justify-content: space-between; margin: 6px 0; }}
     .label {{ color: #888; font-size: 13px; }}
     .value {{ font-weight: 600; }}
+    .section-title {{ font-size: 12px; text-transform: uppercase; color: #aaa;
+                      letter-spacing: 0.05em; margin: 14px 0 4px; }}
     .footer {{ font-size: 12px; color: #999; margin-top: 20px; }}
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
-      <h1 style="margin:0;font-size:22px;">{dir_emoji} Session Break Confirmed</h1>
+      <h1 style="margin:0;font-size:22px;">{dir_emoji} Session Liquidity Sweep Confirmed</h1>
       <p style="margin:6px 0 0;opacity:.8;font-size:14px;">
         {symbol} &bull; {session_label} Session &bull; {session_date}
       </p>
     </div>
     <div class="content">
       <div class="alert-box">
-        <h2 style="margin-top:0;color:{dir_color};">{dir_label} Break on {symbol}</h2>
+        <h2 style="margin-top:0;color:{dir_color};">{dir_label} Sweep on {symbol}</h2>
 
+        <p class="section-title">Session Range</p>
         <div class="row">
           <span class="label">Session</span>
           <span class="value">{session_label} ({session_date})</span>
@@ -233,32 +267,40 @@ class EmailSender:
 
         <hr style="border:none;border-top:1px solid #eee;margin:16px 0;">
 
+        <p class="section-title">Sweep Phase</p>
         <div class="row">
-          <span class="label">First Break Level</span>
-          <span class="level">{fb_str}</span>
+          <span class="label">Sweep Start (UTC)</span>
+          <span class="value">{sweep_start_ts}</span>
         </div>
         <div class="row">
-          <span class="label">First Break Time (UTC)</span>
-          <span class="value">{first_break_ts}</span>
+          <span class="label">Sweep Extreme Level</span>
+          <span class="level">{sl_lvl}</span>
+        </div>
+        <div class="row">
+          <span class="label">Re-entry (Sweep End, UTC)</span>
+          <span class="value">{sweep_end_ts}</span>
         </div>
 
         <hr style="border:none;border-top:1px solid #eee;margin:16px 0;">
 
+        <p class="section-title">Confirmation Break</p>
         <div class="row">
-          <span class="label">Confirm Break Level</span>
+          <span class="label">Confirm Level</span>
           <span class="level">{cb_str}</span>
         </div>
         <div class="row">
-          <span class="label">Confirm Break Time (UTC)</span>
+          <span class="label">Confirm Time (UTC)</span>
           <span class="value">{confirm_break_ts}</span>
         </div>
       </div>
 
       <p style="font-size:13px;color:#555;">
-        A second wick beyond the first break level confirmed the session break.
-        All times are UTC. Candle timeframe: 5M.
+        Price swept the session {("high" if direction == "UP" else "low")},
+        reached a swing extreme of <strong>{sl_lvl}</strong>,
+        re-entered the session range, then confirmed the break above/below
+        that extreme level.  All times are UTC. Candle timeframe: 5M.
       </p>
-      <p class="footer">Sent by PulseAlerts &bull; Session Break Confirmation Alert</p>
+      <p class="footer">Sent by PulseAlerts &bull; Session Liquidity Sweep Alert</p>
     </div>
   </div>
 </body>
@@ -276,7 +318,7 @@ class EmailSender:
             )
             response = self.api_instance.send_transac_email(send_smtp_email)
             logger.info(
-                "SESSION BREAK EMAIL SENT to=%s symbol=%s session=%s/%s direction=%s msg_id=%s",
+                "SESSION SWEEP EMAIL SENT to=%s symbol=%s session=%s/%s direction=%s msg_id=%s",
                 to_email, symbol, session_type, session_date, direction,
                 response.message_id,
             )
@@ -284,7 +326,7 @@ class EmailSender:
 
         except Exception as e:
             logger.error(
-                "SESSION BREAK EMAIL FAILED to=%s symbol=%s err=%s",
+                "SESSION SWEEP EMAIL FAILED to=%s symbol=%s err=%s",
                 to_email, symbol, e,
             )
             return False

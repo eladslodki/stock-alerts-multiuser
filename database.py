@@ -250,6 +250,33 @@ class Database:
             );
             INSERT INTO session_break_health (id) VALUES (1) ON CONFLICT DO NOTHING;
             """,
+            # ── Session Liquidity Sweep migrations ─────────────────────────────
+            # Add sweep-specific columns to session_break_state
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS sweep_start_ts    TIMESTAMP;
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS sweep_end_ts      TIMESTAMP;
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS first_sweep_level DECIMAL(15, 5);
+            """,
+            # Add sweep-specific columns to session_break_history
+            """
+            ALTER TABLE session_break_history
+                ADD COLUMN IF NOT EXISTS sweep_start_ts    TIMESTAMP;
+            """,
+            """
+            ALTER TABLE session_break_history
+                ADD COLUMN IF NOT EXISTS sweep_end_ts      TIMESTAMP;
+            """,
+            """
+            ALTER TABLE session_break_history
+                ADD COLUMN IF NOT EXISTS first_sweep_level DECIMAL(15, 5);
+            """,
         ]
         
         try:

@@ -1,32 +1,44 @@
 """
-Deterministic unit tests for the Session Break Confirmation detector.
+Deterministic unit tests for the Session Liquidity Sweep detector.
 
-All tests use synthetic 5M OHLC candles – no DB, no network calls.
-The pure functions `compute_session_result` and `find_relevant_sessions`
+All tests use synthetic 5-minute OHLC candles – no DB, no network calls.
+The pure functions `compute_sweep_result` and `find_relevant_sessions`
 from services/session_break_detector.py are tested directly.
 
-Test cases required by spec:
-  1.  no break                  -> no trigger
-  2.  first break only          -> no trigger (returns confirmed=False)
-  3.  confirm break             -> trigger once  (confirmed=True)
-  4a. both sides break          -> choose first by time, lock direction
-  4b. both at same candle       -> UP wins (tiebreaker)
-  5.  idempotency               -> no double trigger on re-runs
-  6.  session_high / session_low computed correctly from wicks
-  7.  find_relevant_sessions    -> only returns ended sessions
-  8.  post-session candles      -> only candles AFTER session end
-  9.  confirm candle must be    -> strictly AFTER first_break_ts
-  10. edge: empty candles       -> returns None
+Key properties verified:
+  1.  first_sweep_level = the MAX (UP) or MIN (DOWN) wick across the ENTIRE
+      sweep move, not just the first candle that breaks the session level.
+  2.  Confirmation only after sweep_end (re-entry) and on a STRICTLY LATER candle.
+  3.  Alert triggers exactly once per (user, symbol, session, direction).
+  4.  Direction chosen by earliest sweep_start_ts; tie → UP.
+  5.  Session high/low use wick (high / low), not close.
+  6.  DST-aware session windows via find_relevant_sessions.
+
+Test coverage:
+  A.  No sweep (price stays inside session range)           → no_break
+  B.  Sweep starts but no re-entry yet                     → reentered=False
+  C.  Re-entry but no confirm break yet                    → reentered=True, confirmed=False
+  D.  Full trigger (sweep + re-entry + confirm)            → confirmed=True
+  D2. first_sweep_level is the extreme, not the first wick → KEY FIX
+  E.  Both directions break; UP first → direction=UP
+  F.  Both directions break; DOWN first → direction=DOWN
+  G.  Same candle breaks both sides → UP wins (tiebreaker)
+  H.  Confirm candle must be strictly after sweep_end_ts
+  I.  Session high/low from wicks
+  J.  find_relevant_sessions returns only ended sessions
+  K.  find_relevant_sessions uses Israel local dates
+  L.  _session_candles / _post_session_candles boundary rules
+  M.  Idempotency: compute_sweep_result is deterministic
+  N.  Empty candles edge cases
 """
 
 import sys
 import os
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from unittest.mock import MagicMock
 
 # ── Stub out heavy dependencies so pure functions are importable without DB ──
-# Must happen BEFORE importing the module under test.
 _mock_db = MagicMock()
 _mock_db_module = MagicMock()
 _mock_db_module.db = _mock_db
@@ -34,27 +46,24 @@ sys.modules.setdefault("psycopg2", MagicMock())
 sys.modules.setdefault("psycopg2.extras", MagicMock())
 sys.modules.setdefault("database", _mock_db_module)
 
-# forex_data_provider uses requests – stub it too
 _mock_fdp = MagicMock()
 _mock_fdp.forex_data_provider = MagicMock()
 _mock_fdp.normalize_symbol = MagicMock(return_value=("EUR/USD", None))
 sys.modules.setdefault("services.forex_data_provider", _mock_fdp)
 
-# email_sender
 sys.modules.setdefault("email_sender", MagicMock())
 
-# Make sure the project root is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import unittest
 
 from services.session_break_detector import (
-    compute_session_result,
+    compute_sweep_result,
     find_relevant_sessions,
-    _session_window,
+    _session_window_utc,
     _session_candles,
     _post_session_candles,
-    SessionBreakConfig,
+    SessionSweepConfig,
 )
 
 
@@ -72,461 +81,637 @@ def make_candle(
     return {"timestamp": ts, "open": open_, "high": high, "low": low, "close": close}
 
 
-# A reference session date for tests
-SESSION_DATE = date(2024, 1, 15)
+# Reference session date for tests.
+# The Asia session (Israel time 03:00–07:00) on 2024-01-15.
+# Winter: Israel is UTC+2.  So Asia 03:00–07:00 IL = 01:00–05:00 UTC.
+SESSION_DATE_IL = date(2024, 1, 15)
 
-# Asia session for SESSION_DATE: 00:00–09:00 UTC
-ASIA_START = datetime(2024, 1, 15, 0, 0)
-ASIA_END   = datetime(2024, 1, 15, 9, 0)
+# Computed via _session_window_utc; we derive them here for test convenience.
+# Winter UTC+2: Asia starts at 01:00 UTC, ends at 05:00 UTC.
+ASIA_START_UTC = datetime(2024, 1, 15,  1, 0)  # 03:00 IL in winter
+ASIA_END_UTC   = datetime(2024, 1, 15,  5, 0)  # 07:00 IL in winter
 
-# London session for SESSION_DATE: 08:00–17:00 UTC
-LON_START = datetime(2024, 1, 15, 8, 0)
-LON_END   = datetime(2024, 1, 15, 17, 0)
+# London: 09:00–12:00 IL → 07:00–10:00 UTC in winter
+LON_START_UTC  = datetime(2024, 1, 15,  7, 0)
+LON_END_UTC    = datetime(2024, 1, 15, 10, 0)
 
 
-def asia_session_candles(session_high=1.1000, session_low=1.0900) -> List[Dict]:
-    """A simple Asia session: 12 candles, high=session_high, low=session_low."""
+def asia_session_candles(session_high: float = 1.1000,
+                          session_low: float  = 1.0900) -> List[Dict]:
+    """12 candles inside the Asia session window with given high/low."""
     candles = []
     for i in range(12):
-        ts = ASIA_START + timedelta(minutes=5 * i)
+        ts = ASIA_START_UTC + timedelta(minutes=5 * i)
         candles.append(make_candle(ts, high=session_high, low=session_low))
     return candles
 
 
-def post_session_candles_from(start_offset_min: int, count: int = 10,
-                               high: float = 1.0950, low: float = 1.0950) -> List[Dict]:
-    """Post-session candles starting at ASIA_END + start_offset_min."""
-    candles = []
-    for i in range(count):
-        ts = ASIA_END + timedelta(minutes=5 * i + start_offset_min)
-        candles.append(make_candle(ts, high=high, low=low))
-    return candles
+def post_candles_from(
+    start_offset_min: int = 0,
+    count: int = 10,
+    high: float = 1.0950,
+    low:  float = 1.0950,
+) -> List[Dict]:
+    """Post-Asia candles starting at ASIA_END_UTC + start_offset_min."""
+    return [
+        make_candle(ASIA_END_UTC + timedelta(minutes=5 * i + start_offset_min),
+                    high=high, low=low)
+        for i in range(count)
+    ]
 
 
 # ---------------------------------------------------------------------------
-# 1. No break at all
+# A. No sweep at all
 # ---------------------------------------------------------------------------
 
-class TestNoBreak(unittest.TestCase):
+class TestNoSweep(unittest.TestCase):
 
-    def test_no_break_returns_no_break_flag(self):
-        """Post-session candles that never breach session_high or session_low."""
-        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-        # Post candles stay inside the session range
-        post = post_session_candles_from(0, count=20, high=1.0980, low=1.0920)
+    def test_price_stays_inside_session_range(self):
+        ses  = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        post = post_candles_from(0, count=20, high=1.0980, low=1.0920)
 
-        result = compute_session_result(ses, post)
+        result = compute_sweep_result(ses, post)
         self.assertIsNotNone(result)
-        self.assertTrue(result.get("no_break"), f"Expected no_break flag, got: {result}")
+        self.assertTrue(result.get("no_break"), f"Expected no_break, got: {result}")
 
-    def test_no_post_candles_returns_no_break(self):
-        """Session just ended, no post-session data yet."""
+    def test_no_post_candles(self):
         ses = asia_session_candles()
-        result = compute_session_result(ses, [])
-        self.assertIsNotNone(result)
+        result = compute_sweep_result(ses, [])
         self.assertTrue(result.get("no_break"))
 
     def test_empty_session_returns_none(self):
-        """No session candles at all."""
-        result = compute_session_result([], [])
-        self.assertIsNone(result)
+        self.assertIsNone(compute_sweep_result([], []))
 
 
 # ---------------------------------------------------------------------------
-# 2. First break only – no confirmation
+# B. Sweep started, but re-entry hasn't happened yet
 # ---------------------------------------------------------------------------
 
-class TestFirstBreakOnly(unittest.TestCase):
+class TestSweepStartedNoReentry(unittest.TestCase):
 
-    def test_up_first_break_not_confirmed(self):
-        """One wick above session_high, no later candle surpasses it."""
+    def test_up_sweep_no_reentry(self):
+        """Price breaks above session_high and keeps going – no candle comes back."""
         ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-
-        # Post: first candle breaks high (wick to 1.1010), no later candle exceeds 1.1010
         post = [
-            make_candle(ASIA_END + timedelta(minutes=5),  high=1.1010, low=1.0950),  # first break
-            make_candle(ASIA_END + timedelta(minutes=10), high=1.1005, low=1.0940),  # below 1.1010
-            make_candle(ASIA_END + timedelta(minutes=15), high=1.1008, low=1.0945),  # below 1.1010
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.1010, low=1.1002),
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1020, low=1.1008),
+            make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.1030, low=1.1015),
         ]
-
-        result = compute_session_result(ses, post)
+        result = compute_sweep_result(ses, post)
         self.assertIsNotNone(result)
-        self.assertFalse(result.get("confirmed", True), f"Should not be confirmed: {result}")
         self.assertEqual(result["direction"], "UP")
-        self.assertAlmostEqual(result["first_break_level"], 1.1010)
+        self.assertFalse(result.get("reentered"), "Expected reentered=False")
+        self.assertFalse(result.get("confirmed"))
+        # sweep_start_ts is the first candle that broke session_high
+        self.assertEqual(result["sweep_start_ts"], ASIA_END_UTC + timedelta(minutes=5))
+        # first_sweep_level must be the extreme of the entire sweep (1.1030)
+        self.assertAlmostEqual(result["first_sweep_level"], 1.1030)
 
-    def test_down_first_break_not_confirmed(self):
-        """One wick below session_low, no later candle goes lower."""
+    def test_down_sweep_no_reentry(self):
         ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-
         post = [
-            make_candle(ASIA_END + timedelta(minutes=5),  high=1.0950, low=1.0890),  # first break
-            make_candle(ASIA_END + timedelta(minutes=10), high=1.0960, low=1.0895),  # not below 1.0890
-            make_candle(ASIA_END + timedelta(minutes=15), high=1.0970, low=1.0900),  # not below 1.0890
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.0890, low=1.0870),
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.0880, low=1.0860),
+            make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.0870, low=1.0850),
         ]
-
-        result = compute_session_result(ses, post)
-        self.assertIsNotNone(result)
-        self.assertFalse(result.get("confirmed", True))
+        result = compute_sweep_result(ses, post)
         self.assertEqual(result["direction"], "DOWN")
-        self.assertAlmostEqual(result["first_break_level"], 1.0890)
+        self.assertFalse(result.get("reentered"))
+        self.assertAlmostEqual(result["first_sweep_level"], 1.0850)
 
 
 # ---------------------------------------------------------------------------
-# 3. Full confirm break -> trigger
+# C. Re-entry happened but no confirm break yet
 # ---------------------------------------------------------------------------
 
-class TestConfirmBreak(unittest.TestCase):
+class TestReentryNoConfirm(unittest.TestCase):
 
-    def test_up_confirm_triggers(self):
-        """First break UP, then a later candle surpasses it -> confirmed=True."""
+    def test_up_reentry_no_confirm(self):
+        """
+        Price sweeps above session_high (extends to 1.1030), re-enters
+        (low <= session_high), but no later candle breaks 1.1030.
+        """
         ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-
         post = [
-            make_candle(ASIA_END + timedelta(minutes=5),  high=1.1010, low=1.0950),  # first break UP
-            make_candle(ASIA_END + timedelta(minutes=10), high=1.1005, low=1.0940),  # below 1.1010
-            make_candle(ASIA_END + timedelta(minutes=15), high=1.1015, low=1.0945),  # CONFIRM (>1.1010)
+            # Sweep phase: price keeps going up
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.1010, low=1.1002),
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1030, low=1.1005),
+            # Re-entry candle: low <= session_high=1.1000
+            make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.1025, low=1.0990),
+            # Post-reentry candles that don't break 1.1030
+            make_candle(ASIA_END_UTC + timedelta(minutes=20), high=1.1025, low=1.0950),
+            make_candle(ASIA_END_UTC + timedelta(minutes=25), high=1.1028, low=1.0960),
         ]
+        result = compute_sweep_result(ses, post)
+        self.assertEqual(result["direction"], "UP")
+        self.assertTrue(result.get("reentered"))
+        self.assertFalse(result.get("confirmed"))
+        self.assertAlmostEqual(result["first_sweep_level"], 1.1030)
+        self.assertEqual(result["sweep_end_ts"], ASIA_END_UTC + timedelta(minutes=15))
 
-        result = compute_session_result(ses, post)
-        self.assertIsNotNone(result)
+    def test_down_reentry_no_confirm(self):
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        post = [
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.0895, low=1.0870),
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.0880, low=1.0850),
+            # Re-entry: high >= session_low=1.0900
+            make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.0910, low=1.0865),
+            # Post-reentry but don't break 1.0850
+            make_candle(ASIA_END_UTC + timedelta(minutes=20), high=1.0905, low=1.0855),
+        ]
+        result = compute_sweep_result(ses, post)
+        self.assertEqual(result["direction"], "DOWN")
+        self.assertTrue(result.get("reentered"))
+        self.assertFalse(result.get("confirmed"))
+        self.assertAlmostEqual(result["first_sweep_level"], 1.0850)
+
+
+# ---------------------------------------------------------------------------
+# D. Full trigger: sweep + re-entry + confirm
+# ---------------------------------------------------------------------------
+
+class TestFullTrigger(unittest.TestCase):
+
+    def test_up_trigger(self):
+        """Complete UP sweep sequence triggers correctly."""
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        post = [
+            # Sweep starts: first wick above session_high
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.1010, low=1.1002),
+            # Sweep extends (still above session_high)
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1025, low=1.1005),
+            make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.1030, low=1.1003),
+            # Re-entry: low <= session_high=1.1000 → sweep_end_ts, locks first_sweep_level=1.1030
+            make_candle(ASIA_END_UTC + timedelta(minutes=20), high=1.1020, low=1.0995),
+            # Post-reentry – not a confirm yet
+            make_candle(ASIA_END_UTC + timedelta(minutes=25), high=1.1028, low=1.0985),
+            # CONFIRM: high > first_sweep_level=1.1030
+            make_candle(ASIA_END_UTC + timedelta(minutes=30), high=1.1035, low=1.0990),
+        ]
+        result = compute_sweep_result(ses, post)
+
         self.assertTrue(result.get("confirmed"), f"Expected confirmed=True: {result}")
         self.assertEqual(result["direction"], "UP")
         self.assertAlmostEqual(result["session_high"], 1.1000)
-        self.assertAlmostEqual(result["first_break_level"], 1.1010)
-        self.assertAlmostEqual(result["confirm_break_level"], 1.1015)
-        self.assertEqual(result["confirm_break_ts"], ASIA_END + timedelta(minutes=15))
+        self.assertAlmostEqual(result["session_low"],  1.0900)
+        self.assertEqual(result["sweep_start_ts"],  ASIA_END_UTC + timedelta(minutes=5))
+        self.assertAlmostEqual(result["first_sweep_level"], 1.1030)  # NOT 1.1010
+        self.assertEqual(result["sweep_end_ts"],    ASIA_END_UTC + timedelta(minutes=20))
+        self.assertAlmostEqual(result["confirm_break_level"], 1.1035)
+        self.assertEqual(result["confirm_break_ts"], ASIA_END_UTC + timedelta(minutes=30))
 
-    def test_down_confirm_triggers(self):
-        """First break DOWN, then a later candle goes lower -> confirmed=True."""
+    def test_down_trigger(self):
+        """Complete DOWN sweep sequence triggers correctly."""
         ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-
         post = [
-            make_candle(ASIA_END + timedelta(minutes=5),  high=1.0960, low=1.0890),  # first break DOWN
-            make_candle(ASIA_END + timedelta(minutes=10), high=1.0970, low=1.0895),  # above 1.0890
-            make_candle(ASIA_END + timedelta(minutes=15), high=1.0965, low=1.0885),  # CONFIRM (<1.0890)
+            # Sweep starts below session_low
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.0895, low=1.0880),
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.0885, low=1.0865),
+            make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.0880, low=1.0855),
+            # Re-entry: high >= session_low=1.0900
+            make_candle(ASIA_END_UTC + timedelta(minutes=20), high=1.0910, low=1.0870),
+            # Post-reentry
+            make_candle(ASIA_END_UTC + timedelta(minutes=25), high=1.0908, low=1.0862),
+            # CONFIRM: low < first_sweep_level=1.0855
+            make_candle(ASIA_END_UTC + timedelta(minutes=30), high=1.0900, low=1.0850),
         ]
+        result = compute_sweep_result(ses, post)
 
-        result = compute_session_result(ses, post)
-        self.assertIsNotNone(result)
         self.assertTrue(result.get("confirmed"))
         self.assertEqual(result["direction"], "DOWN")
-        self.assertAlmostEqual(result["first_break_level"], 1.0890)
-        self.assertAlmostEqual(result["confirm_break_level"], 1.0885)
+        self.assertAlmostEqual(result["first_sweep_level"], 1.0855)  # NOT 1.0880
+        self.assertEqual(result["sweep_end_ts"], ASIA_END_UTC + timedelta(minutes=20))
+        self.assertAlmostEqual(result["confirm_break_level"], 1.0850)
 
-    def test_confirm_candle_must_be_strictly_after_first_break(self):
-        """A candle at the SAME timestamp as first_break does not confirm."""
+
+# ---------------------------------------------------------------------------
+# D2. KEY FIX: first_sweep_level must be the extreme of the ENTIRE sweep move
+# ---------------------------------------------------------------------------
+
+class TestFirstSweepLevelIsExtreme(unittest.TestCase):
+    """
+    Critical regression test for the KEY FIX:
+    first_sweep_level must be the MAX high (UP) or MIN low (DOWN) across ALL
+    candles during the sweep move, not just the first candle that breaks the
+    session level.
+    """
+
+    def test_up_sweep_level_is_max_of_all_sweep_candles(self):
+        """
+        Three candles break session_high with increasing highs.
+        first_sweep_level must be the highest of all three, not 1.1010.
+        """
         ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-
-        fb_ts = ASIA_END + timedelta(minutes=5)
         post = [
-            make_candle(fb_ts, high=1.1050, low=1.0950),  # first break, also a "confirm" but same ts
+            # Candle 1: first break (high=1.1010)
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.1010, low=1.1001),
+            # Candle 2: extends sweep (high=1.1020)
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1020, low=1.1005),
+            # Candle 3: extends sweep further (high=1.1035)
+            make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.1035, low=1.1008),
+            # Candle 4: re-entry (low <= session_high=1.1000)
+            make_candle(ASIA_END_UTC + timedelta(minutes=20), high=1.1025, low=1.0995),
+            # Candle 5: confirm (high > 1.1035)
+            make_candle(ASIA_END_UTC + timedelta(minutes=25), high=1.1040, low=1.1010),
         ]
+        result = compute_sweep_result(ses, post)
 
-        result = compute_session_result(ses, post)
-        # The single candle that breaks also has the first_break_ts; no LATER candle exists
-        self.assertIsNotNone(result)
-        self.assertFalse(result.get("confirmed", True),
-                         "Confirm must require a strictly later candle")
+        # KEY ASSERTION: first_sweep_level must be 1.1035, not 1.1010
+        self.assertAlmostEqual(
+            result["first_sweep_level"], 1.1035,
+            msg="first_sweep_level must be the MAX wick across the entire sweep, not 1.1010",
+        )
+        self.assertTrue(result.get("confirmed"))
+        self.assertAlmostEqual(result["confirm_break_level"], 1.1040)
+
+    def test_down_sweep_level_is_min_of_all_sweep_candles(self):
+        """
+        Three candles break session_low with lower lows.
+        first_sweep_level must be the lowest of all three, not 1.0890.
+        """
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        post = [
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.0895, low=1.0890),
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.0890, low=1.0875),
+            make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.0880, low=1.0860),
+            # Re-entry
+            make_candle(ASIA_END_UTC + timedelta(minutes=20), high=1.0910, low=1.0875),
+            # Confirm
+            make_candle(ASIA_END_UTC + timedelta(minutes=25), high=1.0905, low=1.0855),
+        ]
+        result = compute_sweep_result(ses, post)
+
+        self.assertAlmostEqual(
+            result["first_sweep_level"], 1.0860,
+            msg="first_sweep_level must be MIN wick across entire sweep, not 1.0890",
+        )
+        self.assertTrue(result.get("confirmed"))
+        self.assertAlmostEqual(result["confirm_break_level"], 1.0855)
+
+    def test_reentry_candle_high_included_in_up_sweep_extreme(self):
+        """
+        If the re-entry candle (low <= session_high) itself has the highest
+        wick of the sweep, first_sweep_level must include that candle's high.
+        """
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        post = [
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.1010, low=1.1002),
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1018, low=1.1005),
+            # Re-entry candle: low=1.0995 <= 1.1000, but high=1.1040 is the real extreme
+            make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.1040, low=1.0995),
+            # Confirm
+            make_candle(ASIA_END_UTC + timedelta(minutes=20), high=1.1045, low=1.1010),
+        ]
+        result = compute_sweep_result(ses, post)
+
+        # The re-entry candle (t+15) contributes its high=1.1040 to sweep_high
+        self.assertAlmostEqual(result["first_sweep_level"], 1.1040)
+        self.assertEqual(result["sweep_end_ts"], ASIA_END_UTC + timedelta(minutes=15))
+        self.assertTrue(result.get("confirmed"))
+
+    def test_single_candle_sweep_and_reentry_with_later_confirm(self):
+        """
+        A single candle breaks high AND has low <= session_high (spike candle).
+        Sweep start and sweep end are both at t+5.
+        Confirm must be on a STRICTLY LATER candle.
+        """
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        t_sweep = ASIA_END_UTC + timedelta(minutes=5)
+        post = [
+            # One candle: breaks high AND re-enters (wick spike)
+            # sweep_start_ts = t_sweep; re-entry check is c["ts"] > sweep_start_ts
+            # so re-entry is NOT triggered by this candle itself
+            make_candle(t_sweep,                              high=1.1050, low=1.0950),
+            # Next candle re-enters: low <= 1.1000
+            make_candle(t_sweep + timedelta(minutes=5),       high=1.1040, low=1.0990),
+            # Confirm: high > 1.1050
+            make_candle(t_sweep + timedelta(minutes=10),      high=1.1055, low=1.0985),
+        ]
+        result = compute_sweep_result(ses, post)
+
+        # sweep_end_ts is the SECOND candle (first strictly-later re-entry)
+        self.assertEqual(result["sweep_end_ts"], t_sweep + timedelta(minutes=5))
+        # first_sweep_level includes the re-entry candle's high too (1.1050 vs 1.1040)
+        self.assertAlmostEqual(result["first_sweep_level"], 1.1050)
+        self.assertTrue(result.get("confirmed"))
+        self.assertEqual(result["confirm_break_ts"], t_sweep + timedelta(minutes=10))
+
+
+# ---------------------------------------------------------------------------
+# E. Both directions break; UP first → direction=UP
+# ---------------------------------------------------------------------------
+
+class TestBothSidesBreakUpFirst(unittest.TestCase):
+
+    def test_up_breaks_before_down(self):
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        post = [
+            # UP break at t+5
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.1010, low=1.0910),
+            # DOWN break at t+10 (later)
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1015, low=1.0890),
+            # Re-entry for UP direction: low <= 1.1000
+            make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.1020, low=1.0990),
+            # Confirm UP
+            make_candle(ASIA_END_UTC + timedelta(minutes=20), high=1.1025, low=1.1005),
+        ]
+        result = compute_sweep_result(ses, post)
+        self.assertEqual(result["direction"], "UP")
+        self.assertEqual(result["sweep_start_ts"], ASIA_END_UTC + timedelta(minutes=5))
+
+    def test_up_and_down_same_candle_up_wins(self):
+        """Same candle breaks both high and low → UP wins as tiebreaker."""
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        t0 = ASIA_END_UTC + timedelta(minutes=5)
+        post = [
+            # Wide candle: high > 1.1000 AND low < 1.0900 at same timestamp
+            make_candle(t0,                              high=1.1020, low=1.0880),
+            # Re-entry for UP: low <= session_high=1.1000
+            make_candle(t0 + timedelta(minutes=5),       high=1.1030, low=1.0990),
+            # Confirm UP
+            make_candle(t0 + timedelta(minutes=10),      high=1.1035, low=1.1000),
+        ]
+        result = compute_sweep_result(ses, post)
+        self.assertEqual(result["direction"], "UP",
+                         "UP must win when both sides break on the same candle")
+        self.assertEqual(result["sweep_start_ts"], t0)
+
+
+# ---------------------------------------------------------------------------
+# F. Both directions break; DOWN first → direction=DOWN
+# ---------------------------------------------------------------------------
+
+class TestBothSidesBreakDownFirst(unittest.TestCase):
+
+    def test_down_breaks_before_up(self):
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        post = [
+            # DOWN break at t+5
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.0995, low=1.0885),
+            # UP break at t+10 (later)
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1010, low=1.0890),
+            # Re-entry for DOWN: high >= 1.0900
+            make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.0905, low=1.0875),
+            # Confirm DOWN
+            make_candle(ASIA_END_UTC + timedelta(minutes=20), high=1.0900, low=1.0880),
+        ]
+        result = compute_sweep_result(ses, post)
+        self.assertEqual(result["direction"], "DOWN")
+        self.assertEqual(result["sweep_start_ts"], ASIA_END_UTC + timedelta(minutes=5))
+
+
+# ---------------------------------------------------------------------------
+# G. Confirm candle must be strictly after sweep_end_ts
+# ---------------------------------------------------------------------------
+
+class TestConfirmRequiresStrictlyLaterCandle(unittest.TestCase):
+
+    def test_candle_at_sweep_end_ts_does_not_confirm(self):
+        """
+        If a candle has the same timestamp as sweep_end_ts, it cannot be the
+        confirm candle even if its high > first_sweep_level.
+        """
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        t_sweep_end = ASIA_END_UTC + timedelta(minutes=15)
+        post = [
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.1010, low=1.1002),
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1020, low=1.1005),
+            # Re-entry AND high > sweep_level – but this is sweep_end candle, not confirm
+            make_candle(t_sweep_end, high=1.1025, low=1.0995),
+        ]
+        result = compute_sweep_result(ses, post)
+
+        # Re-entry happened at t_sweep_end
+        self.assertTrue(result.get("reentered"))
+        # But no strictly-LATER candle exists to confirm
+        self.assertFalse(result.get("confirmed"),
+                         "Candle at sweep_end_ts must not confirm")
+
+    def test_confirm_at_next_candle_after_reentry(self):
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        t_reentry = ASIA_END_UTC + timedelta(minutes=15)
+        t_confirm  = ASIA_END_UTC + timedelta(minutes=20)
+        post = [
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.1010, low=1.1002),
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1020, low=1.1005),
+            # Re-entry
+            make_candle(t_reentry, high=1.1025, low=1.0995),
+            # Confirm – strictly later
+            make_candle(t_confirm, high=1.1030, low=1.0998),
+        ]
+        result = compute_sweep_result(ses, post)
+        self.assertTrue(result.get("confirmed"))
+        self.assertEqual(result["confirm_break_ts"], t_confirm)
+
+    def test_down_confirm_strictly_after_reentry(self):
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        t_reentry = ASIA_END_UTC + timedelta(minutes=20)
+        post = [
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.0895, low=1.0875),
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.0885, low=1.0860),
+            make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.0882, low=1.0858),
+            # Re-entry: high >= session_low=1.0900
+            make_candle(t_reentry, high=1.0905, low=1.0862),
+            # Confirm: low < first_sweep_level=1.0858
+            make_candle(ASIA_END_UTC + timedelta(minutes=25), high=1.0900, low=1.0855),
+        ]
+        result = compute_sweep_result(ses, post)
+        self.assertTrue(result.get("confirmed"))
+        self.assertAlmostEqual(result["first_sweep_level"], 1.0858)
+        self.assertEqual(result["sweep_end_ts"], t_reentry)
+        self.assertEqual(result["confirm_break_ts"], ASIA_END_UTC + timedelta(minutes=25))
+
+
+# ---------------------------------------------------------------------------
+# H. Session high/low use wicks (high / low, not close)
+# ---------------------------------------------------------------------------
+
+class TestSessionExtremeFromWicks(unittest.TestCase):
 
     def test_session_high_low_from_wicks(self):
-        """session_high and session_low use candle.high and candle.low (wicks)."""
-        # Session candles have higher highs and lower lows than their bodies
         ses = [
-            make_candle(ASIA_START + timedelta(minutes=0),  open_=1.05, high=1.12, low=1.08, close=1.10),
-            make_candle(ASIA_START + timedelta(minutes=5),  open_=1.10, high=1.11, low=1.07, close=1.09),
-            make_candle(ASIA_START + timedelta(minutes=10), open_=1.09, high=1.10, low=1.09, close=1.10),
+            make_candle(ASIA_START_UTC + timedelta(minutes=0),
+                        open_=1.05, high=1.1200, low=1.0700, close=1.10),
+            make_candle(ASIA_START_UTC + timedelta(minutes=5),
+                        open_=1.10, high=1.1150, low=1.0800, close=1.09),
         ]
-        post = post_session_candles_from(0, count=3, high=1.0950, low=1.0950)
-        result = compute_session_result(ses, post)
-        self.assertIsNotNone(result)
-        self.assertAlmostEqual(result["session_high"], 1.12, places=5)
-        self.assertAlmostEqual(result["session_low"],  1.07, places=5)
+        post = post_candles_from(0, count=3, high=1.1150, low=1.0750)
+        result = compute_sweep_result(ses, post)
+        self.assertAlmostEqual(result["session_high"], 1.1200)
+        self.assertAlmostEqual(result["session_low"],  1.0700)
 
 
 # ---------------------------------------------------------------------------
-# 4a. Both sides break – first chronologically wins
+# I. find_relevant_sessions – only ended sessions with data
 # ---------------------------------------------------------------------------
 
-class TestBothSidesBreak(unittest.TestCase):
+def _make_candles_for_utc_range(start_dt: datetime, end_dt: datetime,
+                                 step_min: int = 5) -> List[Dict]:
+    candles = []
+    ts = start_dt
+    while ts < end_dt:
+        candles.append(make_candle(ts))
+        ts += timedelta(minutes=step_min)
+    return candles
 
-    def test_up_breaks_first(self):
-        """UP break happens at minute 5, DOWN break at minute 10 -> direction=UP."""
-        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-
-        post = [
-            make_candle(ASIA_END + timedelta(minutes=5),  high=1.1010, low=1.0910),  # UP break first
-            make_candle(ASIA_END + timedelta(minutes=10), high=1.1005, low=1.0885),  # DOWN break later
-            make_candle(ASIA_END + timedelta(minutes=15), high=1.1015, low=1.0890),  # UP confirm
-        ]
-
-        result = compute_session_result(ses, post)
-        self.assertIsNotNone(result)
-        self.assertEqual(result["direction"], "UP")
-        self.assertEqual(result["first_break_ts"], ASIA_END + timedelta(minutes=5))
-        self.assertTrue(result.get("confirmed"))
-        # Confirm is for UP direction (high > first_break_level=1.1010)
-        self.assertAlmostEqual(result["confirm_break_level"], 1.1015)
-
-    def test_down_breaks_first(self):
-        """DOWN break happens at minute 5, UP break at minute 10 -> direction=DOWN."""
-        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-
-        post = [
-            make_candle(ASIA_END + timedelta(minutes=5),  high=1.0990, low=1.0885),  # DOWN break first
-            make_candle(ASIA_END + timedelta(minutes=10), high=1.1010, low=1.0890),  # UP break later
-            make_candle(ASIA_END + timedelta(minutes=15), high=1.0980, low=1.0880),  # DOWN confirm
-        ]
-
-        result = compute_session_result(ses, post)
-        self.assertIsNotNone(result)
-        self.assertEqual(result["direction"], "DOWN")
-        self.assertEqual(result["first_break_ts"], ASIA_END + timedelta(minutes=5))
-        self.assertTrue(result.get("confirmed"))
-        self.assertAlmostEqual(result["confirm_break_level"], 1.0880)
-
-
-# ---------------------------------------------------------------------------
-# 4b. Both break at the SAME candle -> UP wins (tiebreaker)
-# ---------------------------------------------------------------------------
-
-class TestBothBreakSameCandle(unittest.TestCase):
-
-    def test_up_wins_when_same_candle(self):
-        """Wide candle breaks both session_high and session_low simultaneously -> UP wins."""
-        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-
-        fb_ts = ASIA_END + timedelta(minutes=5)
-        post = [
-            # Same candle: high > 1.1000 AND low < 1.0900
-            make_candle(fb_ts, high=1.1020, low=1.0880),
-            # Later candle confirms UP
-            make_candle(ASIA_END + timedelta(minutes=10), high=1.1025, low=1.0890),
-        ]
-
-        result = compute_session_result(ses, post)
-        self.assertIsNotNone(result)
-        self.assertEqual(result["direction"], "UP",
-                         "When both break same candle, UP should win as tiebreaker")
-        self.assertEqual(result["first_break_ts"], fb_ts)
-        self.assertTrue(result.get("confirmed"))
-
-    def test_no_confirm_if_only_one_candle(self):
-        """Wide candle breaks both sides but is the only candle -> not confirmed."""
-        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-
-        post = [make_candle(ASIA_END + timedelta(minutes=5), high=1.1020, low=1.0880)]
-
-        result = compute_session_result(ses, post)
-        self.assertFalse(result.get("confirmed", True))
-
-
-# ---------------------------------------------------------------------------
-# 5. Idempotency – triggered flag prevents re-run from triggering again
-# ---------------------------------------------------------------------------
-
-class TestIdempotency(unittest.TestCase):
-    """
-    The idempotency guarantee in the detector comes from the DB layer
-    (triggered_at is set before the email is sent, and is checked at the
-    start of every run).  Here we verify that `compute_session_result` is
-    pure and deterministic: running it twice with the same candles yields
-    the same result.
-    """
-
-    def test_same_result_on_rerun(self):
-        """compute_session_result is deterministic for fixed candles."""
-        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-        post = [
-            make_candle(ASIA_END + timedelta(minutes=5),  high=1.1010, low=1.0950),
-            make_candle(ASIA_END + timedelta(minutes=15), high=1.1015, low=1.0945),
-        ]
-
-        r1 = compute_session_result(ses, post)
-        r2 = compute_session_result(ses, post)
-
-        self.assertEqual(r1["direction"],          r2["direction"])
-        self.assertEqual(r1["first_break_ts"],     r2["first_break_ts"])
-        self.assertEqual(r1["confirm_break_ts"],   r2["confirm_break_ts"])
-        self.assertEqual(r1["confirm_break_level"],r2["confirm_break_level"])
-        self.assertTrue(r1["confirmed"])
-        self.assertTrue(r2["confirmed"])
-
-    def test_no_break_is_stable(self):
-        """A no-break result is also stable across multiple runs."""
-        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-        post = post_session_candles_from(0, count=10, high=1.0980, low=1.0920)
-
-        r1 = compute_session_result(ses, post)
-        r2 = compute_session_result(ses, post)
-
-        self.assertTrue(r1.get("no_break"))
-        self.assertTrue(r2.get("no_break"))
-
-
-# ---------------------------------------------------------------------------
-# 6. find_relevant_sessions
-# ---------------------------------------------------------------------------
 
 class TestFindRelevantSessions(unittest.TestCase):
 
-    def _make_candles_for_date_range(self, start_dt: datetime, end_dt: datetime,
-                                     step_min: int = 5) -> List[Dict]:
-        candles = []
-        ts = start_dt
-        while ts < end_dt:
-            candles.append(make_candle(ts))
-            ts += timedelta(minutes=step_min)
-        return candles
-
-    def test_only_ended_sessions_returned(self):
-        """Sessions that have NOT ended (session_end > now_utc) are excluded."""
-        # Candles span SESSION_DATE 00:00–09:00 (Asia session day)
-        candles = self._make_candles_for_date_range(ASIA_START, ASIA_END)
-        # now_utc is BEFORE Asia session ends
-        now_utc = ASIA_START + timedelta(hours=4)
-        sessions = find_relevant_sessions(candles, now_utc)
-        # Asia session for SESSION_DATE has not ended yet
-        asia_sessions = [(s, d) for s, d in sessions if s == "asia" and d == SESSION_DATE]
-        self.assertEqual(len(asia_sessions), 0)
-
     def test_ended_session_included(self):
-        """A session that has ended is included."""
-        # Candles cover the full Asia session + post-session
-        candles = self._make_candles_for_date_range(ASIA_START, ASIA_END + timedelta(hours=2))
-        now_utc = ASIA_END + timedelta(hours=1)
+        candles = _make_candles_for_utc_range(ASIA_START_UTC, ASIA_END_UTC + timedelta(hours=2))
+        now_utc = ASIA_END_UTC + timedelta(hours=1)
         sessions = find_relevant_sessions(candles, now_utc)
-        asia_sessions = [(s, d) for s, d in sessions if s == "asia" and d == SESSION_DATE]
-        self.assertEqual(len(asia_sessions), 1)
+        asia = [(s, d) for s, d in sessions if s == "asia" and d == SESSION_DATE_IL]
+        self.assertEqual(len(asia), 1)
+
+    def test_session_not_ended_excluded(self):
+        candles = _make_candles_for_utc_range(ASIA_START_UTC, ASIA_END_UTC)
+        now_utc = ASIA_START_UTC + timedelta(hours=2)  # mid-session
+        sessions = find_relevant_sessions(candles, now_utc)
+        asia = [(s, d) for s, d in sessions if s == "asia" and d == SESSION_DATE_IL]
+        self.assertEqual(len(asia), 0)
 
     def test_multiple_sessions_detected(self):
-        """Both Asia and London sessions are detected when candles span both."""
-        # Candles from 00:00 to 18:00 UTC on SESSION_DATE
-        candles = self._make_candles_for_date_range(
-            ASIA_START,
-            datetime(2024, 1, 15, 18, 0),
-        )
-        now_utc = datetime(2024, 1, 15, 18, 0)
+        # Candles from Asia start to after London end
+        candles = _make_candles_for_utc_range(ASIA_START_UTC, LON_END_UTC + timedelta(hours=1))
+        now_utc = LON_END_UTC + timedelta(hours=1)
         sessions = find_relevant_sessions(candles, now_utc)
         session_types = {s for s, _ in sessions}
         self.assertIn("asia",   session_types)
         self.assertIn("london", session_types)
 
     def test_no_session_candles_excluded(self):
-        """A session date where no session candles exist is excluded."""
-        # Candles only during post-session hours (09:00–17:00), no Asia candles
-        candles = self._make_candles_for_date_range(ASIA_END, LON_END)
-        now_utc = LON_END + timedelta(hours=1)
+        # Candles only during post-session (no Asia window candles)
+        candles = _make_candles_for_utc_range(ASIA_END_UTC, LON_END_UTC)
+        now_utc = LON_END_UTC + timedelta(hours=1)
         sessions = find_relevant_sessions(candles, now_utc)
-        # Asia session has no candles in 00:00–09:00 -> not included
-        asia_sessions = [(s, d) for s, d in sessions if s == "asia" and d == SESSION_DATE]
-        self.assertEqual(len(asia_sessions), 0)
+        asia = [(s, d) for s, d in sessions if s == "asia" and d == SESSION_DATE_IL]
+        self.assertEqual(len(asia), 0)
 
 
 # ---------------------------------------------------------------------------
-# 7. _session_candles / _post_session_candles helpers
+# J. _session_window_utc – correct DST conversion for Asia/Jerusalem
+# ---------------------------------------------------------------------------
+
+class TestSessionWindowUTC(unittest.TestCase):
+
+    def test_asia_winter_window(self):
+        """Jan 15: Israel is UTC+2.  Asia 03:00–07:00 IL → 01:00–05:00 UTC."""
+        start, end = _session_window_utc("asia", date(2024, 1, 15))
+        self.assertEqual(start, datetime(2024, 1, 15, 1, 0))
+        self.assertEqual(end,   datetime(2024, 1, 15, 5, 0))
+
+    def test_london_winter_window(self):
+        """Jan 15: London 09:00–12:00 IL → 07:00–10:00 UTC."""
+        start, end = _session_window_utc("london", date(2024, 1, 15))
+        self.assertEqual(start, datetime(2024, 1, 15, 7, 0))
+        self.assertEqual(end,   datetime(2024, 1, 15, 10, 0))
+
+    def test_asia_summer_window(self):
+        """Jul 15: Israel is UTC+3 (DST).  Asia 03:00–07:00 IL → 00:00–04:00 UTC."""
+        start, end = _session_window_utc("asia", date(2024, 7, 15))
+        self.assertEqual(start, datetime(2024, 7, 15, 0, 0))
+        self.assertEqual(end,   datetime(2024, 7, 15, 4, 0))
+
+    def test_london_summer_window(self):
+        """Jul 15: London 09:00–12:00 IL → 06:00–09:00 UTC."""
+        start, end = _session_window_utc("london", date(2024, 7, 15))
+        self.assertEqual(start, datetime(2024, 7, 15, 6, 0))
+        self.assertEqual(end,   datetime(2024, 7, 15, 9, 0))
+
+
+# ---------------------------------------------------------------------------
+# K. _session_candles / _post_session_candles boundary rules
 # ---------------------------------------------------------------------------
 
 class TestCandlePartitioning(unittest.TestCase):
 
-    def test_session_candles_boundary_inclusive_start_exclusive_end(self):
-        """[start, end) boundary: candle at start is IN, candle at end is OUT."""
-        c_start = make_candle(ASIA_START)
-        c_mid   = make_candle(ASIA_START + timedelta(hours=4))
-        c_end   = make_candle(ASIA_END)        # This is at 09:00, excluded
-        c_post  = make_candle(ASIA_END + timedelta(minutes=5))
+    def test_session_candles_inclusive_start_exclusive_end(self):
+        c_start = make_candle(ASIA_START_UTC)
+        c_mid   = make_candle(ASIA_START_UTC + timedelta(hours=2))
+        c_end   = make_candle(ASIA_END_UTC)          # at end → excluded from session
+        c_post  = make_candle(ASIA_END_UTC + timedelta(minutes=5))
 
-        all_candles = [c_start, c_mid, c_end, c_post]
-        ses = _session_candles(all_candles, ASIA_START, ASIA_END)
-
+        ses = _session_candles([c_start, c_mid, c_end, c_post], ASIA_START_UTC, ASIA_END_UTC)
         self.assertIn(c_start, ses)
         self.assertIn(c_mid,   ses)
-        self.assertNotIn(c_end,  ses,  "Candle at session end time should be excluded")
+        self.assertNotIn(c_end,  ses)
         self.assertNotIn(c_post, ses)
 
-    def test_post_candles_start_from_session_end(self):
-        """Post-session candles include the candle at session_end time."""
-        c_in_session = make_candle(ASIA_END - timedelta(minutes=5))
-        c_at_end     = make_candle(ASIA_END)   # inclusive in post-session
-        c_after      = make_candle(ASIA_END + timedelta(minutes=5))
+    def test_post_candles_include_end_time(self):
+        c_pre    = make_candle(ASIA_END_UTC - timedelta(minutes=5))
+        c_at_end = make_candle(ASIA_END_UTC)          # inclusive in post
+        c_after  = make_candle(ASIA_END_UTC + timedelta(minutes=5))
 
-        all_candles = [c_in_session, c_at_end, c_after]
-        post = _post_session_candles(all_candles, ASIA_END)
-
-        self.assertNotIn(c_in_session, post)
+        post = _post_session_candles([c_pre, c_at_end, c_after], ASIA_END_UTC)
+        self.assertNotIn(c_pre, post)
         self.assertIn(c_at_end, post)
         self.assertIn(c_after,  post)
 
     def test_post_candles_sorted_oldest_first(self):
-        """Post-session candles are always returned oldest→newest."""
-        # Create in reverse order
         candles = [
-            make_candle(ASIA_END + timedelta(minutes=15)),
-            make_candle(ASIA_END + timedelta(minutes=5)),
-            make_candle(ASIA_END + timedelta(minutes=10)),
+            make_candle(ASIA_END_UTC + timedelta(minutes=15)),
+            make_candle(ASIA_END_UTC + timedelta(minutes=5)),
+            make_candle(ASIA_END_UTC + timedelta(minutes=10)),
         ]
-        post = _post_session_candles(candles, ASIA_END)
-        timestamps = [c["timestamp"] for c in post]
-        self.assertEqual(timestamps, sorted(timestamps))
+        post = _post_session_candles(candles, ASIA_END_UTC)
+        ts = [c["timestamp"] for c in post]
+        self.assertEqual(ts, sorted(ts))
 
 
 # ---------------------------------------------------------------------------
-# 8. Edge: confirm break must be STRICTLY after first_break_ts
+# L. Idempotency – compute_sweep_result is deterministic
 # ---------------------------------------------------------------------------
 
-class TestConfirmMustBeStrictlyLater(unittest.TestCase):
+class TestIdempotency(unittest.TestCase):
 
-    def test_candle_at_first_break_ts_does_not_confirm(self):
-        """If a candle has the exact same ts as first_break, it is NOT the confirm."""
+    def test_same_result_on_repeated_calls(self):
         ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-        fb_ts = ASIA_END + timedelta(minutes=5)
-
-        # Two candles with the same timestamp (pathological case)
         post = [
-            make_candle(fb_ts, high=1.1050, low=1.0950),  # first break
-            make_candle(fb_ts, high=1.1060, low=1.0940),  # same ts – should NOT confirm
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.1010, low=1.1002),
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1030, low=1.1005),
+            make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.1020, low=1.0995),
+            make_candle(ASIA_END_UTC + timedelta(minutes=20), high=1.1035, low=1.0998),
         ]
+        r1 = compute_sweep_result(ses, post)
+        r2 = compute_sweep_result(ses, post)
 
-        result = compute_session_result(ses, post)
-        # First candle triggers first break; second has same ts so cannot confirm
-        self.assertFalse(result.get("confirmed", True))
+        self.assertEqual(r1["direction"],            r2["direction"])
+        self.assertEqual(r1["sweep_start_ts"],       r2["sweep_start_ts"])
+        self.assertEqual(r1["first_sweep_level"],    r2["first_sweep_level"])
+        self.assertEqual(r1["sweep_end_ts"],         r2["sweep_end_ts"])
+        self.assertEqual(r1["confirm_break_ts"],     r2["confirm_break_ts"])
+        self.assertEqual(r1["confirm_break_level"],  r2["confirm_break_level"])
+        self.assertTrue(r1["confirmed"])
 
-    def test_confirm_at_next_candle(self):
-        """Confirm is detected at the very next candle after first break."""
-        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
-
-        t1 = ASIA_END + timedelta(minutes=5)
-        t2 = ASIA_END + timedelta(minutes=10)
-
-        post = [
-            make_candle(t1, high=1.1010, low=1.0950),  # first break
-            make_candle(t2, high=1.1020, low=1.0945),  # confirm
-        ]
-
-        result = compute_session_result(ses, post)
-        self.assertTrue(result.get("confirmed"))
-        self.assertEqual(result["confirm_break_ts"], t2)
+    def test_no_break_is_stable(self):
+        ses  = asia_session_candles()
+        post = post_candles_from(0, count=10, high=1.0980, low=1.0920)
+        r1 = compute_sweep_result(ses, post)
+        r2 = compute_sweep_result(ses, post)
+        self.assertTrue(r1.get("no_break"))
+        self.assertTrue(r2.get("no_break"))
 
 
 # ---------------------------------------------------------------------------
-# 9. Session window configuration sanity
+# M. Session config sanity
 # ---------------------------------------------------------------------------
 
 class TestSessionConfig(unittest.TestCase):
 
-    def test_asia_session_window(self):
-        start, end = _session_window("asia", SESSION_DATE)
-        self.assertEqual(start, datetime(2024, 1, 15, 0, 0))
-        self.assertEqual(end,   datetime(2024, 1, 15, 9, 0))
-
-    def test_london_session_window(self):
-        start, end = _session_window("london", SESSION_DATE)
-        self.assertEqual(start, datetime(2024, 1, 15, 8, 0))
-        self.assertEqual(end,   datetime(2024, 1, 15, 17, 0))
-
     def test_known_session_types(self):
-        self.assertIn("asia",   SessionBreakConfig.SESSIONS)
-        self.assertIn("london", SessionBreakConfig.SESSIONS)
+        self.assertIn("asia",   SessionSweepConfig.SESSIONS)
+        self.assertIn("london", SessionSweepConfig.SESSIONS)
+
+    def test_asia_session_times_il(self):
+        cfg = SessionSweepConfig.SESSIONS["asia"]
+        self.assertEqual(cfg["start_h"], 3)
+        self.assertEqual(cfg["end_h"],   7)
+
+    def test_london_session_times_il(self):
+        cfg = SessionSweepConfig.SESSIONS["london"]
+        self.assertEqual(cfg["start_h"],  9)
+        self.assertEqual(cfg["end_h"],   12)
 
 
 # ---------------------------------------------------------------------------
