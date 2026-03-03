@@ -52,7 +52,7 @@ import json
 import logging
 import os
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 # ── allow running from project root or scripts/ directory ────────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -67,7 +67,7 @@ sys.modules.setdefault("database", type(sys)("database"))
 sys.modules["database"].db = _db_mock
 sys.modules.setdefault("email_sender", MagicMock())
 
-from services.forex_data_provider import forex_data_provider
+from services.forex_data_provider import forex_data_provider, normalize_symbol
 from services.session_break_detector import (
     _session_window_utc,
     _session_candles,
@@ -142,6 +142,16 @@ def main() -> None:
     except KeyError:
         sys.exit(f"ERROR: unknown session type '{args.session_type}'")
 
+    # ── resolve and print normalized symbol ─────────────────────────────
+    _METAL_CODES = frozenset({"XAU", "XAG", "XPT", "XPD"})
+    _norm_sym, _norm_err = normalize_symbol(args.symbol)
+    _td_sym = _norm_sym if _norm_sym else args.symbol.upper().strip()
+    if _norm_sym:
+        _base, _quote = _norm_sym.split("/")
+        _asset_class = "forex/metal" if (_base in _METAL_CODES or _quote in _METAL_CODES) else "forex"
+    else:
+        _asset_class = "unknown"
+
     print(
         f"\nFetching {args.candles} × 5M candles  "
         f"symbol={args.symbol}  session={args.session_type}  date={session_date}",
@@ -149,6 +159,12 @@ def main() -> None:
     )
     print(
         f"Session UTC window: {start_utc.isoformat()} → {end_utc.isoformat()}",
+        flush=True,
+    )
+    # 1) Normalized symbol sent to Twelve Data
+    print(
+        f"symbol_raw={args.symbol!r}  normalized={_td_sym!r}  "
+        f"provider=twelvedata  asset_class={_asset_class}",
         flush=True,
     )
 
@@ -163,10 +179,21 @@ def main() -> None:
             "Check symbol spelling, API key, and rate limits."
         )
 
-    print(f"Fetched {len(all_candles)} candles  "
-          f"[{all_candles[0]['timestamp'].isoformat()} → "
-          f"{all_candles[-1]['timestamp'].isoformat()}]",
-          flush=True)
+    # 2) First and last fetched candles from Twelve Data (ts with UTC tzinfo)
+    _fc = all_candles[0]
+    _lc = all_candles[-1]
+    _fc_ts = _fc["timestamp"].replace(tzinfo=timezone.utc)
+    _lc_ts = _lc["timestamp"].replace(tzinfo=timezone.utc)
+    print(
+        f"Fetched {len(all_candles)} candles\n"
+        f"  first_candle: ts={_fc_ts.isoformat()}  "
+        f"open={_fc['open']:.5f}  high={_fc['high']:.5f}  "
+        f"low={_fc['low']:.5f}  close={_fc['close']:.5f}\n"
+        f"  last_candle:  ts={_lc_ts.isoformat()}  "
+        f"open={_lc['open']:.5f}  high={_lc['high']:.5f}  "
+        f"low={_lc['low']:.5f}  close={_lc['close']:.5f}",
+        flush=True,
+    )
 
     # ── split into session + post-session ────────────────────────────────
     ses_candles  = _session_candles(all_candles, start_utc, end_utc)
@@ -179,9 +206,18 @@ def main() -> None:
             f"Try fetching more candles (--candles) or a more recent date."
         )
 
+    # 3) First and last candles inside the session window (ts with UTC tzinfo)
+    _sorted_ses = sorted(ses_candles, key=lambda c: c["timestamp"])
+    _fs = _sorted_ses[0]
+    _ls = _sorted_ses[-1]
+    _fs_ts = _fs["timestamp"].replace(tzinfo=timezone.utc)
+    _ls_ts = _ls["timestamp"].replace(tzinfo=timezone.utc)
     print(
-        f"Session candles: {len(ses_candles)}  "
-        f"Post-session candles: {len(post_candles)}",
+        f"Session candles: {len(ses_candles)}  Post-session candles: {len(post_candles)}\n"
+        f"  first_session_candle: ts={_fs_ts.isoformat()}  "
+        f"high={_fs['high']:.5f}  low={_fs['low']:.5f}\n"
+        f"  last_session_candle:  ts={_ls_ts.isoformat()}  "
+        f"high={_ls['high']:.5f}  low={_ls['low']:.5f}",
         flush=True,
     )
 
