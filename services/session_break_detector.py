@@ -630,6 +630,70 @@ class SessionBreakDetector:
         if not ses_candles:
             return False, False
 
+        # ── DEBUG: London session detailed inspection ──────────────────────
+        if session_type == "london":
+            # 1) Session window in UTC and Israel time
+            start_il = _utc_to_il(start_utc)
+            end_il   = _utc_to_il(end_utc)
+            logger.info(
+                "%s[DEBUG_LONDON] symbol=%s date=%s\n"
+                "  session_start_utc    = %s\n"
+                "  session_end_utc      = %s\n"
+                "  session_start_israel = %s\n"
+                "  session_end_israel   = %s",
+                LP, symbol, session_date,
+                start_utc.isoformat(),
+                end_utc.isoformat(),
+                start_il.isoformat(),
+                end_il.isoformat(),
+            )
+
+            # 2) First/last session candle timestamps (with UTC tzinfo) + count
+            _sorted_ses = sorted(ses_candles, key=lambda c: c["timestamp"])
+            _first_ts_utc = _sorted_ses[0]["timestamp"].replace(tzinfo=timezone.utc)
+            _last_ts_utc  = _sorted_ses[-1]["timestamp"].replace(tzinfo=timezone.utc)
+            logger.info(
+                "%s[DEBUG_LONDON] symbol=%s candle_membership\n"
+                "  first_session_candle_ts = %s  (tzinfo=%s)\n"
+                "  last_session_candle_ts  = %s  (tzinfo=%s)\n"
+                "  total_candle_count      = %d",
+                LP, symbol,
+                _first_ts_utc.isoformat(), _first_ts_utc.tzinfo,
+                _last_ts_utc.isoformat(),  _last_ts_utc.tzinfo,
+                len(_sorted_ses),
+            )
+
+            # 3) Top 5 candle highs within the session
+            _top5_highs = sorted(ses_candles, key=lambda c: c["high"], reverse=True)[:5]
+            _highs_lines = "\n".join(
+                "  [{i}] ts={ts}  high={h:.5f}".format(
+                    i=idx + 1,
+                    ts=c["timestamp"].replace(tzinfo=timezone.utc).isoformat(),
+                    h=c["high"],
+                )
+                for idx, c in enumerate(_top5_highs)
+            )
+            logger.info(
+                "%s[DEBUG_LONDON] symbol=%s top5_candle_highs:\n%s",
+                LP, symbol, _highs_lines,
+            )
+
+            # 4) Bottom 5 candle lows within the session
+            _bot5_lows = sorted(ses_candles, key=lambda c: c["low"])[:5]
+            _lows_lines = "\n".join(
+                "  [{i}] ts={ts}  low={l:.5f}".format(
+                    i=idx + 1,
+                    ts=c["timestamp"].replace(tzinfo=timezone.utc).isoformat(),
+                    l=c["low"],
+                )
+                for idx, c in enumerate(_bot5_lows)
+            )
+            logger.info(
+                "%s[DEBUG_LONDON] symbol=%s bottom5_candle_lows:\n%s",
+                LP, symbol, _lows_lines,
+            )
+        # ── END DEBUG: London session ──────────────────────────────────────
+
         session_high = max(c["high"] for c in ses_candles)
         session_low  = min(c["low"]  for c in ses_candles)
 
