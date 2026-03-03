@@ -72,6 +72,7 @@ from services.session_break_detector import (
     _session_window_utc,
     _session_candles,
     _post_session_candles,
+    _utc_to_il,
 )
 from services.session_sweep_replay import replay_sweep, render_table
 
@@ -157,8 +158,12 @@ def main() -> None:
         f"symbol={args.symbol}  session={args.session_type}  date={session_date}",
         flush=True,
     )
+    _rp_start_il = _utc_to_il(start_utc)
+    _rp_end_il   = _utc_to_il(end_utc)
     print(
-        f"Session UTC window: {start_utc.isoformat()} → {end_utc.isoformat()}",
+        f"Session UTC window: {start_utc.isoformat()} → {end_utc.isoformat()}\n"
+        f"Session IL  window: {_rp_start_il.isoformat()} → {_rp_end_il.isoformat()}\n"
+        f"Inclusion rule: session_start <= candle.ts < session_end  (end is EXCLUSIVE)",
         flush=True,
     )
     # 1) Normalized symbol sent to Twelve Data
@@ -212,12 +217,24 @@ def main() -> None:
     _ls = _sorted_ses[-1]
     _fs_ts = _fs["timestamp"].replace(tzinfo=timezone.utc)
     _ls_ts = _ls["timestamp"].replace(tzinfo=timezone.utc)
+    _rp_top5h = sorted(ses_candles, key=lambda c: c["high"], reverse=True)[:5]
+    _rp_bot5l = sorted(ses_candles, key=lambda c: c["low"])[:5]
     print(
         f"Session candles: {len(ses_candles)}  Post-session candles: {len(post_candles)}\n"
         f"  first_session_candle: ts={_fs_ts.isoformat()}  "
         f"high={_fs['high']:.5f}  low={_fs['low']:.5f}\n"
         f"  last_session_candle:  ts={_ls_ts.isoformat()}  "
-        f"high={_ls['high']:.5f}  low={_ls['low']:.5f}",
+        f"high={_ls['high']:.5f}  low={_ls['low']:.5f}\n"
+        f"  top5_highs_in_session  :\n"
+        + "".join(
+            f"    [{i+1}] ts={c['timestamp'].replace(tzinfo=timezone.utc).isoformat()}  high={c['high']:.5f}\n"
+            for i, c in enumerate(_rp_top5h)
+        )
+        + f"  bottom5_lows_in_session:\n"
+        + "".join(
+            f"    [{i+1}] ts={c['timestamp'].replace(tzinfo=timezone.utc).isoformat()}  low={c['low']:.5f}\n"
+            for i, c in enumerate(_rp_bot5l)
+        ).rstrip("\n"),
         flush=True,
     )
 

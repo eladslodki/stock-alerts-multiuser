@@ -697,6 +697,41 @@ class SessionBreakDetector:
         session_high = max(c["high"] for c in ses_candles)
         session_low  = min(c["low"]  for c in ses_candles)
 
+        # ── SESSION_DEBUG: candle membership proof (all sessions) ────────────
+        _sd_sorted   = sorted(ses_candles, key=lambda c: c["timestamp"])
+        _sd_start_il = _utc_to_il(start_utc)
+        _sd_end_il   = _utc_to_il(end_utc)
+        _sd_first_ts = _sd_sorted[0]["timestamp"].replace(tzinfo=timezone.utc)
+        _sd_last_ts  = _sd_sorted[-1]["timestamp"].replace(tzinfo=timezone.utc)
+        _sd_top5h = sorted(ses_candles, key=lambda c: c["high"], reverse=True)[:5]
+        _sd_bot5l = sorted(ses_candles, key=lambda c: c["low"])[:5]
+        logger.info(
+            "%s[SESSION_DEBUG] user=%s symbol=%s session_type=%s session_date=%s\n"
+            "  inclusion_rule         : session_start <= candle.ts < session_end  (end is EXCLUSIVE)\n"
+            "  session_start_israel   : %s\n"
+            "  session_end_israel     : %s\n"
+            "  session_start_utc      : %s\n"
+            "  session_end_utc        : %s\n"
+            "  included_candles_count : %d\n"
+            "  first_session_candle_ts: %s\n"
+            "  last_session_candle_ts : %s\n"
+            "  top5_highs_in_session  : %s\n"
+            "  bottom5_lows_in_session: %s",
+            LP, user_id, symbol, session_type, session_date,
+            _sd_start_il.isoformat(),
+            _sd_end_il.isoformat(),
+            start_utc.isoformat(),
+            end_utc.isoformat(),
+            len(_sd_sorted),
+            _sd_first_ts.isoformat(),
+            _sd_last_ts.isoformat(),
+            [(c["timestamp"].replace(tzinfo=timezone.utc).isoformat(), round(c["high"], 5))
+             for c in _sd_top5h],
+            [(c["timestamp"].replace(tzinfo=timezone.utc).isoformat(), round(c["low"], 5))
+             for c in _sd_bot5l],
+        )
+        # ── END SESSION_DEBUG ─────────────────────────────────────────────────
+
         logger.debug(
             "%s[SESSION_END] user=%s symbol=%s session=%s/%s "
             "session_high=%.5f session_low=%.5f "
