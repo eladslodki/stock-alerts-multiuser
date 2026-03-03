@@ -222,6 +222,29 @@ class ForexDataProvider:
                 "%s response_ok candles=%d elapsed_ms=%d",
                 _log_ctx, len(values), _elapsed_ms,
             )
+
+            # ── DEBUG: raw Twelve Data timestamp → parsed datetime ──────────
+            # Logs the first and last raw datetime strings exactly as received
+            # from Twelve Data, alongside the parsed Python datetime object.
+            # NOTE: Twelve Data's "datetime" field = candle OPEN time (start of
+            # the bar), NOT the close time.  A 5-min bar opening at 07:00:00
+            # covers the interval [07:00:00, 07:05:00).
+            if values:
+                _raw_first = values[0]
+                _raw_last  = values[-1]
+                _parsed_first = datetime.strptime(_raw_first["datetime"], "%Y-%m-%d %H:%M:%S")
+                _parsed_last  = datetime.strptime(_raw_last["datetime"],  "%Y-%m-%d %H:%M:%S")
+                logger.info(
+                    "%s [DEBUG_TIMESTAMP]\n"
+                    "  raw_first_ts   = '%s'  → parsed = %s\n"
+                    "  raw_last_ts    = '%s'  → parsed = %s\n"
+                    "  timestamp_meaning = CANDLE OPEN TIME (bar start, NOT close)",
+                    _log_ctx,
+                    _raw_first["datetime"], _parsed_first.isoformat(),
+                    _raw_last["datetime"],  _parsed_last.isoformat(),
+                )
+            # ── END DEBUG: raw Twelve Data timestamp ────────────────────────
+
             return [self._parse_candle(c) for c in values]
 
         except requests.exceptions.Timeout:
