@@ -26,11 +26,12 @@ sys.modules.setdefault("database", MagicMock())
 sys.modules["database"].db = MagicMock()
 sys.modules.setdefault("email_sender", MagicMock())
 
-# Force-set the tvdatafeed stub (not setdefault) so it overrides any prior state.
+# Force-set the tvDatafeed stub (not setdefault) so it overrides any prior state.
+# tradingview-datafeed (PyPI) exposes the module as "tvDatafeed" (camelCase).
 _fake_tvdatafeed = MagicMock()
 _fake_tvdatafeed.TvDatafeed = MagicMock()
 _fake_tvdatafeed.Interval.in_5_minute = "in_5_minute"
-sys.modules["tvdatafeed"] = _fake_tvdatafeed
+sys.modules["tvDatafeed"] = _fake_tvdatafeed
 
 from services.tradingview_provider import normalize_to_tv, TradingViewProvider, tradingview_provider
 
