@@ -2,9 +2,10 @@
 """
 CLI Replay Tool – Session Liquidity Sweep Detector
 
-Fetches live 5M candles from Twelve Data for a given symbol + session date,
-then runs the sweep detector step-by-step and prints a human-readable
-timeline so you can verify every state-machine transition matches the chart.
+Fetches live M5 candles from TradingView PEPPERSTONE for a given symbol +
+session date, then runs the sweep detector step-by-step and prints a
+human-readable timeline so you can verify every state-machine transition
+matches the TradingView chart.
 
 Usage
 -----
@@ -35,9 +36,10 @@ python scripts/replay_session_sweep.py \\
     --date 2024-01-15 \\
     --candles 300
 
-Environment variables required
--------------------------------
-TWELVEDATA_API_KEY   – Twelve Data API key
+Environment variables (optional)
+---------------------------------
+TV_USERNAME   TradingView username (omit for anonymous mode)
+TV_PASSWORD   TradingView password (omit for anonymous mode)
 
 DST handling
 ------------
@@ -67,7 +69,7 @@ sys.modules.setdefault("database", type(sys)("database"))
 sys.modules["database"].db = _db_mock
 sys.modules.setdefault("email_sender", MagicMock())
 
-from services.forex_data_provider import forex_data_provider, normalize_symbol
+from services.tradingview_provider import tradingview_provider, normalize_to_tv
 from services.session_break_detector import (
     _session_window_utc,
     _session_candles,
@@ -84,7 +86,7 @@ logger = logging.getLogger(__name__)
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Session Liquidity Sweep – replay / debug tool",
+        description="Session Liquidity Sweep – replay / debug tool (TradingView PEPPERSTONE)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -112,7 +114,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--candles", type=int, default=500, metavar="N",
-        help="Number of 5M candles to fetch from Twelve Data (default: 500)",
+        help="Number of M5 candles to fetch from TradingView (default: 500)",
     )
     return p.parse_args()
 
@@ -127,15 +129,15 @@ def _parse_date(s: str) -> date:
 def main() -> None:
     args = parse_args()
 
-    # ── validate API key ─────────────────────────────────────────────────
-    if not os.getenv("TWELVEDATA_API_KEY"):
-        sys.exit(
-            "ERROR: TWELVEDATA_API_KEY environment variable not set.\n"
-            "Export it before running:  export TWELVEDATA_API_KEY=your_key"
-        )
-
     session_date = _parse_date(args.date)
     show_updates = not args.no_updates
+
+    # ── normalize symbol → TradingView compact format ─────────────────────
+    _tv_symbol, _norm_err = normalize_to_tv(args.symbol)
+    if _norm_err:
+        sys.exit(f"ERROR: invalid symbol '{args.symbol}': {_norm_err}")
+
+    _tv_exchange = "PEPPERSTONE"
 
     # ── compute session UTC window ───────────────────────────────────────
     try:
@@ -143,18 +145,9 @@ def main() -> None:
     except KeyError:
         sys.exit(f"ERROR: unknown session type '{args.session_type}'")
 
-    # ── resolve and print normalized symbol ─────────────────────────────
-    _METAL_CODES = frozenset({"XAU", "XAG", "XPT", "XPD"})
-    _norm_sym, _norm_err = normalize_symbol(args.symbol)
-    _td_sym = _norm_sym if _norm_sym else args.symbol.upper().strip()
-    if _norm_sym:
-        _base, _quote = _norm_sym.split("/")
-        _asset_class = "forex/metal" if (_base in _METAL_CODES or _quote in _METAL_CODES) else "forex"
-    else:
-        _asset_class = "unknown"
-
+    # ── print header ─────────────────────────────────────────────────────
     print(
-        f"\nFetching {args.candles} × 5M candles  "
+        f"\nFetching {args.candles} × M5 candles  "
         f"symbol={args.symbol}  session={args.session_type}  date={session_date}",
         flush=True,
     )
@@ -166,25 +159,24 @@ def main() -> None:
         f"Inclusion rule: session_start <= candle.ts < session_end  (end is EXCLUSIVE)",
         flush=True,
     )
-    # 1) Normalized symbol sent to Twelve Data
     print(
-        f"symbol_raw={args.symbol!r}  normalized={_td_sym!r}  "
-        f"provider=twelvedata  asset_class={_asset_class}",
+        f"symbol_raw={args.symbol!r}  tv_symbol={_tv_symbol!r}  "
+        f"tv_exchange={_tv_exchange!r}  provider=TRADINGVIEW",
         flush=True,
     )
 
-    # ── fetch candles ────────────────────────────────────────────────────
-    all_candles = forex_data_provider.get_recent_candles(
-        args.symbol, timeframe="5m", count=args.candles
-    )
+    # ── fetch candles (TradingView PEPPERSTONE) ───────────────────────────
+    all_candles = tradingview_provider.get_candles(args.symbol, count=args.candles)
 
     if not all_candles:
         sys.exit(
-            f"ERROR: no candles returned for {args.symbol}.\n"
-            "Check symbol spelling, API key, and rate limits."
+            f"ERROR: no candles returned for {args.symbol} "
+            f"(TradingView: {_tv_exchange}:{_tv_symbol}).\n"
+            "Check symbol spelling.  If using anonymous mode, try setting "
+            "TV_USERNAME and TV_PASSWORD."
         )
 
-    # 2) First and last fetched candles from Twelve Data (ts with UTC tzinfo)
+    # ── print first/last fetched candles ─────────────────────────────────
     _fc = all_candles[0]
     _lc = all_candles[-1]
     _fc_ts = _fc["timestamp"].replace(tzinfo=timezone.utc)
@@ -211,7 +203,7 @@ def main() -> None:
             f"Try fetching more candles (--candles) or a more recent date."
         )
 
-    # 3) First and last candles inside the session window (ts with UTC tzinfo)
+    # ── session candle diagnostics ────────────────────────────────────────
     _sorted_ses = sorted(ses_candles, key=lambda c: c["timestamp"])
     _fs = _sorted_ses[0]
     _ls = _sorted_ses[-1]
@@ -248,7 +240,20 @@ def main() -> None:
         session_end_utc    = end_utc,
         show_sweep_updates = show_updates,
     )
-    result["symbol"] = args.symbol.upper()
+    result["symbol"]      = args.symbol.upper()
+    result["provider"]    = "TRADINGVIEW"
+    result["tv_exchange"] = _tv_exchange
+    result["tv_symbol"]   = _tv_symbol
+    result["first_fetched_candle"] = {
+        "ts":    _fc_ts.isoformat(),
+        "open":  _fc["open"],  "high": _fc["high"],
+        "low":   _fc["low"],   "close": _fc["close"],
+    }
+    result["last_fetched_candle"] = {
+        "ts":    _lc_ts.isoformat(),
+        "open":  _lc["open"],  "high": _lc["high"],
+        "low":   _lc["low"],   "close": _lc["close"],
+    }
 
     # ── output ───────────────────────────────────────────────────────────
     if args.output_format == "json":

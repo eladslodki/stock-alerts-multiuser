@@ -11,7 +11,7 @@ Detects ICT-style "Session Liquidity Sweep" setups:
      level: low <= session_high (UP) or high >= session_low (DOWN).
   5. Confirmation: a strictly-later candle breaks the locked first_sweep_level.
 
-Data source : Twelve Data – 5M candles (OHLC)
+Data source : TradingView PEPPERSTONE – M5 candles (OHLC, UTC open time)
 Timezone    : Asia/Jerusalem (DST-aware).  Sessions are in Israel local time.
 Sessions    : ASIA   03:00–07:00 IL
               LONDON 09:00–12:00 IL
@@ -73,7 +73,8 @@ except ImportError:
 
 
 from database import db
-from services.forex_data_provider import forex_data_provider, normalize_symbol
+from services.forex_data_provider import normalize_symbol  # kept for watchlist validation
+from services.tradingview_provider import tradingview_provider
 
 logger = logging.getLogger(__name__)
 
@@ -525,11 +526,11 @@ class SessionBreakDetector:
             try:
                 if symbol not in candle_cache:
                     logger.debug(
-                        "%s[SESSION_TRACK] user=%s symbol=%s fetching_candles count=%d",
+                        "%s[SESSION_TRACK] user=%s symbol=%s fetching_candles count=%d provider=TRADINGVIEW",
                         LP, user_id, symbol, SessionSweepConfig.CANDLE_COUNT,
                     )
-                    candles = forex_data_provider.get_recent_candles(
-                        symbol, timeframe="5m", count=SessionSweepConfig.CANDLE_COUNT
+                    candles = tradingview_provider.get_candles(
+                        symbol, count=SessionSweepConfig.CANDLE_COUNT
                     )
                     candle_cache[symbol] = candles
                 else:
