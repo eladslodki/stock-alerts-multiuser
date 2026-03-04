@@ -408,18 +408,36 @@ def _rule(char: str = "─") -> str:
 
 
 def _header(result: Dict) -> List[str]:
+    provider   = result.get("provider", "OANDA")
+    instrument = result.get("instrument") or result.get("symbol") or "—"
     lines = [
         _rule("═"),
         "  SESSION LIQUIDITY SWEEP REPLAY",
         f"  Symbol   : {result.get('symbol') or '—'}  │  "
         f"Session: {result['session_type'].upper()}  │  "
         f"Date: {result['session_date']}",
+        f"  Provider : {provider}  │  Instrument: {instrument}",
         f"  Run-ID   : {result['run_id']}",
         f"  Timezone : Asia/Jerusalem (Israel)  │  "
         f"Session UTC: {(result.get('session_start_utc') or '—')[:16]} → "
         f"{(result.get('session_end_utc') or '—')[:16]}",
-        _rule("═"),
     ]
+    # Append first/last fetched candle OHLC if present
+    fc = result.get("first_fetched_candle")
+    lc = result.get("last_fetched_candle")
+    if fc:
+        lines.append(
+            f"  First bar: ts={fc.get('ts', '—')[:19]}  "
+            f"O={fc.get('open', 0):.5f} H={fc.get('high', 0):.5f} "
+            f"L={fc.get('low', 0):.5f} C={fc.get('close', 0):.5f}"
+        )
+    if lc:
+        lines.append(
+            f"  Last bar : ts={lc.get('ts', '—')[:19]}  "
+            f"O={lc.get('open', 0):.5f} H={lc.get('high', 0):.5f} "
+            f"L={lc.get('low', 0):.5f} C={lc.get('close', 0):.5f}"
+        )
+    lines.append(_rule("═"))
     return lines
 
 

@@ -2,7 +2,7 @@
 """
 CLI Replay Tool – Session Liquidity Sweep Detector
 
-Fetches live 5M candles from Twelve Data for a given symbol + session date,
+Fetches live M5 candles from OANDA for a given symbol + session date,
 then runs the sweep detector step-by-step and prints a human-readable
 timeline so you can verify every state-machine transition matches the chart.
 
@@ -37,7 +37,8 @@ python scripts/replay_session_sweep.py \\
 
 Environment variables required
 -------------------------------
-TWELVEDATA_API_KEY   – Twelve Data API key
+OANDA_API_KEY    – OANDA v20 Personal Access Token
+OANDA_ENV        – "practice" (default) or "live"
 
 DST handling
 ------------
@@ -67,7 +68,7 @@ sys.modules.setdefault("database", type(sys)("database"))
 sys.modules["database"].db = _db_mock
 sys.modules.setdefault("email_sender", MagicMock())
 
-from services.forex_data_provider import forex_data_provider, normalize_symbol
+from services.oanda_provider import oanda_provider, normalize_to_oanda
 from services.session_break_detector import (
     _session_window_utc,
     _session_candles,
@@ -112,7 +113,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--candles", type=int, default=500, metavar="N",
-        help="Number of 5M candles to fetch from Twelve Data (default: 500)",
+        help="Number of M5 candles to fetch from OANDA (default: 500)",
     )
     return p.parse_args()
 
@@ -128,14 +129,28 @@ def main() -> None:
     args = parse_args()
 
     # ── validate API key ─────────────────────────────────────────────────
-    if not os.getenv("TWELVEDATA_API_KEY"):
+    if not os.getenv("OANDA_API_KEY"):
         sys.exit(
-            "ERROR: TWELVEDATA_API_KEY environment variable not set.\n"
-            "Export it before running:  export TWELVEDATA_API_KEY=your_key"
+            "ERROR: OANDA_API_KEY environment variable not set.\n"
+            "Export it before running:  export OANDA_API_KEY=your_key\n"
+            "Optionally also set:       export OANDA_ENV=practice  (or live)"
         )
 
     session_date = _parse_date(args.date)
     show_updates = not args.no_updates
+
+    # ── normalize symbol to OANDA instrument ─────────────────────────────
+    _METAL_CODES = frozenset({"XAU", "XAG", "XPT", "XPD"})
+    _oanda_instrument, _norm_err = normalize_to_oanda(args.symbol)
+    if _norm_err:
+        sys.exit(f"ERROR: invalid symbol '{args.symbol}': {_norm_err}")
+
+    _base, _quote = _oanda_instrument.split("_")
+    _asset_class = (
+        "forex/metal"
+        if (_base in _METAL_CODES or _quote in _METAL_CODES)
+        else "forex"
+    )
 
     # ── compute session UTC window ───────────────────────────────────────
     try:
@@ -143,18 +158,9 @@ def main() -> None:
     except KeyError:
         sys.exit(f"ERROR: unknown session type '{args.session_type}'")
 
-    # ── resolve and print normalized symbol ─────────────────────────────
-    _METAL_CODES = frozenset({"XAU", "XAG", "XPT", "XPD"})
-    _norm_sym, _norm_err = normalize_symbol(args.symbol)
-    _td_sym = _norm_sym if _norm_sym else args.symbol.upper().strip()
-    if _norm_sym:
-        _base, _quote = _norm_sym.split("/")
-        _asset_class = "forex/metal" if (_base in _METAL_CODES or _quote in _METAL_CODES) else "forex"
-    else:
-        _asset_class = "unknown"
-
+    # ── print header ─────────────────────────────────────────────────────
     print(
-        f"\nFetching {args.candles} × 5M candles  "
+        f"\nFetching {args.candles} × M5 candles  "
         f"symbol={args.symbol}  session={args.session_type}  date={session_date}",
         flush=True,
     )
@@ -166,25 +172,24 @@ def main() -> None:
         f"Inclusion rule: session_start <= candle.ts < session_end  (end is EXCLUSIVE)",
         flush=True,
     )
-    # 1) Normalized symbol sent to Twelve Data
+    # 1) Normalized symbol sent to OANDA
     print(
-        f"symbol_raw={args.symbol!r}  normalized={_td_sym!r}  "
-        f"provider=twelvedata  asset_class={_asset_class}",
+        f"symbol_raw={args.symbol!r}  instrument={_oanda_instrument!r}  "
+        f"provider=OANDA  asset_class={_asset_class}",
         flush=True,
     )
 
-    # ── fetch candles ────────────────────────────────────────────────────
-    all_candles = forex_data_provider.get_recent_candles(
-        args.symbol, timeframe="5m", count=args.candles
-    )
+    # ── fetch candles (OANDA) ────────────────────────────────────────────
+    all_candles = oanda_provider.get_candles(args.symbol, count=args.candles)
 
     if not all_candles:
         sys.exit(
-            f"ERROR: no candles returned for {args.symbol}.\n"
-            "Check symbol spelling, API key, and rate limits."
+            f"ERROR: no candles returned for {args.symbol} "
+            f"(OANDA instrument: {_oanda_instrument}).\n"
+            "Check symbol spelling, OANDA_API_KEY, and OANDA_ENV."
         )
 
-    # 2) First and last fetched candles from Twelve Data (ts with UTC tzinfo)
+    # 2) First and last fetched candles from OANDA (ts with UTC tzinfo)
     _fc = all_candles[0]
     _lc = all_candles[-1]
     _fc_ts = _fc["timestamp"].replace(tzinfo=timezone.utc)
@@ -248,7 +253,19 @@ def main() -> None:
         session_end_utc    = end_utc,
         show_sweep_updates = show_updates,
     )
-    result["symbol"] = args.symbol.upper()
+    result["symbol"]     = args.symbol.upper()
+    result["provider"]   = "OANDA"
+    result["instrument"] = _oanda_instrument
+    result["first_fetched_candle"] = {
+        "ts":    _fc_ts.isoformat(),
+        "open":  _fc["open"],  "high": _fc["high"],
+        "low":   _fc["low"],   "close": _fc["close"],
+    }
+    result["last_fetched_candle"] = {
+        "ts":    _lc_ts.isoformat(),
+        "open":  _lc["open"],  "high": _lc["high"],
+        "low":   _lc["low"],   "close": _lc["close"],
+    }
 
     # ── output ───────────────────────────────────────────────────────────
     if args.output_format == "json":

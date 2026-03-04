@@ -3791,11 +3791,11 @@ _CANDLE_CACHE_TTL = 60  # seconds
 @app.route('/api/session-break/candles')
 @login_required
 def session_break_candles():
-    """OHLC 5M candles for LightweightCharts.
+    """OHLC 5M candles for LightweightCharts (sourced from OANDA).
     GET /api/session-break/candles?symbol=EURUSD&limit=288
     Returns [{time, open, high, low, close}, …] ascending.
     """
-    from services.forex_data_provider import forex_data_provider
+    from services.oanda_provider import oanda_provider
 
     symbol = request.args.get('symbol', '').strip().upper()
     try:
@@ -3806,13 +3806,13 @@ def session_break_candles():
     if not symbol:
         return jsonify({'error': 'symbol required'}), 400
 
-    cache_key = f"{symbol}:5m"
+    cache_key = f"{symbol}:5m:oanda"
     now_mono = time.monotonic()
     cached = _candle_cache.get(cache_key)
     if cached and (now_mono - cached[0]) < _CANDLE_CACHE_TTL:
         return jsonify(cached[1])
 
-    candles = forex_data_provider.get_recent_candles(symbol, timeframe='5m', count=limit)
+    candles = oanda_provider.get_candles(symbol, count=limit)
     if not candles:
         return jsonify({'error': f'No candle data available for {symbol}'}), 404
 
@@ -4058,7 +4058,7 @@ def session_sweep_replay():
         _post_session_candles,
     )
     from services.session_sweep_replay import replay_sweep, render_table
-    from services.forex_data_provider import forex_data_provider
+    from services.oanda_provider import oanda_provider, normalize_to_oanda
     import uuid as _uuid
 
     # ── parse params ──────────────────────────────────────────────────────
@@ -4090,17 +4090,20 @@ def session_sweep_replay():
     if errors:
         return jsonify({'success': False, 'errors': errors}), 400
 
+    # ── resolve OANDA instrument for logging / output ─────────────────────
+    _oanda_instrument, _norm_err = normalize_to_oanda(symbol)
+    if _norm_err:
+        return jsonify({'success': False, 'error': f'Symbol error: {_norm_err}'}), 400
+
     # ── session UTC window ────────────────────────────────────────────────
     try:
         start_utc, end_utc = _session_window_utc(session_type, session_date)
     except Exception as e:
         return jsonify({'success': False, 'error': f'Session window error: {e}'}), 500
 
-    # ── fetch candles ─────────────────────────────────────────────────────
+    # ── fetch candles (OANDA) ─────────────────────────────────────────────
     try:
-        all_candles = forex_data_provider.get_recent_candles(
-            symbol, timeframe='5m', count=candle_count
-        )
+        all_candles = oanda_provider.get_candles(symbol, count=candle_count)
     except Exception as e:
         logger.error('[SESSION_SWEEP] replay candle fetch error symbol=%s err=%s', symbol, e)
         return jsonify({'success': False, 'error': f'Candle fetch failed: {e}'}), 502
@@ -4108,8 +4111,8 @@ def session_sweep_replay():
     if not all_candles:
         return jsonify({
             'success': False,
-            'error': f'No candles returned for {symbol}. '
-                     'Check symbol, API key and rate limits.',
+            'error': f'No candles returned for {symbol} (OANDA instrument: {_oanda_instrument}). '
+                     'Check symbol spelling and OANDA_API_KEY.',
         }), 404
 
     # ── partition ─────────────────────────────────────────────────────────
@@ -4147,8 +4150,23 @@ def session_sweep_replay():
                      exc_info=True)
         return jsonify({'success': False, 'error': f'Replay engine error: {e}'}), 500
 
-    result['symbol']         = symbol
+    result['symbol']          = symbol
     result['fetched_candles'] = len(all_candles)
+    result['provider']        = 'OANDA'
+    result['instrument']      = _oanda_instrument
+    if all_candles:
+        _fc = all_candles[0]
+        _lc = all_candles[-1]
+        result['first_fetched_candle'] = {
+            'ts':    _fc['timestamp'].isoformat(),
+            'open':  _fc['open'],  'high': _fc['high'],
+            'low':   _fc['low'],   'close': _fc['close'],
+        }
+        result['last_fetched_candle'] = {
+            'ts':    _lc['timestamp'].isoformat(),
+            'open':  _lc['open'],  'high': _lc['high'],
+            'low':   _lc['low'],   'close': _lc['close'],
+        }
 
     if output_format == 'table':
         try:
