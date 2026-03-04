@@ -102,7 +102,7 @@ def _build_client():
     faster; providing credentials is recommended for production.
     """
     try:
-        from tvdatafeed import TvDatafeed  # noqa: PLC0415
+        from tvDatafeed import TvDatafeed  # noqa: PLC0415
     except ImportError as exc:
         logger.error(
             "[TV_ERROR] tv=config error=tvdatafeed_not_installed "
@@ -222,7 +222,7 @@ class TradingViewProvider:
 
             t0 = _time.monotonic()
             try:
-                from tvdatafeed import Interval  # noqa: PLC0415
+                from tvDatafeed import Interval  # noqa: PLC0415
                 df = self._client.get_hist(
                     symbol   = tv_symbol,
                     exchange = _TV_EXCHANGE,
