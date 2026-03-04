@@ -624,6 +624,13 @@ class SessionBreakDetector:
             )
             return False, False
 
+        # ── 1b. Log new session init (first time we see this session identity) ─
+        if existing is None:
+            logger.info(
+                "%s[SESSION_INIT] user=%s symbol=%s session_type=%s session_date=%s reset_state=True",
+                LP, user_id, symbol, session_type, session_date,
+            )
+
         # ── 2. Extract session and post-session candles ──────────────────────
         ses_candles  = _session_candles(all_candles, start_utc, end_utc)
         post_candles = _post_session_candles(all_candles, end_utc)
@@ -748,11 +755,18 @@ class SessionBreakDetector:
         if computation is None:
             return False, False
 
-        # Always persist session high/low
+        # Always persist session high/low; explicitly null all sweep fields so
+        # that a re-processed session row never inherits stale values.
         state_fields: Dict = {
-            "session_high": session_high,
-            "session_low":  session_low,
-            "state":        "WAIT_SWEEP_START",
+            "session_high":        session_high,
+            "session_low":         session_low,
+            "state":               "WAIT_SWEEP_START",
+            "direction":           None,
+            "sweep_start_ts":      None,
+            "first_sweep_level":   None,
+            "sweep_end_ts":        None,
+            "confirm_break_ts":    None,
+            "confirm_break_level": None,
         }
 
         if computation.get("no_break"):

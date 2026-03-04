@@ -4180,6 +4180,85 @@ def session_sweep_replay():
     return jsonify({'success': True, **result})
 
 
+@app.route('/api/session-sweep/reset', methods=['POST'])
+@login_required
+def session_sweep_reset():
+    """
+    Dev endpoint: delete session sweep state and history rows matching the
+    supplied filters.  Only touches session_break_state and
+    session_break_history – no other alert systems are affected.
+
+    Body (all fields optional):
+        user_id      integer
+        symbol       string   (e.g. "XAUUSD")
+        from_date    string   YYYY-MM-DD
+        to_date      string   YYYY-MM-DD
+        session_type string   asia | london
+    """
+    import logging as _log
+    _rlog = _log.getLogger(__name__)
+
+    body        = request.get_json(silent=True) or {}
+    f_user_id   = body.get('user_id')
+    f_symbol    = body.get('symbol')
+    f_from_date = body.get('from_date')
+    f_to_date   = body.get('to_date')
+    f_sess_type = body.get('session_type')
+
+    conditions: list = []
+    params: list     = []
+
+    if f_user_id is not None:
+        conditions.append("user_id = %s")
+        params.append(f_user_id)
+    if f_symbol is not None:
+        conditions.append("symbol = %s")
+        params.append(f_symbol.upper())
+    if f_from_date is not None:
+        conditions.append("session_date >= %s")
+        params.append(f_from_date)
+    if f_to_date is not None:
+        conditions.append("session_date <= %s")
+        params.append(f_to_date)
+    if f_sess_type is not None:
+        conditions.append("session_type = %s")
+        params.append(f_sess_type)
+
+    where = (" AND ".join(conditions)) if conditions else "TRUE"
+
+    deleted_state_rows   = db.execute(
+        f"DELETE FROM session_break_state   WHERE {where} RETURNING id",
+        params, fetchall=True,
+    ) or []
+    deleted_history_rows = db.execute(
+        f"DELETE FROM session_break_history WHERE {where} RETURNING id",
+        params, fetchall=True,
+    ) or []
+
+    deleted_state   = len(deleted_state_rows)
+    deleted_history = len(deleted_history_rows)
+
+    _rlog.info(
+        "[SESSION_SWEEP][RESET] user=%s symbol=%s from_date=%s to_date=%s "
+        "session_type=%s deleted_state=%d deleted_history=%d",
+        f_user_id, f_symbol, f_from_date, f_to_date,
+        f_sess_type, deleted_state, deleted_history,
+    )
+
+    return jsonify({
+        'status':          'ok',
+        'deleted_state':   deleted_state,
+        'deleted_history': deleted_history,
+        'filters': {
+            'user_id':      f_user_id,
+            'symbol':       f_symbol,
+            'from_date':    f_from_date,
+            'to_date':      f_to_date,
+            'session_type': f_sess_type,
+        },
+    })
+
+
 # Gunicorn will run the app, this is only for local testing
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 8080))
