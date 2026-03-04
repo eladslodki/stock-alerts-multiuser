@@ -3791,11 +3791,11 @@ _CANDLE_CACHE_TTL = 60  # seconds
 @app.route('/api/session-break/candles')
 @login_required
 def session_break_candles():
-    """OHLC 5M candles for LightweightCharts (sourced from OANDA).
+    """OHLC 5M candles for LightweightCharts (sourced from TradingView PEPPERSTONE).
     GET /api/session-break/candles?symbol=EURUSD&limit=288
     Returns [{time, open, high, low, close}, …] ascending.
     """
-    from services.oanda_provider import oanda_provider
+    from services.tradingview_provider import tradingview_provider
 
     symbol = request.args.get('symbol', '').strip().upper()
     try:
@@ -3806,13 +3806,13 @@ def session_break_candles():
     if not symbol:
         return jsonify({'error': 'symbol required'}), 400
 
-    cache_key = f"{symbol}:5m:oanda"
+    cache_key = f"{symbol}:5m:tv"
     now_mono = time.monotonic()
     cached = _candle_cache.get(cache_key)
     if cached and (now_mono - cached[0]) < _CANDLE_CACHE_TTL:
         return jsonify(cached[1])
 
-    candles = oanda_provider.get_candles(symbol, count=limit)
+    candles = tradingview_provider.get_candles(symbol, count=limit)
     if not candles:
         return jsonify({'error': f'No candle data available for {symbol}'}), 404
 
@@ -4058,7 +4058,7 @@ def session_sweep_replay():
         _post_session_candles,
     )
     from services.session_sweep_replay import replay_sweep, render_table
-    from services.oanda_provider import oanda_provider, normalize_to_oanda
+    from services.tradingview_provider import tradingview_provider, normalize_to_tv
     import uuid as _uuid
 
     # ── parse params ──────────────────────────────────────────────────────
@@ -4090,8 +4090,8 @@ def session_sweep_replay():
     if errors:
         return jsonify({'success': False, 'errors': errors}), 400
 
-    # ── resolve OANDA instrument for logging / output ─────────────────────
-    _oanda_instrument, _norm_err = normalize_to_oanda(symbol)
+    # ── resolve TradingView symbol for logging / output ────────────────────
+    _tv_symbol, _norm_err = normalize_to_tv(symbol)
     if _norm_err:
         return jsonify({'success': False, 'error': f'Symbol error: {_norm_err}'}), 400
 
@@ -4101,9 +4101,9 @@ def session_sweep_replay():
     except Exception as e:
         return jsonify({'success': False, 'error': f'Session window error: {e}'}), 500
 
-    # ── fetch candles (OANDA) ─────────────────────────────────────────────
+    # ── fetch candles (TradingView PEPPERSTONE) ───────────────────────────
     try:
-        all_candles = oanda_provider.get_candles(symbol, count=candle_count)
+        all_candles = tradingview_provider.get_candles(symbol, count=candle_count)
     except Exception as e:
         logger.error('[SESSION_SWEEP] replay candle fetch error symbol=%s err=%s', symbol, e)
         return jsonify({'success': False, 'error': f'Candle fetch failed: {e}'}), 502
@@ -4111,8 +4111,9 @@ def session_sweep_replay():
     if not all_candles:
         return jsonify({
             'success': False,
-            'error': f'No candles returned for {symbol} (OANDA instrument: {_oanda_instrument}). '
-                     'Check symbol spelling and OANDA_API_KEY.',
+            'error': f'No candles returned for {symbol} '
+                     f'(TradingView: PEPPERSTONE:{_tv_symbol}). '
+                     'Check symbol spelling and TV_USERNAME/TV_PASSWORD if set.',
         }), 404
 
     # ── partition ─────────────────────────────────────────────────────────
@@ -4152,8 +4153,9 @@ def session_sweep_replay():
 
     result['symbol']          = symbol
     result['fetched_candles'] = len(all_candles)
-    result['provider']        = 'OANDA'
-    result['instrument']      = _oanda_instrument
+    result['provider']        = 'TRADINGVIEW'
+    result['tv_exchange']     = 'PEPPERSTONE'
+    result['tv_symbol']       = _tv_symbol
     if all_candles:
         _fc = all_candles[0]
         _lc = all_candles[-1]

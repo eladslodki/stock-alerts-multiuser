@@ -2,9 +2,10 @@
 """
 CLI Replay Tool – Session Liquidity Sweep Detector
 
-Fetches live M5 candles from OANDA for a given symbol + session date,
-then runs the sweep detector step-by-step and prints a human-readable
-timeline so you can verify every state-machine transition matches the chart.
+Fetches live M5 candles from TradingView PEPPERSTONE for a given symbol +
+session date, then runs the sweep detector step-by-step and prints a
+human-readable timeline so you can verify every state-machine transition
+matches the TradingView chart.
 
 Usage
 -----
@@ -35,10 +36,10 @@ python scripts/replay_session_sweep.py \\
     --date 2024-01-15 \\
     --candles 300
 
-Environment variables required
--------------------------------
-OANDA_API_KEY    – OANDA v20 Personal Access Token
-OANDA_ENV        – "practice" (default) or "live"
+Environment variables (optional)
+---------------------------------
+TV_USERNAME   TradingView username (omit for anonymous mode)
+TV_PASSWORD   TradingView password (omit for anonymous mode)
 
 DST handling
 ------------
@@ -68,7 +69,7 @@ sys.modules.setdefault("database", type(sys)("database"))
 sys.modules["database"].db = _db_mock
 sys.modules.setdefault("email_sender", MagicMock())
 
-from services.oanda_provider import oanda_provider, normalize_to_oanda
+from services.tradingview_provider import tradingview_provider, normalize_to_tv
 from services.session_break_detector import (
     _session_window_utc,
     _session_candles,
@@ -85,7 +86,7 @@ logger = logging.getLogger(__name__)
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Session Liquidity Sweep – replay / debug tool",
+        description="Session Liquidity Sweep – replay / debug tool (TradingView PEPPERSTONE)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -113,7 +114,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--candles", type=int, default=500, metavar="N",
-        help="Number of M5 candles to fetch from OANDA (default: 500)",
+        help="Number of M5 candles to fetch from TradingView (default: 500)",
     )
     return p.parse_args()
 
@@ -128,29 +129,15 @@ def _parse_date(s: str) -> date:
 def main() -> None:
     args = parse_args()
 
-    # ── validate API key ─────────────────────────────────────────────────
-    if not os.getenv("OANDA_API_KEY"):
-        sys.exit(
-            "ERROR: OANDA_API_KEY environment variable not set.\n"
-            "Export it before running:  export OANDA_API_KEY=your_key\n"
-            "Optionally also set:       export OANDA_ENV=practice  (or live)"
-        )
-
     session_date = _parse_date(args.date)
     show_updates = not args.no_updates
 
-    # ── normalize symbol to OANDA instrument ─────────────────────────────
-    _METAL_CODES = frozenset({"XAU", "XAG", "XPT", "XPD"})
-    _oanda_instrument, _norm_err = normalize_to_oanda(args.symbol)
+    # ── normalize symbol → TradingView compact format ─────────────────────
+    _tv_symbol, _norm_err = normalize_to_tv(args.symbol)
     if _norm_err:
         sys.exit(f"ERROR: invalid symbol '{args.symbol}': {_norm_err}")
 
-    _base, _quote = _oanda_instrument.split("_")
-    _asset_class = (
-        "forex/metal"
-        if (_base in _METAL_CODES or _quote in _METAL_CODES)
-        else "forex"
-    )
+    _tv_exchange = "PEPPERSTONE"
 
     # ── compute session UTC window ───────────────────────────────────────
     try:
@@ -172,24 +159,24 @@ def main() -> None:
         f"Inclusion rule: session_start <= candle.ts < session_end  (end is EXCLUSIVE)",
         flush=True,
     )
-    # 1) Normalized symbol sent to OANDA
     print(
-        f"symbol_raw={args.symbol!r}  instrument={_oanda_instrument!r}  "
-        f"provider=OANDA  asset_class={_asset_class}",
+        f"symbol_raw={args.symbol!r}  tv_symbol={_tv_symbol!r}  "
+        f"tv_exchange={_tv_exchange!r}  provider=TRADINGVIEW",
         flush=True,
     )
 
-    # ── fetch candles (OANDA) ────────────────────────────────────────────
-    all_candles = oanda_provider.get_candles(args.symbol, count=args.candles)
+    # ── fetch candles (TradingView PEPPERSTONE) ───────────────────────────
+    all_candles = tradingview_provider.get_candles(args.symbol, count=args.candles)
 
     if not all_candles:
         sys.exit(
             f"ERROR: no candles returned for {args.symbol} "
-            f"(OANDA instrument: {_oanda_instrument}).\n"
-            "Check symbol spelling, OANDA_API_KEY, and OANDA_ENV."
+            f"(TradingView: {_tv_exchange}:{_tv_symbol}).\n"
+            "Check symbol spelling.  If using anonymous mode, try setting "
+            "TV_USERNAME and TV_PASSWORD."
         )
 
-    # 2) First and last fetched candles from OANDA (ts with UTC tzinfo)
+    # ── print first/last fetched candles ─────────────────────────────────
     _fc = all_candles[0]
     _lc = all_candles[-1]
     _fc_ts = _fc["timestamp"].replace(tzinfo=timezone.utc)
@@ -216,7 +203,7 @@ def main() -> None:
             f"Try fetching more candles (--candles) or a more recent date."
         )
 
-    # 3) First and last candles inside the session window (ts with UTC tzinfo)
+    # ── session candle diagnostics ────────────────────────────────────────
     _sorted_ses = sorted(ses_candles, key=lambda c: c["timestamp"])
     _fs = _sorted_ses[0]
     _ls = _sorted_ses[-1]
@@ -253,9 +240,10 @@ def main() -> None:
         session_end_utc    = end_utc,
         show_sweep_updates = show_updates,
     )
-    result["symbol"]     = args.symbol.upper()
-    result["provider"]   = "OANDA"
-    result["instrument"] = _oanda_instrument
+    result["symbol"]      = args.symbol.upper()
+    result["provider"]    = "TRADINGVIEW"
+    result["tv_exchange"] = _tv_exchange
+    result["tv_symbol"]   = _tv_symbol
     result["first_fetched_candle"] = {
         "ts":    _fc_ts.isoformat(),
         "open":  _fc["open"],  "high": _fc["high"],
