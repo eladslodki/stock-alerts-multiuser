@@ -608,22 +608,72 @@ def _save_history(user_id: int, symbol: str, session_type: str,
 
 def _send_alert_email(user_email: str, symbol: str, session_type: str,
                       session_date: date, result: Dict) -> bool:
-    """Send the session liquidity sweep alert email."""
-    from email_sender import email_sender
-    return email_sender.send_session_sweep_email(
-        to_email=user_email,
-        symbol=symbol,
-        session_type=session_type,
-        session_date=str(session_date),
-        direction=result["direction"],
-        session_high=result["session_high"],
-        session_low=result["session_low"],
-        sweep_start_ts=result["sweep_start_ts"].isoformat(),
-        first_sweep_level=result["first_sweep_level"],
-        sweep_end_ts=result["sweep_end_ts"].isoformat(),
-        confirm_break_ts=result["confirm_break_ts"].isoformat(),
-        confirm_break_level=result["confirm_break_level"],
+    """Send the session liquidity sweep alert email.
+
+    Returns True if the email was successfully dispatched, False otherwise.
+    Logs [SESSION_SWEEP][EMAIL_CHECK], [EMAIL_SENT], and [EMAIL_SKIP]/[EMAIL_FAIL]
+    so every outcome is visible in logs regardless of exception handling above.
+    """
+    LP = SessionSweepConfig.LOG_PREFIX
+    direction = result.get("direction", "?")
+
+    # ── Guard: require a valid email address ─────────────────────────────────
+    if not user_email or not user_email.strip():
+        logger.error(
+            "%s[EMAIL_SKIP] reason=no_email_address symbol=%s session=%s/%s direction=%s "
+            "user_email=%r – check the users table email column",
+            LP, symbol, session_type, session_date, direction, user_email,
+        )
+        return False
+
+    logger.info(
+        "%s[EMAIL_CHECK] to=%s symbol=%s session_type=%s session_date=%s "
+        "direction=%s sweep_start_ts=%s first_sweep_level=%s "
+        "sweep_end_ts=%s confirm_break_ts=%s",
+        LP,
+        user_email, symbol, session_type, session_date, direction,
+        result.get("sweep_start_ts"),
+        result.get("first_sweep_level"),
+        result.get("sweep_end_ts"),
+        result.get("confirm_break_ts"),
     )
+
+    from email_sender import email_sender
+    try:
+        ok = email_sender.send_session_sweep_email(
+            to_email=user_email,
+            symbol=symbol,
+            session_type=session_type,
+            session_date=str(session_date),
+            direction=direction,
+            session_high=result["session_high"],
+            session_low=result["session_low"],
+            sweep_start_ts=result["sweep_start_ts"].isoformat() if result.get("sweep_start_ts") else "—",
+            first_sweep_level=result["first_sweep_level"],
+            sweep_end_ts=result["sweep_end_ts"].isoformat() if result.get("sweep_end_ts") else "—",
+            confirm_break_ts=result["confirm_break_ts"].isoformat() if result.get("confirm_break_ts") else "—",
+            confirm_break_level=result["confirm_break_level"],
+        )
+        if ok:
+            logger.info(
+                "%s[EMAIL_SENT] to=%s symbol=%s session=%s/%s direction=%s",
+                LP, user_email, symbol, session_type, session_date, direction,
+            )
+        else:
+            logger.error(
+                "%s[EMAIL_FAIL] reason=send_returned_false to=%s symbol=%s "
+                "session=%s/%s direction=%s – check BREVO_API_KEY and sender verification",
+                LP, user_email, symbol, session_type, session_date, direction,
+            )
+        return ok
+    except Exception as exc:
+        logger.error(
+            "%s[EMAIL_FAIL] reason=exception to=%s symbol=%s session=%s/%s "
+            "direction=%s err=%s",
+            LP, user_email, symbol, session_type, session_date, direction, exc,
+            exc_info=True,
+        )
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1089,22 +1139,16 @@ class SessionBreakDetector:
                 confirm_level, confirm_ts.isoformat(),
             )
 
-            try:
-                _send_alert_email(user_email, symbol, session_type, session_date, {
-                    "direction":           dir_key,
-                    "session_high":        session_high,
-                    "session_low":         session_low,
-                    "sweep_start_ts":      sweep_start,
-                    "first_sweep_level":   sweep_level,
-                    "sweep_end_ts":        sweep_end,
-                    "confirm_break_ts":    confirm_ts,
-                    "confirm_break_level": confirm_level,
-                })
-            except Exception as email_exc:
-                logger.error(
-                    "%s[TRIGGER] email_failed user=%s symbol=%s direction=%s err=%s",
-                    LP, user_id, symbol, dir_key, email_exc,
-                )
+            _send_alert_email(user_email, symbol, session_type, session_date, {
+                "direction":           dir_key,
+                "session_high":        session_high,
+                "session_low":         session_low,
+                "sweep_start_ts":      sweep_start,
+                "first_sweep_level":   sweep_level,
+                "sweep_end_ts":        sweep_end,
+                "confirm_break_ts":    confirm_ts,
+                "confirm_break_level": confirm_level,
+            })
 
             triggered = True
 
