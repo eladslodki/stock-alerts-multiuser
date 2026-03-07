@@ -328,6 +328,28 @@ class Database:
             ALTER TABLE session_break_history
                 ADD COLUMN IF NOT EXISTS first_sweep_level DECIMAL(15, 5);
             """,
+            # Drop NOT NULL from legacy columns that are no longer written by the
+            # sweep-model detector.  Old rows already have values so this is safe.
+            # first_break_ts / first_break_level are back-filled from sweep fields.
+            # confirm_break_ts / confirm_break_level are still written so they keep
+            # their data, but we relax the constraint so a partial insert cannot
+            # crash when a direction result is missing one of these.
+            """
+            ALTER TABLE session_break_history
+                ALTER COLUMN first_break_ts   DROP NOT NULL;
+            """,
+            """
+            ALTER TABLE session_break_history
+                ALTER COLUMN first_break_level DROP NOT NULL;
+            """,
+            """
+            ALTER TABLE session_break_history
+                ALTER COLUMN confirm_break_ts   DROP NOT NULL;
+            """,
+            """
+            ALTER TABLE session_break_history
+                ALTER COLUMN confirm_break_level DROP NOT NULL;
+            """,
         ]
         
         try:
