@@ -249,7 +249,7 @@ async function searchFilings() {
           });
         }
         card.querySelector('._gen-btn').addEventListener('click', function () {
-          generateReport(ticker, q.year, q.quarter);
+          generateReport(ticker, q.year, q.quarter, this);
         });
         lst.appendChild(card);
       });
@@ -266,8 +266,9 @@ async function searchFilings() {
 
 const _pollTimers = {};
 
-async function generateReport(ticker, year, quarter) {
+async function generateReport(ticker, year, quarter, btnEl) {
   showStatus('שולח בקשה... <span class="spinner"></span>', 'info');
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'מייצר...'; }
   try {
     const res  = await fetch('/api/reports/generate', {
       method: 'POST',
@@ -278,6 +279,7 @@ async function generateReport(ticker, year, quarter) {
 
     if (!res.ok) {
       showStatus('שגיאה: ' + (data.error || 'אירעה שגיאה'), 'error');
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'ייצר'; }
       return;
     }
 
@@ -286,19 +288,21 @@ async function generateReport(ticker, year, quarter) {
         'הדוח מוכן — <a href="' + data.url_html + '" target="_blank" style="color:inherit;text-decoration:underline">פתח דוח HTML</a>',
         'success'
       );
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'ייצר'; }
       return;
     }
 
     // status === 'generating' → poll using filing_id returned by server
     if (data.filing_id) {
-      _startPolling(data.filing_id);
+      _startPolling(data.filing_id, btnEl);
     }
   } catch (e) {
     showStatus('שגיאת רשת: ' + e, 'error');
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'ייצר'; }
   }
 }
 
-function _startPolling(filingId) {
+function _startPolling(filingId, btnEl) {
   showStatus('מייצר דוח... <span class="spinner"></span>', 'info');
   if (_pollTimers[filingId]) clearInterval(_pollTimers[filingId]);
   _pollTimers[filingId] = setInterval(async function () {
@@ -312,10 +316,12 @@ function _startPolling(filingId) {
           'הדוח מוכן — <a href="' + data.url_html + '" target="_blank" style="color:inherit;text-decoration:underline">פתח דוח HTML</a>',
           'success'
         );
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'ייצר'; }
       } else if (data.status === 'error') {
         clearInterval(_pollTimers[filingId]);
         delete _pollTimers[filingId];
         showStatus('שגיאה בייצור הדוח: ' + (data.error || 'שגיאה לא ידועה'), 'error');
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'ייצר'; }
       }
       // 'generating' or 'not_started' → keep polling
     } catch (_) { /* network glitch — keep polling */ }

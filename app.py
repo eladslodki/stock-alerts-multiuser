@@ -1656,6 +1656,7 @@ def portfolio_page():
 <head>
     <title>Portfolio — Stock Alerts</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <link rel="stylesheet" href="/static/css/theme.css">
     <style>
         /* Portfolio-specific styles */
@@ -1834,6 +1835,17 @@ def portfolio_page():
                     <div class="stat-label">Expectancy</div>
                     <div class="stat-value" id="expectancy">$0.00</div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Allocation Pie Chart -->
+        <div class="card" id="allocationCard">
+            <h2>🥧 Allocation by Category</h2>
+            <div style="display:flex;align-items:center;gap:32px;flex-wrap:wrap;">
+                <div style="position:relative;width:240px;height:240px;flex-shrink:0;">
+                    <canvas id="allocPieCanvas" width="240" height="240"></canvas>
+                </div>
+                <div id="allocLegend" style="display:flex;flex-direction:column;gap:8px;font-size:13px;"></div>
             </div>
         </div>
 
@@ -2068,8 +2080,9 @@ def portfolio_page():
                 if (data.success) {
                     portfolioCash = data.cash;
                     document.getElementById('portfolioCash').value = portfolioCash;
-                    document.getElementById('portfolioValue').textContent = 
+                    document.getElementById('portfolioValue').textContent =
                         '$' + portfolioCash.toLocaleString('en-US', {minimumFractionDigits: 2});
+                    renderAllocationChart();
                 }
             } catch (error) {
                 console.error('Error loading portfolio:', error);
@@ -2164,6 +2177,7 @@ def portfolio_page():
                     allTrades = data.trades;
                     console.log('Loaded', allTrades.length, 'trades');
                     renderTrades();
+                    renderAllocationChart();
                 } else {
                     console.error('Failed to load trades:', data.error);
                     showMessage('Failed to load trades: ' + data.error, 'error');
@@ -2498,6 +2512,96 @@ def portfolio_page():
             const msgEl = document.getElementById('message');
             msgEl.innerHTML = `<div class="message ${type}">${text}</div>`;
             setTimeout(() => msgEl.innerHTML = '', 5000);
+        }
+
+        // ── Allocation pie chart ──────────────────────────────────────────────
+        const TICKER_CATEGORY = {
+            // Crypto
+            BTC:'Crypto', ETH:'Crypto', SOL:'Crypto', XRP:'Crypto', ADA:'Crypto',
+            DOGE:'Crypto', AVAX:'Crypto', DOT:'Crypto', LINK:'Crypto', MATIC:'Crypto',
+            // Software / Tech
+            AAPL:'Software', MSFT:'Software', GOOGL:'Software', GOOG:'Software',
+            META:'Software', AMZN:'Software', NVDA:'Software', TSLA:'Software',
+            NFLX:'Software', ADBE:'Software', CRM:'Software', ORCL:'Software',
+            SHOP:'Software', SNOW:'Software', NOW:'Software', PLTR:'Software',
+            // Security
+            PANW:'Security', CRWD:'Security', ZS:'Security', FTNT:'Security',
+            OKTA:'Security', S:'Security', CYBR:'Security', NET:'Security',
+            // Energy
+            XOM:'Energy', CVX:'Energy', OKE:'Energy', ET:'Energy',
+            EPD:'Energy', MPC:'Energy', PSX:'Energy', VLO:'Energy',
+            // Finance
+            JPM:'Finance', BAC:'Finance', GS:'Finance', MS:'Finance',
+            V:'Finance', MA:'Finance', PYPL:'Finance', BLK:'Finance',
+            // Healthcare
+            JNJ:'Healthcare', PFE:'Healthcare', MRK:'Healthcare', ABBV:'Healthcare',
+            UNH:'Healthcare', CVS:'Healthcare', AMGN:'Healthcare', GILD:'Healthcare',
+        };
+        const CATEGORY_COLORS = {
+            Crypto:     '#F7931A',
+            Software:   '#5B7CFF',
+            Security:   '#FF6B6B',
+            Energy:     '#FFB800',
+            Finance:    '#00C9A7',
+            Healthcare: '#A78BFA',
+            Other:      '#8B92A8',
+            Cash:       '#2DD4BF',
+        };
+
+        let _allocChart = null;
+
+        function renderAllocationChart() {
+            const openTrades = allTrades.filter(t => !t.is_closed);
+            const buckets = {};
+            openTrades.forEach(t => {
+                const cat = TICKER_CATEGORY[t.ticker.toUpperCase()] || 'Other';
+                buckets[cat] = (buckets[cat] || 0) + parseFloat(t.position_size || 0);
+            });
+            // Add uninvested cash
+            const invested = Object.values(buckets).reduce((a, b) => a + b, 0);
+            const cashVal = Math.max(0, portfolioCash - invested);
+            if (cashVal > 0) buckets['Cash'] = cashVal;
+
+            const labels = Object.keys(buckets);
+            const values = labels.map(k => buckets[k]);
+            const colors = labels.map(k => CATEGORY_COLORS[k] || CATEGORY_COLORS.Other);
+
+            const ctx = document.getElementById('allocPieCanvas').getContext('2d');
+            if (_allocChart) _allocChart.destroy();
+            _allocChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }] },
+                options: {
+                    responsive: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => {
+                                    const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                                    const pct = total > 0 ? (ctx.raw / total * 100).toFixed(1) : 0;
+                                    return ' $' + ctx.raw.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + ' (' + pct + '%)';
+                                }
+                            }
+                        }
+                    },
+                    cutout: '60%',
+                },
+            });
+
+            // Custom legend
+            const legendEl = document.getElementById('allocLegend');
+            const total = values.reduce((a, b) => a + b, 0);
+            legendEl.innerHTML = labels.map((lbl, i) => {
+                const pct = total > 0 ? (values[i] / total * 100).toFixed(1) : 0;
+                return '<div style="display:flex;align-items:center;gap:8px;">' +
+                    '<span style="width:12px;height:12px;border-radius:50%;background:' + colors[i] + ';flex-shrink:0;"></span>' +
+                    '<span style="color:#8B92A8;">' + lbl + '</span>' +
+                    '<span style="margin-left:auto;color:#E2E8F0;font-weight:600;">$' +
+                        values[i].toLocaleString('en-US', {minimumFractionDigits:0,maximumFractionDigits:0}) +
+                        ' <span style="color:#8B92A8;font-weight:400;">(' + pct + '%)</span></span>' +
+                    '</div>';
+            }).join('');
         }
 
         // Logout
@@ -2908,10 +3012,10 @@ def create_alert_from_suggestion():
         logger.info(f"Creating alert from AI suggestion: {ticker} | Type: {alert_type}")
         
         # Validate alert type is supported
-        if alert_type not in ['price', 'ma']:
+        if alert_type not in ['price', 'ma', 'percent_change']:
             return jsonify({
-                'success': False, 
-                'error': f'Alert type "{alert_type}" not yet supported via AI parsing. Try price or MA alerts.'
+                'success': False,
+                'error': f'Alert type "{alert_type}" not yet supported via AI parsing. Try price, MA, or percent alerts.'
             }), 400
         
         # Get current price (validates ticker exists)
@@ -2980,7 +3084,52 @@ def create_alert_from_suggestion():
             )
             
             logger.info(f"Created MA alert #{alert_id}: {ticker} MA{ma_period} @ ${ma_value:.2f}")
-        
+            target_price = ma_value
+
+        elif alert_type == 'percent_change':
+            # PERCENT CHANGE ALERT — convert to a derived price level
+            threshold_pct = float(params.get('threshold_pct', params.get('percent', 5.0)))
+            direction = params.get('direction', 'both')
+
+            if threshold_pct <= 0:
+                return jsonify({'success': False, 'error': 'Threshold must be greater than 0%'}), 400
+
+            if direction == 'up':
+                target_price = round(current_price * (1 + threshold_pct / 100), 4)
+                alert_direction = 'up'
+            elif direction == 'down':
+                target_price = round(current_price * (1 - threshold_pct / 100), 4)
+                alert_direction = 'down'
+            else:
+                # "both" — create two alerts (up and down)
+                price_up   = round(current_price * (1 + threshold_pct / 100), 4)
+                price_down = round(current_price * (1 - threshold_pct / 100), 4)
+                alert_id = Alert.create(
+                    user_id=current_user.id, ticker=ticker,
+                    target_price=price_up, current_price=current_price,
+                    direction='up', alert_type='price'
+                )
+                Alert.create(
+                    user_id=current_user.id, ticker=ticker,
+                    target_price=price_down, current_price=current_price,
+                    direction='down', alert_type='price'
+                )
+                logger.info(f"Created bidirectional {threshold_pct}% alerts for {ticker}: ↑{price_up} / ↓{price_down}")
+                return jsonify({
+                    'success': True,
+                    'alert': {'id': alert_id, 'ticker': ticker, 'alert_type': 'price',
+                              'target_price': price_up, 'current_price': current_price, 'direction': 'both'},
+                    'message': f'✓ Two {threshold_pct}% alerts created for {ticker} (↑ and ↓)'
+                })
+
+            alert_id = Alert.create(
+                user_id=current_user.id, ticker=ticker,
+                target_price=target_price, current_price=current_price,
+                direction=alert_direction, alert_type='price'
+            )
+            logger.info(f"Created {threshold_pct}% change alert #{alert_id}: {ticker} @ ${target_price:.4f} ({alert_direction})")
+            direction = alert_direction
+
         # Return success
         return jsonify({
             'success': True,
@@ -2988,7 +3137,7 @@ def create_alert_from_suggestion():
                 'id': alert_id,
                 'ticker': ticker,
                 'alert_type': alert_type,
-                'target_price': target_price if alert_type == 'price' else ma_value,
+                'target_price': target_price,
                 'current_price': current_price,
                 'direction': direction
             },
@@ -3533,6 +3682,7 @@ def session_break_page():
 
         // ── Chart state ──────────────────────────────────────────────────────
         let _chart = null, _candleSeries = null, _overlayMode = 'current';
+        let _sessionBoxState = null;  // {fromTs, toTs, high, low} – redrawn on scroll/zoom
 
         const COLORS = {
             sessionHigh:  '#FFB800',
@@ -3560,6 +3710,7 @@ def session_break_page():
                     if (el.parentNode) el.parentNode.removeChild(el);
                 });
                 this.boxEls = [];
+                _sessionBoxState = null;
             },
 
             addPriceLine(opts) {
@@ -3574,10 +3725,20 @@ def session_break_page():
         };
 
         // ── Session box (HTML div positioned over the chart canvas) ───────────
-        // Uses LWC's timeToCoordinate / priceToCoordinate to place a shaded
-        // rectangle exactly over the session candles.
+        // drawSessionBox() stores the logical state; _renderSessionBox() converts
+        // to pixel coords and redraws. _renderSessionBox is called on every
+        // scroll/zoom/resize so the rectangle always tracks the viewport.
         function drawSessionBox(fromTs, toTs, high, low) {
-            if (!_chart || !_candleSeries) return;
+            _sessionBoxState = { fromTs, toTs, high, low };
+            _renderSessionBox();
+        }
+
+        function _renderSessionBox() {
+            // Remove any existing box elements
+            OverlayMgr.boxEls.forEach(el => { if (el.parentNode) el.parentNode.removeChild(el); });
+            OverlayMgr.boxEls = [];
+            if (!_sessionBoxState || !_chart || !_candleSeries) return;
+            const { fromTs, toTs, high, low } = _sessionBoxState;
             const el = document.getElementById('sb-chart');
             const x1 = _chart.timeScale().timeToCoordinate(fromTs);
             const x2 = _chart.timeScale().timeToCoordinate(toTs);
@@ -3697,7 +3858,10 @@ def session_break_page():
             });
             new ResizeObserver(() => {
                 if (_chart) _chart.applyOptions({ width: el.clientWidth });
+                _renderSessionBox();
             }).observe(el);
+            _chart.timeScale().subscribeVisibleLogicalRangeChange(_renderSessionBox);
+            _chart.subscribeCrosshairMove(_renderSessionBox);
         }
 
         function updateChartSymbolSelect(symbols) {
