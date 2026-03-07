@@ -565,7 +565,17 @@ def _upsert_state(user_id: int, symbol: str, session_type: str, session_date: da
 
 def _save_history(user_id: int, symbol: str, session_type: str,
                   session_date: date, result: Dict) -> None:
-    """Save a triggered event to the history table."""
+    """Save a triggered event to the history table.
+
+    Writes both the new sweep-model columns and the legacy first_break_*
+    columns (back-filled from sweep data) so that UI queries that still
+    read first_break_ts / first_break_level continue to display correctly.
+    """
+    # Back-fill legacy columns from sweep equivalents so NOT NULL constraints
+    # (relaxed by migration) and old UI readers are both satisfied.
+    first_break_ts    = result.get("sweep_start_ts")
+    first_break_level = result.get("first_sweep_level")
+
     db.execute(
         """
         INSERT INTO session_break_history (
@@ -574,18 +584,20 @@ def _save_history(user_id: int, symbol: str, session_type: str,
             session_high, session_low,
             sweep_start_ts, first_sweep_level,
             sweep_end_ts,
+            first_break_ts, first_break_level,
             confirm_break_ts, confirm_break_level,
             triggered_at
-        ) VALUES (%s,%s,%s,%s, %s, %s,%s, %s,%s, %s, %s,%s, NOW())
+        ) VALUES (%s,%s,%s,%s, %s, %s,%s, %s,%s, %s, %s,%s, %s,%s, NOW())
         ON CONFLICT DO NOTHING
         """,
         (
             user_id, symbol, session_type, str(session_date),
             result["direction"],
             result["session_high"], result["session_low"],
-            result["sweep_start_ts"], result["first_sweep_level"],
-            result["sweep_end_ts"],
-            result["confirm_break_ts"], result["confirm_break_level"],
+            result.get("sweep_start_ts"), result.get("first_sweep_level"),
+            result.get("sweep_end_ts"),
+            first_break_ts, first_break_level,
+            result.get("confirm_break_ts"), result.get("confirm_break_level"),
         ),
     )
 
