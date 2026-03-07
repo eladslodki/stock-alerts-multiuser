@@ -3339,8 +3339,20 @@ def session_break_page():
             font-size: 14px;
             cursor: pointer;
         }
-        #sb-chart { border-radius: 8px; overflow: hidden; }
+        #sb-chart { border-radius: 8px; overflow: hidden; position: relative; }
         #chart-error { color: #FF6B6B; font-size: 13px; margin-top: 8px; display: none; }
+        .mode-btn {
+            padding: 6px 14px; font-size: 12px; font-weight: 600;
+            border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
+            background: rgba(255,255,255,0.06); color: #8B92A8; cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+        .mode-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff; border-color: transparent;
+        }
+        .mode-btn:hover:not(.active) { background: rgba(255,255,255,0.12); color: #fff; }
+        .setup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; color: #8B92A8; }
     </style>
 </head>
 <body>
@@ -3381,21 +3393,48 @@ def session_break_page():
             </div>
         </div>
 
-        <div class="section">
-            <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
-                <h2>Chart (5M)</h2>
-                <select id="chartSymbolSelect" class="chart-select" onchange="loadChart()">
+        <div class="section" id="chart-section">
+            <!-- ── Mode selector row ── -->
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+                <h2 style="margin:0;">Chart (5M)</h2>
+                <select id="chartSymbolSelect" class="chart-select" onchange="onSymbolChange()">
                     <option value="">-- Select symbol --</option>
                 </select>
-                <span id="chart-state-badge" style="font-size:12px;color:#8B92A8;"></span>
+                <div id="mode-btn-group" style="display:flex;gap:6px;">
+                    <button class="mode-btn active" data-mode="current"
+                            onclick="setMode('current')">Current</button>
+                    <button class="mode-btn" data-mode="last_triggered"
+                            onclick="setMode('last_triggered')">Last Triggered</button>
+                    <button class="mode-btn" data-mode="date"
+                            onclick="setMode('date')">Pick Date</button>
+                </div>
+                <!-- Date picker (visible only in Pick Date mode) -->
+                <div id="date-picker-row" style="display:none;align-items:center;gap:8px;">
+                    <input type="date" id="pickDate" class="chart-select"
+                           style="padding:6px 10px;">
+                    <select id="pickSessionType" class="chart-select">
+                        <option value="asia">Asia</option>
+                        <option value="london">London</option>
+                    </select>
+                    <button onclick="loadOverlays()"
+                            style="padding:6px 14px;font-size:13px;">Load</button>
+                </div>
             </div>
+            <!-- ── Chart canvas ── -->
             <div id="sb-chart" style="height:420px;width:100%;"></div>
             <div id="chart-error"></div>
-            <div style="margin-top:10px;font-size:12px;color:#555;line-height:1.6;">
-                <span style="color:#FFB800;">&#9472;&#9472;</span> Session High &nbsp;
-                <span style="color:#5B7CFF;">&#9472;&#9472;</span> Session Low &nbsp;
-                <span style="color:#00FFA3;">&#9650;</span> UP Trigger &nbsp;
-                <span style="color:#FF6B6B;">&#9660;</span> DOWN Trigger
+            <!-- ── Setup Card ── -->
+            <div id="setup-card" style="display:none;margin-top:14px;padding:16px;
+                 background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);
+                 border-radius:10px;font-size:13px;"></div>
+            <!-- ── Legend ── -->
+            <div style="margin-top:10px;font-size:12px;color:#555;line-height:1.8;">
+                <span style="color:#FFB800;">&#9472;&#9472;</span> Sess H &nbsp;
+                <span style="color:#5B7CFF;">&#9472;&#9472;</span> Sess L &nbsp;
+                <span style="color:#00D4AA;">&#9472;&#9472;</span> Sweep Level &nbsp;
+                <span style="color:#FF9F43;">&#9472;&#9472;</span> Confirm &nbsp;
+                <span style="color:#00FFA3;">&#9650;</span> UP &nbsp;
+                <span style="color:#FF6B6B;">&#9660;</span> DOWN
             </div>
         </div>
     </div>
@@ -3492,11 +3531,150 @@ def session_break_page():
             window.location.href = '/login';
         }
 
-        // ── Candlestick Chart ────────────────────────────────────────────────
-        let _chart = null;
-        let _candleSeries = null;
-        let _priceLines = [];
+        // ── Chart state ──────────────────────────────────────────────────────
+        let _chart = null, _candleSeries = null, _overlayMode = 'current';
 
+        const COLORS = {
+            sessionHigh:  '#FFB800',
+            sessionLow:   '#5B7CFF',
+            sweepLevel:   '#00D4AA',
+            confirmLevel: '#FF9F43',
+            up:           '#00FFA3',
+            down:         '#FF6B6B',
+        };
+
+        // ── OverlayManager ────────────────────────────────────────────────────
+        // Tracks every chart object created so we can wipe them all before
+        // re-rendering. Prevents stacking of labels / lines across refreshes.
+        const OverlayMgr = {
+            priceLines: [],
+            boxEls:     [],
+
+            clear() {
+                this.priceLines.forEach(pl => {
+                    try { _candleSeries.removePriceLine(pl); } catch(_) {}
+                });
+                this.priceLines = [];
+                if (_candleSeries) _candleSeries.setMarkers([]);
+                this.boxEls.forEach(el => {
+                    if (el.parentNode) el.parentNode.removeChild(el);
+                });
+                this.boxEls = [];
+            },
+
+            addPriceLine(opts) {
+                if (!_candleSeries) return;
+                this.priceLines.push(_candleSeries.createPriceLine(opts));
+            },
+
+            setMarkers(arr) {
+                if (!_candleSeries) return;
+                _candleSeries.setMarkers(arr.slice().sort((a, b) => a.time - b.time));
+            },
+        };
+
+        // ── Session box (HTML div positioned over the chart canvas) ───────────
+        // Uses LWC's timeToCoordinate / priceToCoordinate to place a shaded
+        // rectangle exactly over the session candles.
+        function drawSessionBox(fromTs, toTs, high, low) {
+            if (!_chart || !_candleSeries) return;
+            const el = document.getElementById('sb-chart');
+            const x1 = _chart.timeScale().timeToCoordinate(fromTs);
+            const x2 = _chart.timeScale().timeToCoordinate(toTs);
+            const y1 = _candleSeries.priceToCoordinate(high);
+            const y2 = _candleSeries.priceToCoordinate(low);
+            if (x1 == null || x2 == null || y1 == null || y2 == null) return;
+            const L = Math.min(x1, x2), T = Math.min(y1, y2);
+            const W = Math.abs(x2 - x1),  H = Math.abs(y2 - y1);
+            if (W < 2 || H < 2) return;
+            const box = document.createElement('div');
+            box.style.cssText =
+                'position:absolute;pointer-events:none;z-index:1;border-radius:2px;' +
+                'left:' + L + 'px;top:' + T + 'px;' +
+                'width:' + W + 'px;height:' + H + 'px;' +
+                'background:rgba(91,124,255,0.09);' +
+                'border:1px solid rgba(91,124,255,0.28);';
+            el.appendChild(box);
+            OverlayMgr.boxEls.push(box);
+        }
+
+        // ── Setup Card helpers ────────────────────────────────────────────────
+        function fmt(v, dp) {
+            return (v != null) ? parseFloat(v).toFixed(dp != null ? dp : 5) : '\u2014';
+        }
+        function fmtTs(iso) {
+            if (!iso) return '\u2014';
+            const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+            return d.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+        }
+        function fmtIL(iso) {
+            if (!iso) return '';
+            try {
+                const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+                return d.toLocaleString('he-IL', {
+                    timeZone: 'Asia/Jerusalem',
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit',
+                });
+            } catch(_) { return ''; }
+        }
+
+        // ── Setup Card renderer ───────────────────────────────────────────────
+        function renderSetupCard(setup) {
+            const card = document.getElementById('setup-card');
+            if (!setup || setup.status === 'NO_SETUP') {
+                card.style.display = 'none';
+                card.innerHTML = '';
+                return;
+            }
+            const STATUS_COLOR = {
+                WAIT_SWEEP:   '#8B92A8',
+                IN_SWEEP:     '#FFB800',
+                WAIT_CONFIRM: '#FF9F43',
+                TRIGGERED:    '#00FFA3',
+            };
+            const sc  = STATUS_COLOR[setup.status] || '#8B92A8';
+            const dir = setup.sweep && setup.sweep.direction;
+            const dc  = dir === 'DOWN' ? COLORS.down : COLORS.up;
+            const sLbl = ((setup.session_type || '').toUpperCase()) + ' \u00b7 ' + (setup.session_date || '');
+
+            let html =
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+                  '<span style="font-size:15px;font-weight:700;">' + (setup.symbol || '') +
+                    ' <span class="session-badge">' + sLbl + '</span></span>' +
+                  '<span style="color:' + sc + ';font-weight:700;">' + setup.status + '</span>' +
+                '</div>' +
+                '<div class="setup-grid">' +
+                  '<span>Session High: <strong style="color:#FFB800;">' + fmt(setup.session_high) + '</strong></span>' +
+                  '<span>Session Low: <strong style="color:#5B7CFF;">' + fmt(setup.session_low) + '</strong></span>';
+
+            if (dir) {
+                const sl = setup.sweep;
+                html += '<span>Direction: <strong style="color:' + dc + ';">' + dir + '</strong></span>';
+                html += '<span>Sweep Level: <strong style="color:#00D4AA;">' + fmt(sl.first_sweep_level) + '</strong></span>';
+                if (sl.sweep_start_ts)
+                    html += '<span>Sweep Start: <strong>' + fmtTs(sl.sweep_start_ts) + '</strong></span><span></span>';
+                if (sl.sweep_end_ts)
+                    html += '<span>Re-entry: <strong>' + fmtTs(sl.sweep_end_ts) + '</strong></span><span></span>';
+            }
+            if (setup.confirm) {
+                const c = setup.confirm;
+                html += '<span>Confirm Level: <strong style="color:#FF9F43;">' + fmt(c.confirm_break_level) + '</strong></span>';
+                html += '<span>Confirm Time: <strong>' + fmtTs(c.confirm_break_ts) + '</strong></span>';
+            }
+            if (setup.trigger) {
+                const t = setup.trigger;
+                html += '<span style="color:#00FFA3;font-weight:600;">Trigger (UTC): <strong>' + fmtTs(t.trigger_ts) + '</strong></span>';
+                html += '<span style="color:#00FFA3;font-weight:600;">Trigger (IL): <strong>' + fmtIL(t.trigger_ts) + '</strong></span>';
+            }
+            html += '</div>';
+
+            card.innerHTML = html;
+            card.style.display = 'block';
+            card.style.borderLeft = '4px solid ' + (setup.status === 'TRIGGERED' ? dc : sc);
+        }
+
+        // ── Chart init ────────────────────────────────────────────────────────
         function initChart() {
             const el = document.getElementById('sb-chart');
             if (!el || typeof LightweightCharts === 'undefined') return;
@@ -3517,7 +3695,9 @@ def session_break_page():
                 borderUpColor: '#00FFA3', borderDownColor: '#FF6B6B',
                 wickUpColor: '#00FFA3', wickDownColor: '#FF6B6B',
             });
-            new ResizeObserver(() => { if (_chart) _chart.applyOptions({ width: el.clientWidth }); }).observe(el);
+            new ResizeObserver(() => {
+                if (_chart) _chart.applyOptions({ width: el.clientWidth });
+            }).observe(el);
         }
 
         function updateChartSymbolSelect(symbols) {
@@ -3533,81 +3713,133 @@ def session_break_page():
             if (!sel.value && symbols.length) { sel.value = symbols[0]; loadChart(); }
         }
 
+        // ── loadOverlays – fetches ONE setup, clears old drawings, renders fresh
+        async function loadOverlays() {
+            const sym = document.getElementById('chartSymbolSelect').value;
+            if (!sym || !_candleSeries) return;
+
+            // Always clear before rendering – prevents stacked labels
+            OverlayMgr.clear();
+            document.getElementById('setup-card').style.display = 'none';
+
+            // Build URL with cache-bust so stale data is never served
+            let url = '/api/session-sweep/overlay'
+                    + '?symbol=' + encodeURIComponent(sym)
+                    + '&mode='   + encodeURIComponent(_overlayMode)
+                    + '&_t='     + Date.now();
+            if (_overlayMode === 'date') {
+                const d  = document.getElementById('pickDate').value;
+                const st = document.getElementById('pickSessionType').value;
+                if (!d) return;
+                url += '&date=' + encodeURIComponent(d) + '&session_type=' + encodeURIComponent(st);
+            }
+
+            let setup;
+            try { const r = await fetch(url); setup = await r.json(); }
+            catch(_) { return; }
+
+            if (!setup || setup.status === 'NO_SETUP') {
+                renderSetupCard(null);
+                return;
+            }
+
+            // 1) Session box (shaded rectangle over session candles)
+            const sb = setup.session_box;
+            if (sb && sb.enabled && setup.session_high != null && setup.session_low != null) {
+                drawSessionBox(sb.from_ts, sb.to_ts, setup.session_high, setup.session_low);
+            }
+
+            // 2) Price lines (session H/L, sweep level, confirm level)
+            const LS = LightweightCharts.LineStyle;
+            const lineStyleMap = {
+                session_high:      LS.Dashed,
+                session_low:       LS.Dashed,
+                first_sweep_level: LS.Solid,
+                confirm_level:     LS.Dotted,
+            };
+            const colorMap = {
+                sessionHigh:  COLORS.sessionHigh,
+                sessionLow:   COLORS.sessionLow,
+                sweepLevel:   COLORS.sweepLevel,
+                confirmLevel: COLORS.confirmLevel,
+            };
+            const titleMap = {
+                session_high:      'Sess H',
+                session_low:       'Sess L',
+                first_sweep_level: 'Sweep',
+                confirm_level:     'Confirm',
+            };
+            (setup.levels_to_draw || []).forEach(l => {
+                OverlayMgr.addPriceLine({
+                    price:            l.price,
+                    color:            colorMap[l.color_key] || '#888',
+                    lineWidth:        l.type === 'first_sweep_level' ? 2 : 1,
+                    lineStyle:        lineStyleMap[l.type] != null ? lineStyleMap[l.type] : LS.Dotted,
+                    axisLabelVisible: true,
+                    title:            titleMap[l.type] || l.type,
+                });
+            });
+
+            // 3) Markers (SWEEP, RE-ENTRY, CONFIRM, TRIGGER)
+            const dir = setup.sweep && setup.sweep.direction;
+            const isUp = dir === 'UP';
+            const mColorMap = {
+                'SWEEP':    COLORS.sweepLevel,
+                'RE-ENTRY': '#FFB800',
+                'CONFIRM':  COLORS.confirmLevel,
+                'TRIGGER':  isUp ? COLORS.up : COLORS.down,
+            };
+            const markers = (setup.markers || []).map(m => ({
+                time:     m.ts,
+                position: m.position || (isUp ? 'belowBar' : 'aboveBar'),
+                color:    mColorMap[m.text] || '#888',
+                shape:    m.shape || (isUp ? 'arrowUp' : 'arrowDown'),
+                text:     m.text,
+            }));
+            if (markers.length) OverlayMgr.setMarkers(markers);
+
+            // 4) Setup Card
+            renderSetupCard(setup);
+        }
+
+        // ── Mode selector ─────────────────────────────────────────────────────
+        function setMode(mode) {
+            _overlayMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(b =>
+                b.classList.toggle('active', b.dataset.mode === mode));
+            document.getElementById('date-picker-row').style.display =
+                mode === 'date' ? 'flex' : 'none';
+            if (mode !== 'date') loadOverlays();
+        }
+
+        function onSymbolChange() { loadChart(); }
+
+        // ── loadChart – fetches candles then overlays ─────────────────────────
         async function loadChart() {
             const sym = document.getElementById('chartSymbolSelect').value;
             const errEl = document.getElementById('chart-error');
             errEl.style.display = 'none';
             if (!sym) return;
             if (!_chart) initChart();
-            if (!_chart) { errEl.textContent = 'LightweightCharts library not loaded.'; errEl.style.display = 'block'; return; }
+            if (!_chart) {
+                errEl.textContent = 'LightweightCharts library not loaded.';
+                errEl.style.display = 'block';
+                return;
+            }
             try {
-                const res = await fetch('/api/session-break/candles?symbol=' + encodeURIComponent(sym) + '&limit=288');
+                const res = await fetch(
+                    '/api/session-break/candles?symbol=' + encodeURIComponent(sym)
+                    + '&limit=288&_t=' + Date.now()
+                );
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
                 _candleSeries.setData(data);
                 _chart.timeScale().fitContent();
-                await loadOverlays(sym);
+                await loadOverlays();
             } catch(e) {
                 errEl.textContent = 'Chart error: ' + e.message;
                 errEl.style.display = 'block';
             }
-        }
-
-        async function loadOverlays(sym) {
-            _priceLines.forEach(pl => { try { _candleSeries.removePriceLine(pl); } catch(_) {} });
-            _priceLines = [];
-            _candleSeries.setMarkers([]);
-            const badge = document.getElementById('chart-state-badge');
-            if (badge) badge.textContent = '';
-            try {
-                const res = await fetch('/api/session-break/overlay?symbol=' + encodeURIComponent(sym));
-                const data = await res.json();
-                if (!data.success || !data.sessions) return;
-
-                const markers = [];
-                data.sessions.forEach(s => {
-                    if (s.session_high) {
-                        _priceLines.push(_candleSeries.createPriceLine({
-                            price: parseFloat(s.session_high), color: '#FFB800', lineWidth: 1,
-                            lineStyle: LightweightCharts.LineStyle.Dotted,
-                            axisLabelVisible: true,
-                            title: s.session_type.toUpperCase() + ' H',
-                        }));
-                    }
-                    if (s.session_low) {
-                        _priceLines.push(_candleSeries.createPriceLine({
-                            price: parseFloat(s.session_low), color: '#5B7CFF', lineWidth: 1,
-                            lineStyle: LightweightCharts.LineStyle.Dotted,
-                            axisLabelVisible: true,
-                            title: s.session_type.toUpperCase() + ' L',
-                        }));
-                    }
-                    if (s.first_break_level) {
-                        const col = s.direction === 'UP' ? '#00FFA3' : '#FF6B6B';
-                        _priceLines.push(_candleSeries.createPriceLine({
-                            price: parseFloat(s.first_break_level), color: col, lineWidth: 2,
-                            lineStyle: LightweightCharts.LineStyle.Dashed,
-                            axisLabelVisible: true,
-                            title: 'First Break',
-                        }));
-                    }
-                    if (s.triggered_at && s.confirm_break_ts) {
-                        const ts = Math.floor(new Date(s.confirm_break_ts).getTime() / 1000);
-                        markers.push({
-                            time: ts,
-                            position: s.direction === 'UP' ? 'belowBar' : 'aboveBar',
-                            color: s.direction === 'UP' ? '#00FFA3' : '#FF6B6B',
-                            shape: s.direction === 'UP' ? 'arrowUp' : 'arrowDown',
-                            text: s.session_type.toUpperCase() + ' ' + s.direction,
-                        });
-                    }
-                });
-                if (markers.length) _candleSeries.setMarkers(markers.sort((a,b) => a.time - b.time));
-                if (badge && data.sessions.length) {
-                    const latest = data.sessions[data.sessions.length - 1];
-                    badge.textContent = 'State: ' + (latest.state || '—');
-                }
-            } catch(_) { /* overlay errors are non-fatal */ }
         }
 
         // ── Boot ─────────────────────────────────────────────────────────────
@@ -4257,6 +4489,245 @@ def session_sweep_reset():
             'session_type': f_sess_type,
         },
     })
+
+
+@app.route('/api/session-sweep/overlay')
+@login_required
+def session_sweep_overlay():
+    """
+    Return a SINGLE setup object for the chart overlay.
+
+    Query parameters
+    ----------------
+    symbol       required  e.g. XAUUSD
+    mode         optional  current (default) | last_triggered | date
+    session_type required when mode=date  asia | london
+    date         required when mode=date  YYYY-MM-DD (Israel local date)
+
+    Selection rules
+    ---------------
+    current       – latest session that is NOT triggered; falls back to the
+                    most-recently-updated row if everything is triggered.
+    last_triggered – most recently triggered session (triggered_at DESC).
+    date          – exact (symbol, session_type, session_date) lookup.
+
+    Returns a single setup object or {status:"NO_SETUP"} when nothing found.
+    The response is never cached (caller must add ?_t=… for cache-busting).
+    """
+    from services.session_break_detector import _session_window_utc
+    from datetime import datetime as _dtp
+
+    symbol = request.args.get('symbol', '').strip().upper()
+    mode   = request.args.get('mode',   'current').strip().lower()
+
+    if not symbol:
+        return jsonify({'error': 'symbol required'}), 400
+    if mode not in ('current', 'last_triggered', 'date'):
+        return jsonify({'error': "mode must be 'current', 'last_triggered', or 'date'"}), 400
+
+    _no_setup = {
+        'status': 'NO_SETUP', 'symbol': symbol, 'mode': mode,
+        'session_high': None, 'session_low': None,
+        'levels_to_draw': [], 'markers': [],
+        'sweep': None, 'confirm': None, 'trigger': None, 'session_box': None,
+    }
+
+    try:
+        row = None
+
+        if mode == 'current':
+            # Prefer the latest in-progress (non-triggered) setup
+            row = db.execute(
+                """
+                SELECT * FROM session_break_state
+                WHERE user_id = %s AND symbol = %s AND triggered_at IS NULL
+                ORDER BY session_date DESC, updated_at DESC NULLS LAST
+                LIMIT 1
+                """,
+                (current_user.id, symbol), fetchone=True,
+            )
+            if not row:
+                # All triggered or empty – show most recent overall
+                row = db.execute(
+                    """
+                    SELECT * FROM session_break_state
+                    WHERE user_id = %s AND symbol = %s
+                    ORDER BY session_date DESC, COALESCE(triggered_at, updated_at) DESC NULLS LAST
+                    LIMIT 1
+                    """,
+                    (current_user.id, symbol), fetchone=True,
+                )
+
+        elif mode == 'last_triggered':
+            row = db.execute(
+                """
+                SELECT * FROM session_break_state
+                WHERE user_id = %s AND symbol = %s AND triggered_at IS NOT NULL
+                ORDER BY triggered_at DESC
+                LIMIT 1
+                """,
+                (current_user.id, symbol), fetchone=True,
+            )
+
+        elif mode == 'date':
+            session_type = request.args.get('session_type', '').strip().lower()
+            date_str     = request.args.get('date', '').strip()
+            if session_type not in ('asia', 'london'):
+                return jsonify({'error': "session_type must be 'asia' or 'london'"}), 400
+            if not date_str:
+                return jsonify({'error': 'date required (YYYY-MM-DD)'}), 400
+            row = db.execute(
+                """
+                SELECT * FROM session_break_state
+                WHERE user_id = %s AND symbol = %s
+                  AND session_type = %s AND session_date = %s
+                """,
+                (current_user.id, symbol, session_type, date_str), fetchone=True,
+            )
+
+        if not row:
+            return jsonify(_no_setup)
+
+        d = dict(row)
+
+        # ── Compute session UTC window from stored session_type + session_date ──
+        try:
+            sd = d['session_date']
+            if isinstance(sd, str):
+                sd = _dtp.strptime(sd, '%Y-%m-%d').date()
+            start_utc, end_utc = _session_window_utc(d['session_type'], sd)
+            box_from_ts       = int(start_utc.timestamp())
+            box_to_ts         = int(end_utc.timestamp())
+            session_start_utc = start_utc.isoformat()
+            session_end_utc   = end_utc.isoformat()
+        except Exception:
+            box_from_ts = box_to_ts = None
+            session_start_utc = session_end_utc = None
+
+        # ── Map DB state → clean status string ───────────────────────────────
+        db_state = d.get('state') or 'WAIT_SWEEP_START'
+        if d.get('triggered_at'):
+            status = 'TRIGGERED'
+        elif db_state in ('UP_WAIT_CONFIRM', 'DOWN_WAIT_CONFIRM'):
+            status = 'WAIT_CONFIRM'
+        elif db_state in ('UP_IN_SWEEP', 'DOWN_IN_SWEEP'):
+            status = 'IN_SWEEP'
+        else:
+            status = 'WAIT_SWEEP'
+
+        direction = d.get('direction')
+
+        def _f(key):
+            v = d.get(key)
+            return float(v) if v is not None else None
+
+        def _ts(key):
+            v = d.get(key)
+            if v is None:
+                return None
+            return v.isoformat() if hasattr(v, 'isoformat') else str(v)
+
+        def _unix(key):
+            v = d.get(key)
+            if v is None:
+                return None
+            return int(v.timestamp()) if hasattr(v, 'timestamp') else None
+
+        # ── Price levels ─────────────────────────────────────────────────────
+        levels = []
+        if d.get('session_high') is not None:
+            levels.append({'type': 'session_high',      'price': _f('session_high'),
+                           'color_key': 'sessionHigh'})
+        if d.get('session_low') is not None:
+            levels.append({'type': 'session_low',       'price': _f('session_low'),
+                           'color_key': 'sessionLow'})
+        if d.get('first_sweep_level') is not None:
+            levels.append({'type': 'first_sweep_level', 'price': _f('first_sweep_level'),
+                           'color_key': 'sweepLevel',   'only_if_present': True})
+        if d.get('confirm_break_level') is not None:
+            levels.append({'type': 'confirm_level',     'price': _f('confirm_break_level'),
+                           'color_key': 'confirmLevel', 'only_if_present': True})
+
+        # ── Markers (one per key event, minimal set) ─────────────────────────
+        markers = []
+        if d.get('sweep_start_ts'):
+            markers.append({
+                'ts':       _unix('sweep_start_ts'),
+                'position': 'belowBar' if direction == 'UP' else 'aboveBar',
+                'shape':    'arrowUp'  if direction == 'UP' else 'arrowDown',
+                'text':     'SWEEP',
+            })
+        if d.get('sweep_end_ts'):
+            markers.append({
+                'ts':       _unix('sweep_end_ts'),
+                'position': 'aboveBar' if direction == 'UP' else 'belowBar',
+                'shape':    'circle',
+                'text':     'RE-ENTRY',
+            })
+        if d.get('confirm_break_ts'):
+            label = 'TRIGGER' if d.get('triggered_at') else 'CONFIRM'
+            markers.append({
+                'ts':       _unix('confirm_break_ts'),
+                'position': 'belowBar' if direction == 'UP' else 'aboveBar',
+                'shape':    'arrowUp'  if direction == 'UP' else 'arrowDown',
+                'text':     label,
+            })
+
+        # ── Sweep / confirm / trigger sub-objects ─────────────────────────────
+        sweep_obj = None
+        if direction:
+            sweep_obj = {
+                'direction':         direction,
+                'sweep_start_ts':    _ts('sweep_start_ts'),
+                'sweep_end_ts':      _ts('sweep_end_ts'),
+                'first_sweep_level': _f('first_sweep_level'),
+                'reentry_ts':        _ts('sweep_end_ts'),
+            }
+
+        confirm_obj = None
+        if d.get('confirm_break_ts'):
+            confirm_obj = {
+                'confirm_break_ts':    _ts('confirm_break_ts'),
+                'confirm_break_level': _f('confirm_break_level'),
+            }
+
+        trigger_obj = None
+        if d.get('triggered_at'):
+            trigger_obj = {
+                'triggered_at':  _ts('triggered_at'),
+                'trigger_ts':    _ts('confirm_break_ts'),
+                'trigger_price': _f('confirm_break_level'),
+            }
+
+        session_box = None
+        if box_from_ts and box_to_ts:
+            session_box = {'enabled': True, 'from_ts': box_from_ts, 'to_ts': box_to_ts}
+
+        return jsonify({
+            'symbol':            symbol,
+            'provider':          'TRADINGVIEW',
+            'feed':              'PEPPERSTONE',
+            'session_type':      d.get('session_type'),
+            'session_date':      str(d['session_date']),
+            'timezone':          'Asia/Jerusalem',
+            'session_start_utc': session_start_utc,
+            'session_end_utc':   session_end_utc,
+            'session_high':      _f('session_high'),
+            'session_low':       _f('session_low'),
+            'status':            status,
+            'db_state':          db_state,
+            'mode':              mode,
+            'sweep':             sweep_obj,
+            'confirm':           confirm_obj,
+            'trigger':           trigger_obj,
+            'levels_to_draw':    levels,
+            'markers':           markers,
+            'session_box':       session_box,
+        })
+
+    except Exception as exc:
+        logger.error('[SESSION_SWEEP] overlay endpoint error: %s', exc)
+        return jsonify({'error': str(exc)}), 500
 
 
 # Gunicorn will run the app, this is only for local testing
