@@ -188,6 +188,14 @@ class EmailSender:
         confirm_break_level: float,
     ) -> bool:
         """Send a Session Liquidity Sweep alert email."""
+        if not to_email or not str(to_email).strip():
+            logger.error(
+                "SESSION SWEEP EMAIL SKIPPED – to_email is empty/None "
+                "symbol=%s session=%s/%s direction=%s",
+                symbol, session_type, session_date, direction,
+            )
+            return False
+
         if not self.enabled:
             logger.error(
                 "EMAIL NOT SENT (disabled) – would send session sweep alert to %s "
