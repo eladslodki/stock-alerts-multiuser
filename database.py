@@ -264,6 +264,57 @@ class Database:
             ALTER TABLE session_break_state
                 ADD COLUMN IF NOT EXISTS first_sweep_level DECIMAL(15, 5);
             """,
+            # ── Dual-direction sweep columns ────────────────────────────────────
+            # Each direction (UP / DOWN) is tracked independently so a sweep on
+            # one side never blocks detection of the other side.
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS up_sweep_start_ts      TIMESTAMP;
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS up_first_sweep_level   DECIMAL(15, 5);
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS up_sweep_end_ts        TIMESTAMP;
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS up_confirm_break_ts    TIMESTAMP;
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS up_confirm_break_level DECIMAL(15, 5);
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS up_triggered_at        TIMESTAMP;
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS down_sweep_start_ts      TIMESTAMP;
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS down_first_sweep_level   DECIMAL(15, 5);
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS down_sweep_end_ts        TIMESTAMP;
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS down_confirm_break_ts    TIMESTAMP;
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS down_confirm_break_level DECIMAL(15, 5);
+            """,
+            """
+            ALTER TABLE session_break_state
+                ADD COLUMN IF NOT EXISTS down_triggered_at        TIMESTAMP;
+            """,
             # Add sweep-specific columns to session_break_history
             """
             ALTER TABLE session_break_history

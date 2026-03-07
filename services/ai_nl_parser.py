@@ -112,6 +112,9 @@ EXAMPLES:
 "Alert when TSLA is near 250" → ticker: TSLA, intent: PRICE_NEAR, price: 250
 "SPY shows big moves" → ticker: SPY, intent: BIG_MOVE
 "ETH pumps 5%" → ticker: ETH-USD, intent: PERCENT_CHANGE, percent: 5, direction: up
+"Tell me when OKE bumps up 9%+" → ticker: OKE, intent: PERCENT_CHANGE, percent: 9, direction: up
+"TSLA drops 7%" → ticker: TSLA, intent: PERCENT_CHANGE, percent: 7, direction: down
+"Alert if BTC moves 10% either way" → ticker: BTC-USD, intent: PERCENT_CHANGE, percent: 10, direction: both
 
 INTENT TYPES:
 - PRICE_TARGET: specific price level with direction (above/below)

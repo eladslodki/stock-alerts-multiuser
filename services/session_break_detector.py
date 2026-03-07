@@ -170,6 +170,143 @@ def _post_session_candles(candles: List[Dict], end_dt: datetime) -> List[Dict]:
     )
 
 
+def _compute_one_direction(
+    direction: str,
+    session_level: float,
+    post_candles: List[Dict],
+) -> Dict:
+    """
+    Evaluate a single sweep direction from post-session candles.
+
+    Returns a dict with at least one of:
+      {"no_break": True}                 – session level never broken
+      {"direction", "sweep_start_ts", "first_sweep_level",
+       "reentered": False, "confirmed": False}
+      {... "sweep_end_ts", "reentered": True, "confirmed": False}
+      {... "confirm_break_ts", "confirm_break_level", "confirmed": True}
+    """
+    # STATE 2: Find first candle that breaks session_level
+    sweep_start_ts: Optional[datetime] = None
+    for c in post_candles:
+        if direction == "UP" and c["high"] > session_level:
+            sweep_start_ts = c["timestamp"]
+            break
+        elif direction == "DOWN" and c["low"] < session_level:
+            sweep_start_ts = c["timestamp"]
+            break
+
+    if sweep_start_ts is None:
+        return {"no_break": True}
+
+    # STATE 3: Aggregate the extreme across the entire sweep until re-entry
+    sweep_end_ts: Optional[datetime] = None
+    if direction == "UP":
+        sweep_extreme: float = -float("inf")
+        for c in post_candles:
+            if c["timestamp"] < sweep_start_ts:
+                continue
+            sweep_extreme = max(sweep_extreme, c["high"])
+            if c["timestamp"] > sweep_start_ts and c["low"] <= session_level:
+                sweep_end_ts = c["timestamp"]
+                break
+    else:  # DOWN
+        sweep_extreme = float("inf")
+        for c in post_candles:
+            if c["timestamp"] < sweep_start_ts:
+                continue
+            sweep_extreme = min(sweep_extreme, c["low"])
+            if c["timestamp"] > sweep_start_ts and c["high"] >= session_level:
+                sweep_end_ts = c["timestamp"]
+                break
+
+    first_sweep_level = sweep_extreme
+
+    if sweep_end_ts is None:
+        return {
+            "direction":         direction,
+            "sweep_start_ts":    sweep_start_ts,
+            "first_sweep_level": first_sweep_level,
+            "reentered":         False,
+            "confirmed":         False,
+        }
+
+    # STATE 4: Find confirmation break after re-entry
+    for c in post_candles:
+        if c["timestamp"] <= sweep_end_ts:
+            continue
+        if direction == "UP" and c["high"] > first_sweep_level:
+            return {
+                "direction":           direction,
+                "sweep_start_ts":      sweep_start_ts,
+                "first_sweep_level":   first_sweep_level,
+                "sweep_end_ts":        sweep_end_ts,
+                "reentered":           True,
+                "confirmed":           True,
+                "confirm_break_ts":    c["timestamp"],
+                "confirm_break_level": c["high"],
+            }
+        if direction == "DOWN" and c["low"] < first_sweep_level:
+            return {
+                "direction":           direction,
+                "sweep_start_ts":      sweep_start_ts,
+                "first_sweep_level":   first_sweep_level,
+                "sweep_end_ts":        sweep_end_ts,
+                "reentered":           True,
+                "confirmed":           True,
+                "confirm_break_ts":    c["timestamp"],
+                "confirm_break_level": c["low"],
+            }
+
+    return {
+        "direction":         direction,
+        "sweep_start_ts":    sweep_start_ts,
+        "first_sweep_level": first_sweep_level,
+        "sweep_end_ts":      sweep_end_ts,
+        "reentered":         True,
+        "confirmed":         False,
+    }
+
+
+def compute_sweep_result_dual(
+    session_candles: List[Dict],
+    post_candles: List[Dict],
+) -> Optional[Dict]:
+    """
+    Evaluate BOTH UP and DOWN sweep paths independently.
+
+    This is the main entry point used by _process_session().
+    compute_sweep_result() (single-direction) is kept intact for tests.
+
+    Returns None if session_candles is empty, otherwise:
+      {
+        "session_high": float,
+        "session_low":  float,
+        "up":   _compute_one_direction("UP",   session_high, post_candles),
+        "down": _compute_one_direction("DOWN", session_low,  post_candles),
+      }
+    """
+    if not session_candles:
+        return None
+
+    session_high = max(c["high"] for c in session_candles)
+    session_low  = min(c["low"]  for c in session_candles)
+
+    if not post_candles:
+        return {
+            "session_high": session_high,
+            "session_low":  session_low,
+            "up":           {"no_break": True},
+            "down":         {"no_break": True},
+        }
+
+    return {
+        "session_high": session_high,
+        "session_low":  session_low,
+        "up":           _compute_one_direction("UP",   session_high, post_candles),
+        "down":         _compute_one_direction("DOWN", session_low,  post_candles),
+    }
+
+
 def compute_sweep_result(
     session_candles: List[Dict],
     post_candles: List[Dict],
@@ -615,14 +752,17 @@ class SessionBreakDetector:
 
         start_utc, end_utc = _session_window_utc(session_type, session_date)
 
-        # ── 1. Anti-spam: skip if already triggered ──────────────────────────
+        # ── 1. Anti-spam: skip only when BOTH directions are already triggered ──
         existing = _load_state(user_id, symbol, session_type, session_date)
-        if existing and existing.get("triggered_at"):
-            logger.debug(
-                "%s[SESSION_TRACK] user=%s symbol=%s session=%s/%s already_triggered",
-                LP, user_id, symbol, session_type, session_date,
-            )
-            return False, False
+        if existing:
+            _up_done   = existing.get("up_triggered_at")   is not None
+            _down_done = existing.get("down_triggered_at") is not None
+            if _up_done and _down_done:
+                logger.debug(
+                    "%s[SESSION_TRACK] user=%s symbol=%s session=%s/%s both_directions_triggered",
+                    LP, user_id, symbol, session_type, session_date,
+                )
+                return False, False
 
         # ── 1b. Log new session init (first time we see this session identity) ─
         if existing is None:
@@ -750,134 +890,216 @@ class SessionBreakDetector:
             len(post_candles),
         )
 
-        # ── 3. Run the sweep state machine ───────────────────────────────────
-        computation = compute_sweep_result(ses_candles, post_candles)
+        # ── 3. Run DUAL sweep state machine (UP and DOWN independently) ────────
+        computation = compute_sweep_result_dual(ses_candles, post_candles)
         if computation is None:
             return False, False
+
+        up_result   = computation["up"]
+        down_result = computation["down"]
 
         # Always persist session high/low; explicitly null all sweep fields so
         # that a re-processed session row never inherits stale values.
         state_fields: Dict = {
-            "session_high":        session_high,
-            "session_low":         session_low,
-            "state":               "WAIT_SWEEP_START",
-            "direction":           None,
-            "sweep_start_ts":      None,
-            "first_sweep_level":   None,
-            "sweep_end_ts":        None,
-            "confirm_break_ts":    None,
-            "confirm_break_level": None,
+            "session_high":             session_high,
+            "session_low":              session_low,
+            "state":                    "WAIT_SWEEP_START",
+            # Single-direction backwards-compat fields (set from primary direction below)
+            "direction":                None,
+            "sweep_start_ts":           None,
+            "first_sweep_level":        None,
+            "sweep_end_ts":             None,
+            "confirm_break_ts":         None,
+            "confirm_break_level":      None,
+            # Per-direction columns (dual-direction support)
+            "up_sweep_start_ts":        None,
+            "up_first_sweep_level":     None,
+            "up_sweep_end_ts":          None,
+            "up_confirm_break_ts":      None,
+            "up_confirm_break_level":   None,
+            "down_sweep_start_ts":      None,
+            "down_first_sweep_level":   None,
+            "down_sweep_end_ts":        None,
+            "down_confirm_break_ts":    None,
+            "down_confirm_break_level": None,
         }
 
-        if computation.get("no_break"):
+        up_no_break   = up_result.get("no_break", False)
+        down_no_break = down_result.get("no_break", False)
+
+        if up_no_break and down_no_break:
             _upsert_state(user_id, symbol, session_type, session_date, **state_fields)
             return False, False
 
-        # Sweep has started
-        direction        = computation["direction"]
-        sweep_start_ts   = computation["sweep_start_ts"]
-        first_sweep_level = computation["first_sweep_level"]
-        reentered        = computation.get("reentered", False)
-
-        logger.info(
-            "%s[SWEEP_START] user=%s symbol=%s session=%s/%s "
-            "direction=%s sweep_start_ts=%s session_level=%.5f",
-            LP, user_id, symbol, session_type, session_date,
-            direction, sweep_start_ts.isoformat(),
-            session_high if direction == "UP" else session_low,
-        )
-
-        if reentered:
-            sweep_end_ts = computation["sweep_end_ts"]
-            logger.info(
-                "%s[SWEEP_END] user=%s symbol=%s session=%s/%s "
-                "direction=%s first_sweep_level=%.5f sweep_end_ts=%s reentered=True",
-                LP, user_id, symbol, session_type, session_date,
-                direction, first_sweep_level, sweep_end_ts.isoformat(),
-            )
-        else:
-            sweep_end_ts = None
-            logger.debug(
-                "%s[SWEEP_UPDATE] user=%s symbol=%s session=%s/%s "
-                "direction=%s current_sweep_level=%.5f sweep_start_ts=%s reentered=False",
-                LP, user_id, symbol, session_type, session_date,
-                direction, first_sweep_level, sweep_start_ts.isoformat(),
-            )
-
-        state_name = f"{direction}_IN_SWEEP" if not reentered else f"{direction}_WAIT_CONFIRM"
-        state_fields.update({
-            "state":             state_name,
-            "direction":         direction,
-            "sweep_start_ts":    sweep_start_ts,
-            "first_sweep_level": first_sweep_level,
-            "sweep_end_ts":      sweep_end_ts,
-        })
-        state_advanced = True
-
-        if not computation.get("confirmed"):
-            _upsert_state(user_id, symbol, session_type, session_date, **state_fields)
-            return False, state_advanced
-
-        # ── 4. Confirmation – TRIGGER ────────────────────────────────────────
-        confirm_ts    = computation["confirm_break_ts"]
-        confirm_level = computation["confirm_break_level"]
-
-        logger.info(
-            "%s[CONFIRM] user=%s symbol=%s session=%s/%s "
-            "direction=%s confirm_level=%.5f confirm_ts=%s",
-            LP, user_id, symbol, session_type, session_date,
-            direction, confirm_level, confirm_ts.isoformat(),
-        )
-
-        # Race-condition guard: re-check DB before writing triggered_at
-        existing_now = _load_state(user_id, symbol, session_type, session_date)
-        if existing_now and existing_now.get("triggered_at"):
-            return False, state_advanced
-
-        # Mark triggered BEFORE sending email (idempotency)
-        trigger_time = datetime.utcnow()
-        state_fields.update({
-            "state":               "TRIGGERED",
-            "confirm_break_ts":    confirm_ts,
-            "confirm_break_level": confirm_level,
-            "triggered_at":        trigger_time,
-        })
-        _upsert_state(user_id, symbol, session_type, session_date, **state_fields)
-
-        # Save history
-        _save_history(user_id, symbol, session_type, session_date, {
-            **computation,
-            "session_high":    session_high,
-            "session_low":     session_low,
-            "sweep_end_ts":    sweep_end_ts,
-        })
-
-        logger.info(
-            "%s[TRIGGER] user=%s symbol=%s session=%s/%s "
-            "direction=%s sweep_start_ts=%s first_sweep_level=%.5f "
-            "sweep_end_ts=%s confirm_level=%.5f@%s",
-            LP, user_id, symbol, session_type, session_date,
-            direction,
-            sweep_start_ts.isoformat(), first_sweep_level,
-            sweep_end_ts.isoformat() if sweep_end_ts else "None",
-            confirm_level, confirm_ts.isoformat(),
-        )
-
-        # Send email
-        try:
-            _send_alert_email(user_email, symbol, session_type, session_date, {
-                **computation,
-                "session_high":    session_high,
-                "session_low":     session_low,
-                "sweep_end_ts":    sweep_end_ts,
+        # ── Populate per-direction fields from computation ───────────────────
+        if not up_no_break:
+            state_fields.update({
+                "up_sweep_start_ts":      up_result.get("sweep_start_ts"),
+                "up_first_sweep_level":   up_result.get("first_sweep_level"),
+                "up_sweep_end_ts":        up_result.get("sweep_end_ts"),
+                "up_confirm_break_ts":    up_result.get("confirm_break_ts"),
+                "up_confirm_break_level": up_result.get("confirm_break_level"),
             })
-        except Exception as email_exc:
-            logger.error(
-                "%s[TRIGGER] email_failed user=%s symbol=%s err=%s",
-                LP, user_id, symbol, email_exc,
+            logger.info(
+                "%s[SWEEP_START] user=%s symbol=%s session=%s/%s "
+                "direction=UP sweep_start_ts=%s session_high=%.5f",
+                LP, user_id, symbol, session_type, session_date,
+                up_result["sweep_start_ts"].isoformat(), session_high,
+            )
+            if up_result.get("reentered"):
+                logger.info(
+                    "%s[SWEEP_END] user=%s symbol=%s session=%s/%s "
+                    "direction=UP first_sweep_level=%.5f sweep_end_ts=%s reentered=True",
+                    LP, user_id, symbol, session_type, session_date,
+                    up_result["first_sweep_level"],
+                    up_result["sweep_end_ts"].isoformat(),
+                )
+
+        if not down_no_break:
+            state_fields.update({
+                "down_sweep_start_ts":      down_result.get("sweep_start_ts"),
+                "down_first_sweep_level":   down_result.get("first_sweep_level"),
+                "down_sweep_end_ts":        down_result.get("sweep_end_ts"),
+                "down_confirm_break_ts":    down_result.get("confirm_break_ts"),
+                "down_confirm_break_level": down_result.get("confirm_break_level"),
+            })
+            logger.info(
+                "%s[SWEEP_START] user=%s symbol=%s session=%s/%s "
+                "direction=DOWN sweep_start_ts=%s session_low=%.5f",
+                LP, user_id, symbol, session_type, session_date,
+                down_result["sweep_start_ts"].isoformat(), session_low,
+            )
+            if down_result.get("reentered"):
+                logger.info(
+                    "%s[SWEEP_END] user=%s symbol=%s session=%s/%s "
+                    "direction=DOWN first_sweep_level=%.5f sweep_end_ts=%s reentered=True",
+                    LP, user_id, symbol, session_type, session_date,
+                    down_result["first_sweep_level"],
+                    down_result["sweep_end_ts"].isoformat(),
+                )
+
+        # ── Choose "primary" direction for single-direction backwards-compat ──
+        # Most-advanced state wins: confirmed(3) > reentered(2) > sweeping(1) > none(0)
+        def _score(r: Dict) -> int:
+            if r.get("no_break"):  return 0
+            if r.get("confirmed"): return 3
+            if r.get("reentered"): return 2
+            return 1
+
+        up_score   = _score(up_result)
+        down_score = _score(down_result)
+        primary    = "UP"   if up_score >= down_score else "DOWN"
+        primary_r  = up_result if primary == "UP" else down_result
+
+        if not primary_r.get("no_break"):
+            state_name = (
+                f"{primary}_IN_SWEEP"     if not primary_r.get("reentered") else
+                f"{primary}_WAIT_CONFIRM" if not primary_r.get("confirmed") else
+                "TRIGGERED"
+            )
+            state_fields.update({
+                "state":             state_name,
+                "direction":         primary,
+                "sweep_start_ts":    primary_r.get("sweep_start_ts"),
+                "first_sweep_level": primary_r.get("first_sweep_level"),
+                "sweep_end_ts":      primary_r.get("sweep_end_ts"),
+            })
+
+        state_advanced = up_score > 0 or down_score > 0
+
+        # ── 4. Trigger each confirmed direction independently ─────────────────
+        # A sweep on one side does NOT prevent detection of the other side.
+        for dir_key, dir_result, trig_col in (
+            ("UP",   up_result,   "up_triggered_at"),
+            ("DOWN", down_result, "down_triggered_at"),
+        ):
+            if dir_result.get("no_break") or not dir_result.get("confirmed"):
+                continue
+
+            # Per-direction anti-spam: skip if this direction was already triggered
+            _existing_check = _load_state(user_id, symbol, session_type, session_date)
+            if _existing_check and _existing_check.get(trig_col):
+                logger.debug(
+                    "%s[TRIGGER] user=%s symbol=%s session=%s/%s "
+                    "direction=%s already_triggered – skipping",
+                    LP, user_id, symbol, session_type, session_date, dir_key,
+                )
+                continue
+
+            confirm_ts    = dir_result["confirm_break_ts"]
+            confirm_level = dir_result["confirm_break_level"]
+            sweep_start   = dir_result["sweep_start_ts"]
+            sweep_level   = dir_result["first_sweep_level"]
+            sweep_end     = dir_result.get("sweep_end_ts")
+
+            logger.info(
+                "%s[CONFIRM] user=%s symbol=%s session=%s/%s "
+                "direction=%s confirm_level=%.5f confirm_ts=%s",
+                LP, user_id, symbol, session_type, session_date,
+                dir_key, confirm_level, confirm_ts.isoformat(),
             )
 
-        triggered = True
+            # Mark triggered BEFORE sending email (idempotency)
+            trigger_time = datetime.utcnow()
+            state_fields[trig_col] = trigger_time
+            state_fields.update({
+                "state":               "TRIGGERED",
+                "triggered_at":        trigger_time,
+                "direction":           dir_key,
+                "sweep_start_ts":      sweep_start,
+                "first_sweep_level":   sweep_level,
+                "sweep_end_ts":        sweep_end,
+                "confirm_break_ts":    confirm_ts,
+                "confirm_break_level": confirm_level,
+            })
+            _upsert_state(user_id, symbol, session_type, session_date, **state_fields)
+
+            # Save to history (one row per direction per session)
+            _save_history(user_id, symbol, session_type, session_date, {
+                "direction":           dir_key,
+                "session_high":        session_high,
+                "session_low":         session_low,
+                "sweep_start_ts":      sweep_start,
+                "first_sweep_level":   sweep_level,
+                "sweep_end_ts":        sweep_end,
+                "confirm_break_ts":    confirm_ts,
+                "confirm_break_level": confirm_level,
+            })
+
+            logger.info(
+                "%s[TRIGGER] user=%s symbol=%s session=%s/%s "
+                "direction=%s sweep_start_ts=%s first_sweep_level=%.5f "
+                "sweep_end_ts=%s confirm_level=%.5f@%s",
+                LP, user_id, symbol, session_type, session_date,
+                dir_key,
+                sweep_start.isoformat(), sweep_level,
+                sweep_end.isoformat() if sweep_end else "None",
+                confirm_level, confirm_ts.isoformat(),
+            )
+
+            try:
+                _send_alert_email(user_email, symbol, session_type, session_date, {
+                    "direction":           dir_key,
+                    "session_high":        session_high,
+                    "session_low":         session_low,
+                    "sweep_start_ts":      sweep_start,
+                    "first_sweep_level":   sweep_level,
+                    "sweep_end_ts":        sweep_end,
+                    "confirm_break_ts":    confirm_ts,
+                    "confirm_break_level": confirm_level,
+                })
+            except Exception as email_exc:
+                logger.error(
+                    "%s[TRIGGER] email_failed user=%s symbol=%s direction=%s err=%s",
+                    LP, user_id, symbol, dir_key, email_exc,
+                )
+
+            triggered = True
+
+        # Persist state even when no new trigger fired
+        if not triggered:
+            _upsert_state(user_id, symbol, session_type, session_date, **state_fields)
+
         return triggered, state_advanced
 
 
