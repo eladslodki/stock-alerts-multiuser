@@ -86,7 +86,7 @@ def _run_generation(
 
 _TAB_HTML = """
 <!DOCTYPE html>
-<html lang="he" dir="rtl">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -114,6 +114,17 @@ _TAB_HTML = """
     .status-box.error   { background: rgba(255,71,87,.1);   color: var(--negative); border: 1px solid rgba(255,71,87,.3); }
     .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(91,124,255,.3); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-left: 8px; }
     .error-msg { color: var(--negative); font-size: 13px; margin-top: 8px; display: none; }
+    /* ── Mobile ── */
+    @media (max-width: 768px) {
+      .page-wrap { padding-left: 16px; padding-right: 16px; }
+      .search-row { flex-wrap: wrap; }
+      .search-row .form-input { min-width: 0; }
+      .search-row .btn { width: 100%; }
+      .filing-card { flex-wrap: wrap; align-items: flex-start; padding: 14px 16px; }
+      .filing-actions { width: 100%; margin-top: 10px; justify-content: flex-end; }
+      .filing-title { font-size: 13px; }
+      .btn-sm { padding: 8px 16px; min-height: 40px; }
+    }
   </style>
 </head>
 <body>
@@ -306,6 +317,7 @@ async function logout() {
   window.location.href = '/login';
 }
 </script>
+<script src="/static/js/nav-mobile.js"></script>
 </body>
 </html>
 """
