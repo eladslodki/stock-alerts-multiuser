@@ -1096,3 +1096,187 @@ input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
 @media (min-width: 700px) {
   .bottom-tab-bar { left: 50%; transform: translateX(-50%); width: 700px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   MOBILE NAV — hamburger button (always defined, shown via media query)
+   ═══════════════════════════════════════════════════════════════════ */
+.mobile-menu-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+.mobile-menu-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.07); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   768px — Core mobile layout
+   ═══════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+  /* ── Navigation ── */
+  .mobile-menu-btn { display: flex; }
+
+  .top-nav {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: var(--nav-h);
+    padding: 0 16px;
+    overflow: visible;
+    /* Keep sticky so it doesn't scroll away when menu opens */
+    position: sticky;
+  }
+
+  /* Reset scrollable-nav behaviour: we now use wrap */
+  .top-nav { overflow-x: visible; }
+
+  .top-nav-brand { flex: 1; }
+
+  /* Hide all nav links and spacer/logout by default on mobile */
+  .top-nav-link,
+  .top-nav-spacer,
+  .top-nav-logout {
+    display: none;
+  }
+
+  /* Reveal links when menu is open */
+  .top-nav.mobile-open .top-nav-link {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 13px 8px;
+    border-top: 1px solid var(--border-subtle);
+    font-size: 14px;
+    border-radius: 0;
+  }
+  .top-nav.mobile-open .top-nav-link.active {
+    background: rgba(91,124,255,0.08);
+    color: var(--accent);
+  }
+  .top-nav.mobile-open .top-nav-logout {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    margin: 8px 0 12px;
+  }
+
+  /* ── Page wrapper ── */
+  .page-wrapper {
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-top: calc(var(--nav-h) + 20px);
+  }
+  .page-wrapper.narrow,
+  .page-wrapper.medium {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  /* ── Cards ── */
+  .card {
+    padding: var(--sp-4);
+    border-radius: var(--r-md);
+  }
+  .card-header {
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+
+  /* ── Stat grids → 2 columns ── */
+  .stat-grid,
+  .stat-grid-3,
+  .stat-grid-4,
+  .stat-grid-auto {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* ── Hero stats ── */
+  .hero-stats { grid-template-columns: repeat(2, 1fr); gap: var(--sp-3); }
+
+  /* ── Form rows → single column ── */
+  .form-row,
+  .form-row-3 { grid-template-columns: 1fr; }
+
+  /* ── Form inputs: larger touch targets + prevent iOS zoom ── */
+  .form-input,
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  input[type="email"],
+  input[type="password"],
+  select,
+  textarea {
+    font-size: 16px; /* Prevents iOS auto-zoom */
+    min-height: 44px;
+  }
+  textarea { min-height: 80px; }
+
+  /* ── Buttons: minimum tap target ── */
+  .btn { min-height: 44px; }
+  .btn-primary, .btn-ghost { min-height: 44px; }
+
+  /* ── Segmented controls ── */
+  .segmented-4 { grid-template-columns: repeat(2, 1fr); }
+  .segmented-3 { grid-template-columns: repeat(3, 1fr); }
+
+  /* ── Item card body grids ── */
+  .item-card-body.thirds { grid-template-columns: repeat(2, 1fr); }
+  .item-card-body.quarter { grid-template-columns: repeat(2, 1fr); }
+
+  /* ── Tables: always scrollable on mobile ── */
+  .table-wrap,
+  .table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: var(--r-md);
+  }
+  .data-table th,
+  .data-table td {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  /* ── History cards ── */
+  .history-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--sp-2);
+  }
+
+  /* ── Page headers ── */
+  .page-title { font-size: 24px; }
+  .page-header { margin-bottom: var(--sp-4); }
+  .page-header-actions { flex-wrap: wrap; gap: var(--sp-2); }
+
+  /* ── Modals ── */
+  .modal-content {
+    width: 94vw;
+    max-width: 94vw;
+    padding: var(--sp-5) var(--sp-4);
+  }
+
+  /* ── Empty states ── */
+  .empty-state { padding: var(--sp-8) var(--sp-4); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   480px — Extra-small phones
+   ═══════════════════════════════════════════════════════════════════ */
+@media (max-width: 480px) {
+  .hero-stats { grid-template-columns: 1fr; }
+  .item-card-body.thirds,
+  .item-card-body.quarter { grid-template-columns: 1fr; }
+  .page-title { font-size: 22px; }
+  .segmented-3 { grid-template-columns: 1fr; }
+  .stat-card { padding: var(--sp-3); }
+}

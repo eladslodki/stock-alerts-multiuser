@@ -213,6 +213,20 @@ def dashboard():
             align-items: start;
         }
         @media (max-width: 960px) { .dash-layout { grid-template-columns: 1fr; } }
+        @media (max-width: 768px) {
+            .dash-layout { gap: var(--sp-3); }
+        }
+
+        /* Alert price grid (JS-generated) */
+        .alert-price-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+            margin-bottom: 12px;
+        }
+        @media (max-width: 360px) {
+            .alert-price-grid { grid-template-columns: 1fr; }
+        }
 
         /* Alert card rendered by JS */
         .alert-card {
@@ -356,17 +370,6 @@ def dashboard():
                     <div class="form-group">
                         <input type="text" id="nlAlertInput" placeholder='e.g. "Alert me when TSLA breaks 200"' />
                     </div>
-
-                <input 
-                    type="text" 
-                    id="nlAlertInput" 
-                    placeholder="Type your alert in plain English..."
-                    style="width: 100%; margin-bottom: 12px;"
-                />
-    
-               <button onclick="parseNLAlert()" id="parseBtn">Parse Alert</button>
-
-               <!-- Preview Section (hidden initially) -->
                     <button class="btn btn-secondary btn-sm" onclick="parseNLAlert()" id="parseBtn">Parse Alert</button>
 
                     <div id="nlPreview" style="display:none;" class="nl-preview">
@@ -636,7 +639,7 @@ def dashboard():
                         ${isAbove ? 'Above' : 'Below'}
                     </div>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
+                <div class="alert-price-grid">
                     <div>
                         <div class="item-field-label">Current Price</div>
                         <div class="item-field-value" style="font-size:18px;">$${current.toFixed(2)}</div>
@@ -811,6 +814,7 @@ function cancelNLAlert() {
 }
 
     </script>
+    <script src="/static/js/nav-mobile.js"></script>
 </body>
 </html>
 """
@@ -1139,6 +1143,7 @@ def bitcoin_scanner_page():
                 window.location.href = '/login';
             }
         </script>
+        <script src="/static/js/nav-mobile.js"></script>
     </body>
     </html>
     """
@@ -1249,7 +1254,28 @@ def portfolio_page():
         .tab:hover:not(.active) { color: var(--text-primary); }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
-        @media (max-width: 768px) { .summary-grid { grid-template-columns: 1fr 1fr; } .stats-grid { grid-template-columns: repeat(2, 1fr); } .grid { grid-template-columns: 1fr; } th, td { padding: 8px 6px; } }
+        /* ── Mobile overrides ── */
+        @media (max-width: 768px) {
+            .summary-grid { grid-template-columns: 1fr 1fr; }
+            .stats-grid   { grid-template-columns: repeat(2, 1fr); }
+            .grid         { grid-template-columns: 1fr; }
+            th, td        { padding: 8px 8px; font-size: 12px; }
+            .tab          { padding: 10px 12px; font-size: 12px; }
+            /* Pie chart + legend: stack vertically */
+            .alloc-chart-wrap { flex-direction: column; align-items: flex-start; gap: var(--sp-4); }
+            .alloc-legend-wrap { min-width: unset !important; width: 100%; }
+            /* Summary value font size */
+            .summary-value { font-size: 20px; }
+            /* Action buttons in tables */
+            .btn-close, .btn-edit, .btn-delete { padding: 5px 8px; font-size: 11px; }
+            /* Form grid */
+            .form-group { margin-bottom: 10px; }
+        }
+        @media (max-width: 480px) {
+            .summary-grid { grid-template-columns: 1fr; }
+            .stats-grid   { grid-template-columns: repeat(2, 1fr); }
+            .summary-value { font-size: 18px; }
+        }
     </style>
 </head>
 <body>
@@ -1353,11 +1379,11 @@ def portfolio_page():
         <!-- Allocation Pie Chart -->
         <div class="card" id="allocationCard" style="margin-bottom: var(--sp-4);">
             <div class="card-header"><div class="card-title">Allocation by Category</div></div>
-            <div style="display:flex;align-items:center;gap:40px;flex-wrap:wrap;">
+            <div class="alloc-chart-wrap" style="display:flex;align-items:center;gap:40px;flex-wrap:wrap;">
                 <div style="position:relative;width:220px;height:220px;flex-shrink:0;">
                     <canvas id="allocPieCanvas" width="220" height="220"></canvas>
                 </div>
-                <div id="allocLegend" style="display:flex;flex-direction:column;gap:10px;font-size:13px;flex:1;min-width:200px;"></div>
+                <div id="allocLegend" class="alloc-legend-wrap" style="display:flex;flex-direction:column;gap:10px;font-size:13px;flex:1;min-width:200px;"></div>
             </div>
         </div>
 
@@ -2134,6 +2160,7 @@ def portfolio_page():
             window.location.href = '/login';
         }
     </script>
+    <script src="/static/js/nav-mobile.js"></script>
 </body>
 </html>
     """
@@ -2791,6 +2818,7 @@ def alert_history_page():
 
         loadHistory();
     </script>
+    <script src="/static/js/nav-mobile.js"></script>
 </body>
 </html>
     """
@@ -2912,6 +2940,7 @@ def radar_page():
         loadRadar();
         setInterval(loadRadar, 60000);
     </script>
+    <script src="/static/js/nav-mobile.js"></script>
 </body>
 </html>
     """
@@ -2959,6 +2988,15 @@ def session_break_page():
         .watchlist-tag { display: inline-flex; align-items: center; gap: 8px; margin: 4px; padding: 6px 14px; background: var(--bg-surface); border: 1px solid var(--border-card); border-radius: var(--r-sm); font-size: 13px; font-weight: 600; }
         .watchlist-tag-remove { padding: 2px 7px; font-size: 11px; background: rgba(255,71,87,0.15); color: var(--negative); border: none; border-radius: 4px; cursor: pointer; font-family: inherit; }
         .chart-legend { margin-top: 10px; font-size: 12px; color: var(--text-muted); line-height: 2; }
+        /* ── Mobile ── */
+        @media (max-width: 768px) {
+            .section { padding: var(--sp-4); }
+            .setup-grid { grid-template-columns: 1fr; gap: 4px 0; }
+            #sb-chart { height: 320px !important; }
+        }
+        @media (max-width: 480px) {
+            #sb-chart { height: 260px !important; }
+        }
     </style>
 </head>
 <body>
@@ -2983,8 +3021,8 @@ def session_break_page():
 
         <div class="section">
             <div class="section-title">Watchlist</div>
-            <div style="display:flex;gap:var(--sp-3);margin-bottom:var(--sp-4);">
-                <input type="text" id="symbolInput" placeholder="Add symbol (e.g., EURUSD or XAU/USD)" class="form-input" style="flex:1;">
+            <div style="display:flex;gap:var(--sp-3);margin-bottom:var(--sp-4);flex-wrap:wrap;">
+                <input type="text" id="symbolInput" placeholder="Add symbol (e.g., EURUSD or XAU/USD)" class="form-input" style="flex:1;min-width:200px;">
                 <button class="btn btn-primary" onclick="addSymbol()">Add Symbol</button>
             </div>
             <div id="watchlistContainer"></div>
@@ -3291,9 +3329,10 @@ def session_break_page():
         function initChart() {
             const el = document.getElementById('sb-chart');
             if (!el || typeof LightweightCharts === 'undefined') return;
+            const chartHeight = window.innerWidth <= 480 ? 260 : window.innerWidth <= 768 ? 320 : 440;
             _chart = LightweightCharts.createChart(el, {
                 width: el.clientWidth,
-                height: 420,
+                height: chartHeight,
                 layout: { background: { color: '#0d1117' }, textColor: '#8B92A8' },
                 grid: {
                     vertLines: { color: 'rgba(255,255,255,0.04)' },
@@ -3463,6 +3502,7 @@ def session_break_page():
         loadAlerts();
         setInterval(loadAlerts, 60000);
     </script>
+    <script src="/static/js/nav-mobile.js"></script>
 </body>
 </html>
     """
@@ -3863,6 +3903,7 @@ async function logout() {
   window.location.href = '/login';
 }
 </script>
+<script src="/static/js/nav-mobile.js"></script>
 </body>
 </html>"""
     return html
