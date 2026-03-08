@@ -2767,61 +2767,85 @@ def portfolio_page():
             const errDiv  = document.getElementById('tvChartError');
             const errMsg  = document.getElementById('tvChartErrorMsg');
 
-            // Remove any previous iframe
-            const prev = wrap.querySelector('iframe');
+            // Remove any previous widget container
+            const prev = wrap.querySelector('.tv-widget-container');
             if (prev) prev.remove();
 
             loading.style.display = 'flex';
             errDiv.style.display  = 'none';
             document.getElementById('tvChartLoadingText').textContent = 'Loading chart for ' + tvSymbol + '…';
 
-            // Build iframe
-            const iframe = document.createElement('iframe');
-            iframe.style.cssText = 'width:100%;height:100%;border:none;display:none;';
-            iframe.setAttribute('allowtransparency', 'true');
-            iframe.setAttribute('allowfullscreen', '');
+            // Each widget needs a unique container id
+            const containerId = 'tv_chart_' + Date.now();
+            const container = document.createElement('div');
+            container.className = 'tv-widget-container';
+            container.style.cssText = 'width:100%;height:100%;display:none;';
 
-            // TradingView Advanced Chart widget URL
-            const src = 'https://www.tradingview.com/widgetsnippet/chart/?symbol=' + encodeURIComponent(tvSymbol)
-                + '&interval=D&theme=dark&style=1&locale=en'
-                + '&toolbar_bg=%230d0f1a'
-                + '&hide_top_toolbar=0'
-                + '&hide_legend=0'
-                + '&allow_symbol_change=1'
-                + '&save_image=0';
+            const chartDiv = document.createElement('div');
+            chartDiv.id = containerId;
+            chartDiv.style.cssText = 'width:100%;height:100%;';
+            container.appendChild(chartDiv);
+            wrap.appendChild(container);
 
-            iframe.src = src;
-
-            iframe.onload = function() {
-                loading.style.display = 'none';
-                iframe.style.display  = 'block';
-            };
-
-            // If the iframe fails to communicate (cross-origin), hide loading after 8s
-            let fallbackTimer = setTimeout(() => {
-                if (loading.style.display !== 'none') {
+            function initWidget() {
+                try {
+                    new TradingView.widget({
+                        container_id:       containerId,
+                        symbol:             tvSymbol,
+                        interval:           'D',
+                        timezone:           'Etc/UTC',
+                        theme:              'dark',
+                        style:              '1',
+                        locale:             'en',
+                        toolbar_bg:         '#141520',
+                        enable_publishing:  false,
+                        allow_symbol_change: true,
+                        autosize:           true,
+                        hide_side_toolbar:  false,
+                        hide_top_toolbar:   false,
+                        withdateranges:     true,
+                        save_image:         false,
+                    });
+                    loading.style.display  = 'none';
+                    container.style.display = 'block';
+                } catch (e) {
                     loading.style.display = 'none';
-                    iframe.style.display  = 'block';
+                    errDiv.style.display  = 'flex';
+                    errMsg.textContent    = 'Could not initialise chart for "' + tvSymbol + '"';
                 }
-            }, 8000);
+            }
 
-            iframe.onerror = function() {
-                clearTimeout(fallbackTimer);
-                loading.style.display = 'none';
-                errDiv.style.display  = 'flex';
-                errMsg.textContent    = 'Symbol "' + tvSymbol + '" could not be loaded. Try editing the ticker.';
-            };
-
-            wrap.appendChild(iframe);
+            if (typeof TradingView !== 'undefined' && TradingView.widget) {
+                initWidget();
+            } else {
+                // Load TradingView library once; re-use on subsequent opens
+                const existing = document.getElementById('tv-js-lib');
+                if (existing) {
+                    // Script tag exists but TradingView not ready yet — wait
+                    existing.addEventListener('load', initWidget);
+                    return;
+                }
+                const script   = document.createElement('script');
+                script.id      = 'tv-js-lib';
+                script.src     = 'https://s3.tradingview.com/tv.js';
+                script.async   = true;
+                script.onload  = initWidget;
+                script.onerror = function () {
+                    loading.style.display = 'none';
+                    errDiv.style.display  = 'flex';
+                    errMsg.textContent    = 'Could not load TradingView library. Check your internet connection.';
+                };
+                document.head.appendChild(script);
+            }
         }
 
         function closeChartModal() {
             document.getElementById('chartModal').classList.remove('active');
             document.body.style.overflow = '';
-            // Remove iframe to stop media/network activity
+            // Remove the widget container so the next open starts fresh
             setTimeout(() => {
-                const iframe = document.getElementById('tvChartWrap').querySelector('iframe');
-                if (iframe) iframe.remove();
+                const prev = document.getElementById('tvChartWrap').querySelector('.tv-widget-container');
+                if (prev) prev.remove();
             }, 350);
         }
 
