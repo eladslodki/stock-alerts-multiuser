@@ -93,69 +93,31 @@ _TAB_HTML = """
   <title>Fundamentals — Stock Alerts</title>
   <link rel="stylesheet" href="/static/css/theme.css">
   <style>
-    body { background: #0A0E1A; color: #E2E8F0; font-family: 'Inter', sans-serif; }
-    .page-wrap   { max-width: 900px; margin: 0 auto; padding: 40px 24px; }
-    .page-title  { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
-    .page-sub    { color: #64748B; margin-bottom: 32px; font-size: 14px; }
-    .search-row  { display: flex; gap: 12px; margin-bottom: 32px; }
-    .search-row input {
-      flex: 1; padding: 12px 16px; border-radius: 10px;
-      background: #111827; border: 1px solid #1E2D45;
-      color: #E2E8F0; font-size: 15px; font-family: inherit;
-    }
-    .search-row input:focus { outline: none; border-color: #5B7CFF; }
-    .btn {
-      padding: 12px 24px; border-radius: 10px; border: none;
-      background: #5B7CFF; color: #fff; font-size: 14px; font-weight: 600;
-      cursor: pointer; font-family: inherit;
-    }
-    .btn:hover { background: #4A6AE8; }
-    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    /* Fundamentals page — minimal page-specific styles using theme vars */
+    .page-wrap { max-width: 900px; margin: 0 auto; padding: calc(var(--nav-h) + 32px) 24px 48px; }
+    .search-row { display: flex; gap: var(--sp-3); margin-bottom: var(--sp-6); }
     .filings-section { display: none; }
-    .filings-header  { font-size: 13px; font-weight: 600; color: #64748B;
-                        text-transform: uppercase; letter-spacing: .5px;
-                        margin-bottom: 12px; }
-    .filing-card {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 12px; padding: 16px 20px;
-      background: #111827; border: 1px solid #1E2D45; border-radius: 10px;
-      margin-bottom: 8px; transition: border-color .2s;
-    }
-    .filing-card:hover { border-color: #5B7CFF; }
-    .filing-badge {
-      padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 700;
-      background: rgba(91,124,255,.15); color: #5B7CFF; flex-shrink: 0;
-    }
-    .filing-period { font-size: 13px; color: #94A3B8; }
-    .filing-title  { font-size: 14px; font-weight: 500; flex: 1; }
+    .filings-header { font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: var(--sp-3); }
+    .filing-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; background: var(--bg-card); border: 1px solid var(--border-card); border-radius: var(--r-md); margin-bottom: var(--sp-2); transition: border-color .2s; }
+    .filing-card:hover { border-color: var(--accent); }
+    .filing-badge { padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; background: rgba(91,124,255,.15); color: var(--accent); flex-shrink: 0; }
+    .filing-period { font-size: 13px; color: var(--text-muted); }
+    .filing-title { font-size: 14px; font-weight: 500; flex: 1; }
     .filing-actions { display: flex; gap: 8px; }
-    .btn-sm {
-      padding: 7px 14px; border-radius: 8px; border: none; cursor: pointer;
-      font-size: 12px; font-weight: 600; font-family: inherit;
-    }
-    .btn-view { background: rgba(91,124,255,.15); color: #5B7CFF; }
-    .btn-view:hover { background: rgba(91,124,255,.3); }
-    .btn-gen  { background: #5B7CFF; color: #fff; }
-    .btn-gen:hover { background: #4A6AE8; }
-    .status-box {
-      padding: 12px 16px; border-radius: 8px; font-size: 13px;
-      margin-top: 16px; display: none;
-    }
-    .status-box.info    { background: rgba(91,124,255,.1); color: #5B7CFF; border: 1px solid rgba(91,124,255,.3); }
-    .status-box.success { background: rgba(0,208,132,.1);  color: #00D084; border: 1px solid rgba(0,208,132,.3); }
-    .status-box.error   { background: rgba(255,71,87,.1);  color: #FF4757; border: 1px solid rgba(255,71,87,.3); }
-    .spinner {
-      display: inline-block; width: 14px; height: 14px;
-      border: 2px solid rgba(91,124,255,.3); border-top-color: #5B7CFF;
-      border-radius: 50%; animation: spin .6s linear infinite;
-      vertical-align: middle; margin-left: 8px;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .error-msg { color: #FF4757; font-size: 13px; margin-top: 8px; display: none; }
+    .btn-sm { padding: 7px 14px; border-radius: 8px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; font-family: inherit; transition: opacity .15s; }
+    .btn-sm:hover { opacity: .8; }
+    .btn-view { background: rgba(91,124,255,.15); color: var(--accent); }
+    .btn-gen  { background: var(--accent); color: #fff; }
+    .status-box { padding: 12px 16px; border-radius: var(--r-md); font-size: 13px; margin-top: var(--sp-4); display: none; }
+    .status-box.info    { background: rgba(91,124,255,.1);  color: var(--accent);   border: 1px solid rgba(91,124,255,.3); }
+    .status-box.success { background: rgba(0,208,132,.1);   color: var(--positive); border: 1px solid rgba(0,208,132,.3); }
+    .status-box.error   { background: rgba(255,71,87,.1);   color: var(--negative); border: 1px solid rgba(255,71,87,.3); }
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(91,124,255,.3); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-left: 8px; }
+    .error-msg { color: var(--negative); font-size: 13px; margin-top: 8px; display: none; }
   </style>
 </head>
 <body>
-<nav class="top-nav wide">
+<nav class="top-nav">
   <span class="top-nav-brand">📈 PulseAlerts</span>
   <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
   <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
@@ -168,18 +130,21 @@ _TAB_HTML = """
   <button class="top-nav-logout" onclick="logout()">Sign out</button>
 </nav>
 <div class="page-wrap">
-  <h1 class="page-title">📊 דוחות פונדמנטליים</h1>
-  <p class="page-sub">בחר טיקר וצפה בדוחות SEC 10-K / 10-Q עם ניתוח AI</p>
+  <div class="page-header" style="margin-bottom: var(--sp-6);">
+    <div class="page-eyebrow">Analysis</div>
+    <h1 class="page-title">Fundamentals</h1>
+    <p class="page-subtitle">Search SEC 10-K / 10-Q filings and generate AI analysis reports</p>
+  </div>
 
   <div class="search-row">
-    <input id="ticker-input" type="text" placeholder="הקלד טיקר (לדוגמה: AAPL, OKE, MSFT)"
-           autocomplete="off" autocapitalize="characters">
-    <button class="btn" id="search-btn" onclick="searchFilings()">חפש</button>
+    <input id="ticker-input" type="text" placeholder="Enter ticker (e.g. AAPL, OKE, MSFT)"
+           autocomplete="off" autocapitalize="characters" class="form-input" style="flex:1;">
+    <button class="btn btn-primary" id="search-btn" onclick="searchFilings()">Search</button>
   </div>
   <div class="error-msg" id="search-error"></div>
 
   <div class="filings-section" id="filings-section">
-    <div class="filings-header" id="filings-header">דוחות זמינים</div>
+    <div class="filings-header" id="filings-header">Available Reports</div>
     <div id="filings-list"></div>
   </div>
 
@@ -206,14 +171,14 @@ async function searchFilings() {
 
   const btn = document.getElementById('search-btn');
   btn.disabled = true;
-  btn.textContent = 'מחפש...';
+  btn.textContent = 'Searching...';
 
   try {
     const res  = await fetch('/api/quarters/' + encodeURIComponent(ticker));
     const data = await res.json();
 
     if (!res.ok) {
-      searchErr.textContent = data.error || 'שגיאה בחיפוש';
+      searchErr.textContent = data.error || 'Search failed';
       searchErr.style.display = 'block';
       return;
     }
@@ -223,25 +188,25 @@ async function searchFilings() {
     const hdr = document.getElementById('filings-header');
     const lst = document.getElementById('filings-list');
 
-    hdr.textContent = ticker + ' — ' + quarters.length + ' רבעונים';
+    hdr.textContent = ticker + ' — ' + quarters.length + ' quarters';
     lst.innerHTML   = '';
 
     if (!quarters.length) {
-      lst.innerHTML = '<p style="color:#64748B;font-size:13px;">לא נמצאו דוחות עבור הטיקר הזה.</p>';
+      lst.innerHTML = '<p style="color:var(--text-muted);font-size:13px;">No filings found for this ticker.</p>';
     } else {
       quarters.forEach(function (q) {
         const card = document.createElement('div');
         card.className = 'filing-card';
-        const reportMark = q.has_report ? ' <span style="color:#00D084;font-size:11px;">✓ קיים</span>' : '';
+        const reportMark = q.has_report ? ' <span style="color:var(--positive);font-size:11px;">✓ Available</span>' : '';
         card.innerHTML =
           '<span class="filing-badge">' + q.label + '</span>' +
           '<div style="flex:1">' +
             '<div class="filing-title">' + q.label + '</div>' +
-            '<div class="filing-period">הוגש: ' + (q.filed_at || '—') + reportMark + '</div>' +
+            '<div class="filing-period">Filed: ' + (q.filed_at || '—') + reportMark + '</div>' +
           '</div>' +
           '<div class="filing-actions">' +
-            (q.has_report ? '<button class="btn-sm btn-view _view-btn">צפה</button>' : '') +
-            '<button class="btn-sm btn-gen _gen-btn">ייצר</button>' +
+            (q.has_report ? '<button class="btn-sm btn-view _view-btn">View</button>' : '') +
+            '<button class="btn-sm btn-gen _gen-btn">Generate</button>' +
           '</div>';
         if (q.has_report) {
           card.querySelector('._view-btn').addEventListener('click', function () {
@@ -256,19 +221,19 @@ async function searchFilings() {
     }
     sec.style.display = 'block';
   } catch (e) {
-    searchErr.textContent = 'שגיאת רשת: ' + e;
+    searchErr.textContent = 'Network error: ' + e;
     searchErr.style.display = 'block';
   } finally {
     btn.disabled = false;
-    btn.textContent = 'חפש';
+    btn.textContent = 'Search';
   }
 }
 
 const _pollTimers = {};
 
 async function generateReport(ticker, year, quarter, btnEl) {
-  showStatus('שולח בקשה... <span class="spinner"></span>', 'info');
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'מייצר...'; }
+  showStatus('Sending request... <span class="spinner"></span>', 'info');
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Generating...'; }
   try {
     const res  = await fetch('/api/reports/generate', {
       method: 'POST',
@@ -278,17 +243,17 @@ async function generateReport(ticker, year, quarter, btnEl) {
     const data = await res.json();
 
     if (!res.ok) {
-      showStatus('שגיאה: ' + (data.error || 'אירעה שגיאה'), 'error');
-      if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'ייצר'; }
+      showStatus('Error: ' + (data.error || 'Unknown error'), 'error');
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Generate'; }
       return;
     }
 
     if (data.status === 'done') {
       showStatus(
-        'הדוח מוכן — <a href="' + data.url_html + '" target="_blank" style="color:inherit;text-decoration:underline">פתח דוח HTML</a>',
+        'Report ready — <a href="' + data.url_html + '" target="_blank" style="color:inherit;text-decoration:underline">Open HTML Report</a>',
         'success'
       );
-      if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'ייצר'; }
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Generate'; }
       return;
     }
 
@@ -297,13 +262,13 @@ async function generateReport(ticker, year, quarter, btnEl) {
       _startPolling(data.filing_id, btnEl);
     }
   } catch (e) {
-    showStatus('שגיאת רשת: ' + e, 'error');
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'ייצר'; }
+    showStatus('Network error: ' + e, 'error');
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Generate'; }
   }
 }
 
 function _startPolling(filingId, btnEl) {
-  showStatus('מייצר דוח... <span class="spinner"></span>', 'info');
+  showStatus('Generating report... <span class="spinner"></span>', 'info');
   if (_pollTimers[filingId]) clearInterval(_pollTimers[filingId]);
   _pollTimers[filingId] = setInterval(async function () {
     try {
@@ -313,15 +278,15 @@ function _startPolling(filingId, btnEl) {
         clearInterval(_pollTimers[filingId]);
         delete _pollTimers[filingId];
         showStatus(
-          'הדוח מוכן — <a href="' + data.url_html + '" target="_blank" style="color:inherit;text-decoration:underline">פתח דוח HTML</a>',
+          'Report ready — <a href="' + data.url_html + '" target="_blank" style="color:inherit;text-decoration:underline">Open HTML Report</a>',
           'success'
         );
-        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'ייצר'; }
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Generate'; }
       } else if (data.status === 'error') {
         clearInterval(_pollTimers[filingId]);
         delete _pollTimers[filingId];
-        showStatus('שגיאה בייצור הדוח: ' + (data.error || 'שגיאה לא ידועה'), 'error');
-        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'ייצר'; }
+        showStatus('Generation failed: ' + (data.error || 'Unknown error'), 'error');
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Generate'; }
       }
       // 'generating' or 'not_started' → keep polling
     } catch (_) { /* network glitch — keep polling */ }
