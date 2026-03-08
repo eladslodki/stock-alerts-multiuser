@@ -1090,14 +1090,14 @@ def bitcoin_scanner_page():
                     const data = await res.json();
 
                     if (!data.success) {
-                        resultsEl.innerHTML = \`<div class="empty">Scan failed: \${data.error || 'Unknown error'}</div>\`;
+                        resultsEl.innerHTML = `<div class="empty">Scan failed: ${data.error || 'Unknown error'}</div>`;
                     } else if (data.transactions.length === 0) {
-                        resultsEl.innerHTML = \`
+                        resultsEl.innerHTML = `
                             <div class="empty-state">
                                 <div class="empty-state-icon">₿</div>
                                 <div class="empty-state-title">No Transactions Found</div>
                                 <div class="empty-state-text">Try lowering the minimum BTC amount or extending the time range.</div>
-                            </div>\`;
+                            </div>`;
                     } else {
                         displayResults(data.transactions);
                     }
@@ -1117,22 +1117,22 @@ def bitcoin_scanner_page():
                 document.getElementById('totalUSD').textContent = '$' + Math.round(totalUSD).toLocaleString();
                 document.getElementById('statsGrid').style.display = 'grid';
 
-                let html = \`<div class="table-wrap"><table class="data-table">
+                let html = `<div class="table-wrap"><table class="data-table">
                     <thead><tr>
                         <th>Transaction</th><th>Time</th><th>Amount</th><th>Inputs</th><th>Outputs</th>
-                    </tr></thead><tbody>\`;
+                    </tr></thead><tbody>`;
 
                 txs.forEach(tx => {
                     const time = new Date(tx.time).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
                     const from = tx.from_addresses.slice(0, 1).join('') || '—';
                     const to   = tx.to_addresses.slice(0, 1).join('') || '—';
-                    html += \`<tr>
-                        <td><a href="https://blockchain.info/tx/\${tx.hash}" target="_blank" class="hash">\${tx.hash.substring(0,14)}…</a></td>
-                        <td class="col-muted">\${time}</td>
-                        <td><span class="col-btc">\${tx.amount_btc.toFixed(4)} BTC</span><br><span style="font-size:11px;color:var(--text-muted);">$\${Math.round(tx.amount_usd).toLocaleString()}</span></td>
-                        <td class="col-addr">\${from.substring(0,12)}…\${tx.num_inputs > 1 ? ' +' + (tx.num_inputs-1) : ''}</td>
-                        <td class="col-addr">\${to.substring(0,12)}…\${tx.num_outputs > 1 ? ' +' + (tx.num_outputs-1) : ''}</td>
-                    </tr>\`;
+                    html += `<tr>
+                        <td><a href="https://blockchain.info/tx/${tx.hash}" target="_blank" class="hash">${tx.hash.substring(0,14)}…</a></td>
+                        <td class="col-muted">${time}</td>
+                        <td><span class="col-btc">${tx.amount_btc.toFixed(4)} BTC</span><br><span style="font-size:11px;color:var(--text-muted);">$${Math.round(tx.amount_usd).toLocaleString()}</span></td>
+                        <td class="col-addr">${from.substring(0,12)}…${tx.num_inputs > 1 ? ' +' + (tx.num_inputs-1) : ''}</td>
+                        <td class="col-addr">${to.substring(0,12)}…${tx.num_outputs > 1 ? ' +' + (tx.num_outputs-1) : ''}</td>
+                    </tr>`;
                 });
                 html += '</tbody></table></div>';
                 document.getElementById('results').innerHTML = html;
@@ -2731,13 +2731,13 @@ def portfolio_page():
 
             list.innerHTML = items.map(item => {
                 const pctStr = item.pct != null ? fmtPct(item.pct) : '';
-                return \`
-                    <div class="level-row \${item.cls}">
-                        <span class="level-label">\${item.label}</span>
-                        <span class="level-price">\${fmtPrice(item.price)}</span>
-                        \${item.pct !== 0 ? \`<span class="level-pct">\${pctStr} from entry</span>\` : ''}
+                return `
+                    <div class="level-row ${item.cls}">
+                        <span class="level-label">${item.label}</span>
+                        <span class="level-price">${fmtPrice(item.price)}</span>
+                        ${item.pct !== 0 ? `<span class="level-pct">${pctStr} from entry</span>` : ''}
                     </div>
-                \`;
+                `;
             }).join('');
 
             // ── Colour-zone scale (profit / entry / risk) ────────────────────
@@ -2745,19 +2745,19 @@ def portfolio_page():
             if (isLong) {
                 // LONG: profit above entry, risk below
                 scaleEl.innerHTML =
-                    (tp ? \`<div class="scale-zone profit-zone">▲ Profit Zone\${tp ? '<br>' + fmtPrice(tp) : ''}</div>\` : '') +
-                    (tp && entry ? \`<div class="scale-zone divider">— — —</div>\` : '') +
-                    \`<div class="scale-zone entry-zone">● Entry \${fmtPrice(entry)}</div>\` +
-                    (sl && entry ? \`<div class="scale-zone divider">— — —</div>\` : '') +
-                    (sl ? \`<div class="scale-zone risk-zone">▼ Risk Zone<br>\${fmtPrice(sl)}</div>\` : '');
+                    (tp ? `<div class="scale-zone profit-zone">▲ Profit Zone${tp ? '<br>' + fmtPrice(tp) : ''}</div>` : '') +
+                    (tp && entry ? `<div class="scale-zone divider">— — —</div>` : '') +
+                    `<div class="scale-zone entry-zone">● Entry ${fmtPrice(entry)}</div>` +
+                    (sl && entry ? `<div class="scale-zone divider">— — —</div>` : '') +
+                    (sl ? `<div class="scale-zone risk-zone">▼ Risk Zone<br>${fmtPrice(sl)}</div>` : '');
             } else {
                 // SHORT: profit below entry, risk above
                 scaleEl.innerHTML =
-                    (sl ? \`<div class="scale-zone risk-zone">▲ Risk Zone<br>\${fmtPrice(sl)}</div>\` : '') +
-                    (sl && entry ? \`<div class="scale-zone divider">— — —</div>\` : '') +
-                    \`<div class="scale-zone entry-zone">● Entry \${fmtPrice(entry)}</div>\` +
-                    (tp && entry ? \`<div class="scale-zone divider">— — —</div>\` : '') +
-                    (tp ? \`<div class="scale-zone profit-zone">▼ Profit Zone<br>\${fmtPrice(tp)}</div>\` : '');
+                    (sl ? `<div class="scale-zone risk-zone">▲ Risk Zone<br>${fmtPrice(sl)}</div>` : '') +
+                    (sl && entry ? `<div class="scale-zone divider">— — —</div>` : '') +
+                    `<div class="scale-zone entry-zone">● Entry ${fmtPrice(entry)}</div>` +
+                    (tp && entry ? `<div class="scale-zone divider">— — —</div>` : '') +
+                    (tp ? `<div class="scale-zone profit-zone">▼ Profit Zone<br>${fmtPrice(tp)}</div>` : '');
             }
         }
 
@@ -3451,12 +3451,12 @@ def alert_history_page():
                 const data = await res.json();
 
                 if (!data.success || data.history.length === 0) {
-                    container.innerHTML = \`
+                    container.innerHTML = `
                         <div class="empty-state">
                             <div class="empty-state-icon">📜</div>
                             <div class="empty-state-title">No History Yet</div>
                             <div class="empty-state-text">Triggered alerts will appear here once your price targets are hit.</div>
-                        </div>\`;
+                        </div>`;
                     return;
                 }
 
@@ -3467,24 +3467,24 @@ def alert_history_page():
                     });
                     const price = record.price_at_trigger?.toFixed(2) || 'N/A';
 
-                    return \`
+                    return `
                         <div class="history-card">
                             <div class="history-card-header">
                                 <div>
-                                    <div class="history-card-ticker">\${record.ticker}</div>
-                                    <div class="history-card-price">Triggered at <span style="color:var(--accent);">$\${price}</span></div>
+                                    <div class="history-card-ticker">${record.ticker}</div>
+                                    <div class="history-card-price">Triggered at <span style="color:var(--accent);">$${price}</span></div>
                                 </div>
                                 <div style="text-align:right;">
-                                    <div class="history-card-time">\${date}</div>
+                                    <div class="history-card-time">${date}</div>
                                     <span class="badge badge-positive" style="margin-top:6px;">Fired</span>
                                 </div>
                             </div>
-                            \${record.explanation ? \`
+                            ${record.explanation ? `
                             <div class="ai-insight">
                                 <div class="ai-insight-label">🤖 AI Insight</div>
-                                \${record.explanation}
-                            </div>\` : ''}
-                        </div>\`;
+                                ${record.explanation}
+                            </div>` : ''}
+                        </div>`;
                 }).join('');
 
             } catch (error) {
@@ -3573,12 +3573,12 @@ def radar_page():
                 const data = await res.json();
 
                 if (!data.success || data.anomalies.length === 0) {
-                    container.innerHTML = \`
+                    container.innerHTML = `
                         <div class="empty-state">
                             <div class="empty-state-icon">🔍</div>
                             <div class="empty-state-title">All Clear</div>
                             <div class="empty-state-text">No unusual market activity detected right now.</div>
-                        </div>\`;
+                        </div>`;
                     return;
                 }
 
@@ -3590,22 +3590,22 @@ def radar_page():
                     const sevBadge = anomaly.severity === 'high' ? 'badge-negative'
                                    : anomaly.severity === 'medium' ? 'badge-warning' : 'badge-positive';
 
-                    return \`
-                        <div class="anomaly-card \${anomaly.severity || ''}">
+                    return `
+                        <div class="anomaly-card ${anomaly.severity || ''}">
                             <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
                                 <div>
-                                    <span style="font-size:19px;font-weight:800;letter-spacing:-0.3px;">\${anomaly.ticker}</span>
-                                    <span class="badge \${sevBadge}" style="margin-left:8px;">\${anomaly.severity || 'signal'}</span>
+                                    <span style="font-size:19px;font-weight:800;letter-spacing:-0.3px;">${anomaly.ticker}</span>
+                                    <span class="badge ${sevBadge}" style="margin-left:8px;">${anomaly.severity || 'signal'}</span>
                                 </div>
-                                <span style="font-size:12px;color:var(--text-secondary);">\${date}</span>
+                                <span style="font-size:12px;color:var(--text-secondary);">${date}</span>
                             </div>
-                            \${anomaly.anomaly_type === 'BIG_MOVE' ? \`
+                            ${anomaly.anomaly_type === 'BIG_MOVE' ? `
                             <div style="font-size:14px;color:var(--text-secondary);">
-                                Price moved <strong style="color:\${metrics.direction === 'up' ? 'var(--positive)' : 'var(--negative)'};">
-                                \${metrics.pct_change > 0 ? '+' : ''}\${metrics.pct_change?.toFixed(2)}%
-                                </strong> to <strong>$\${metrics.current_price?.toFixed(2)}</strong>
-                            </div>\` : \`<div style="font-size:13px;color:var(--text-secondary);">\${anomaly.anomaly_type}</div>\`}
-                        </div>\`;
+                                Price moved <strong style="color:${metrics.direction === 'up' ? 'var(--positive)' : 'var(--negative)'};">
+                                ${metrics.pct_change > 0 ? '+' : ''}${metrics.pct_change?.toFixed(2)}%
+                                </strong> to <strong>$${metrics.current_price?.toFixed(2)}</strong>
+                            </div>` : `<div style="font-size:13px;color:var(--text-secondary);">${anomaly.anomaly_type}</div>`}
+                        </div>`;
                 }).join('');
 
             } catch (error) {
