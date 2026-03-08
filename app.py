@@ -200,117 +200,71 @@ def dashboard():
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Dashboard — Stock Alerts</title>
+    <title>Dashboard — PulseAlerts</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/css/theme.css">
     <style>
-        /* Dashboard-specific styles */
-        .main-content { max-width: 1400px; margin: 0 auto; padding: 80px 20px 40px; }
-        .dash-grid { display: grid; grid-template-columns: 360px 1fr; gap: 24px; }
-        @media (max-width: 900px) { .dash-grid { grid-template-columns: 1fr; } }
-        /* Legacy aliases kept for JS compatibility */
-        .container { max-width: 1400px; margin: 0 auto; }
-
-        /* old nav/grid overrides removed — all via theme.css */
-        .grid {
+        body { padding: 0; }
+        .page-wrapper { padding-top: 0; }
+        .dash-layout {
             display: grid;
-            grid-template-columns: 1fr 2fr;
-            gap: 25px;
-            margin-bottom: 30px;
+            grid-template-columns: 380px 1fr;
+            gap: 24px;
+            align-items: start;
         }
-        @media (max-width: 968px) { .grid { grid-template-columns: 1fr; } }
-        /* keep legacy card/button/input styles for JS-generated HTML */
-        button {
-            width: 100%;
-            padding: 14px;
-            background: linear-gradient(135deg, #5B7CFF 0%, #7B5CFF 100%);
-            color: white;
-            border: none;
-            border-radius: 12px;
-            font-weight: 700;
-            cursor: pointer;
-            font-size: 15px;
-            transition: all 0.2s ease;
-            margin-top: 10px;
-            box-shadow: 0 4px 24px rgba(91,124,255,0.35), 0 2px 8px rgba(0,0,0,0.2);
+        @media (max-width: 960px) { .dash-layout { grid-template-columns: 1fr; } }
+
+        /* Alert card rendered by JS */
+        .alert-card {
+            background: rgba(255,255,255,0.045);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 16px;
+            padding: 18px 18px 18px 22px;
+            margin-bottom: 10px;
+            position: relative; overflow: hidden;
+            transition: border-color 0.15s, box-shadow 0.15s;
         }
-        
-        button:hover {
-            box-shadow: 0 6px 32px rgba(91,124,255,0.45), 0 2px 8px rgba(0,0,0,0.3);
+        .alert-card::before {
+            content: ''; position: absolute; top: 0; left: 0;
+            width: 3px; height: 100%;
+            background: linear-gradient(180deg, #5B7CFF 0%, #7B5CFF 100%);
         }
-        
-        button:active {
-            transform: scale(0.98);
-        }
-            
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-            
-        /* Semantic colours for JS-built alert cards */
-        .message { padding: 12px 16px; border-radius: 10px; margin-top: 15px; font-size: 14px; font-weight: 500; }
-        .success { background: rgba(0,208,132,0.12); border: 1px solid rgba(0,208,132,0.25); color: #00D084; }
-        .error   { background: rgba(255,71,87,0.12);  border: 1px solid rgba(255,71,87,0.25);  color: #FF4757; }
-        .alert-card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); position: relative; overflow: hidden; }
-        .alert-card::before { content: ''; position: absolute; top: 0; left: 0; width: 3px; height: 100%; background: linear-gradient(180deg, #5B7CFF 0%, #7B5CFF 100%); }
         .alert-card.ma-alert::before { background: linear-gradient(180deg, #00D9FF 0%, #0099FF 100%); }
-        .alert-item { background: rgba(255,255,255,0.03); padding: 18px; border-radius: 12px; margin-bottom: 12px; border-left: 3px solid #5B7CFF; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s; }
-        .alert-item:hover { background: rgba(255,255,255,0.06); }
-        .alert-ticker { font-size: 18px; font-weight: 700; color: #5B7CFF; margin-bottom: 4px; }
-        .alert-prices { font-size: 13px; color: #8B92A8; margin-top: 4px; }
-        .current-price { color: #fff; font-weight: 600; }
-        .target-price  { color: #FFB800; font-weight: 600; }
-        .delete-btn { padding: 8px 16px; background: rgba(255,71,87,0.12); border: 1px solid rgba(255,71,87,0.25); color: #FF4757; border-radius: 8px; cursor: pointer; font-size: 13px; transition: background 0.2s; width: auto; margin: 0; }
-        .delete-btn:hover { background: rgba(255,71,87,0.2); }
-        .status-badge { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 99px; letter-spacing: 0.3px; }
-        .status-badge.price { background: rgba(91,124,255,0.15); color: #5B7CFF; border: 1px solid rgba(91,124,255,0.25); }
-        .status-badge.ma    { background: rgba(0,217,255,0.12);  color: #00D9FF; border: 1px solid rgba(0,217,255,0.2); }
-        .loading { text-align: center; padding: 40px; color: #8B92A8; }
-        .empty   { text-align: center; padding: 40px; color: #4A5268; }
-        .spinner { border: 3px solid rgba(91,124,255,0.1); border-top: 3px solid #5B7CFF; border-radius: 50%; width: 32px; height: 32px; animation: spin 0.7s linear infinite; margin: 16px auto; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .btn-secondary { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #8B92A8; border-radius: 10px; padding: 10px 16px; font-size: 14px; cursor: pointer; transition: background 0.2s; width: auto; margin: 0; }
-        .btn-secondary:hover { background: rgba(255,255,255,0.08); color: #fff; }
-        .card { background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 24px; margin-bottom: 20px; }
-        .card h2 { font-size: 18px; font-weight: 700; margin-bottom: 18px; letter-spacing: -0.3px; }
-        label { display: block; margin-bottom: 6px; font-weight: 600; color: #8B92A8; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase; }
-        input, select, textarea { width: 100%; height: 50px; padding: 0 14px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: #fff; font-size: 15px; font-weight: 500; font-family: inherit; transition: border-color 0.2s, box-shadow 0.2s; }
-        textarea { height: auto; min-height: 80px; padding: 12px 14px; }
-        input:focus, select:focus, textarea:focus { outline: none; border-color: #5B7CFF; box-shadow: 0 0 0 3px rgba(91,124,255,0.2); background: rgba(91,124,255,0.06); }
-        input::placeholder { color: rgba(255,255,255,0.3); }
-        .autocomplete-container { position: relative; margin-bottom: 16px; }
-        .autocomplete-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; max-height: 280px; overflow-y: auto; background: rgba(10,14,26,0.97); border: 1px solid rgba(91,124,255,0.35); border-radius: 12px; z-index: 200; display: none; box-shadow: 0 10px 40px rgba(0,0,0,0.45); }
-        .autocomplete-item { padding: 11px 14px; cursor: pointer; transition: background 0.15s; border-bottom: 1px solid rgba(255,255,255,0.04); display: flex; align-items: center; justify-content: space-between; }
-        .autocomplete-item:last-child { border-bottom: none; }
-        .autocomplete-item:hover { background: rgba(91,124,255,0.1); }
-        .ticker-symbol { font-weight: 700; color: #5B7CFF; font-size: 14px; }
-        .ticker-name   { font-size: 12px; color: #8B92A8; margin-left: 8px; }
-        .ticker-type   { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 99px; background: rgba(91,124,255,0.12); color: #5B7CFF; }
+        .alert-card:hover { border-color: rgba(255,255,255,0.12); box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+
+        /* Alert type toggle */
         .alert-type-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 4px; margin-bottom: 20px; }
-        .toggle-option { height: 40px; border-radius: 8px; background: transparent; border: none; color: #8B92A8; font-size: 13px; font-weight: 600; transition: all 0.2s; margin: 0; width: auto; cursor: pointer; }
+        .toggle-option { height: 40px; border-radius: 8px; background: transparent; border: none; color: #8B92A8; font-size: 13px; font-weight: 600; transition: all 0.15s; margin: 0; width: auto; cursor: pointer; font-family: inherit; }
         .toggle-option.active { background: #5B7CFF; color: #fff; box-shadow: 0 2px 10px rgba(91,124,255,0.3); }
-        .ma-selector { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
-        .ma-option { height: 56px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer; transition: all 0.2s; }
-        .ma-option:hover { background: rgba(255,255,255,0.08); }
-        .ma-option.active { background: rgba(0,217,255,0.08); border-color: #00D9FF; box-shadow: 0 0 0 3px rgba(0,217,255,0.15); }
-        .ma-label { font-size: 15px; font-weight: 700; color: #fff; }
-        .ma-sublabel { font-size: 11px; color: #8B92A8; }
-        .ma-option.active .ma-sublabel { color: #00D9FF; }
+
+        /* Status indicators (JS-generated) */
         .status-indicator { font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 8px; display: inline-flex; align-items: center; gap: 4px; }
         .status-indicator.above { background: rgba(0,208,132,0.1); color: #00D084; border: 1px solid rgba(0,208,132,0.2); }
-        .status-indicator.below { background: rgba(255,71,87,0.1);  color: #FF4757; border: 1px solid rgba(255,71,87,0.2); }
-        .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
-        .price-label { font-size: 12px; color: #8B92A8; margin-bottom: 4px; }
-        .price-value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
-        .price-change { font-size: 13px; font-weight: 600; margin-top: 4px; }
-        .price-change.positive { color: #00D084; }
-        .price-change.negative { color: #FF4757; }
+        .status-indicator.below { background: rgba(255,71,87,0.1); color: #FF4757; border: 1px solid rgba(255,71,87,0.2); }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; flex-shrink: 0; }
+
+        /* Badges (JS-generated) */
+        .status-badge { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 99px; letter-spacing: 0.3px; }
+        .status-badge.price { background: rgba(91,124,255,0.15); color: #5B7CFF; border: 1px solid rgba(91,124,255,0.25); }
+        .status-badge.ma    { background: rgba(0,217,255,0.12); color: #00D9FF; border: 1px solid rgba(0,217,255,0.2); }
+
+        /* Delete button (JS-generated) */
+        .delete-btn { padding: 8px 16px; background: rgba(255,71,87,0.1); border: 1px solid rgba(255,71,87,0.2); color: #FF4757; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit; transition: background 0.15s; width: auto; margin: 0; }
+        .delete-btn:hover { background: rgba(255,71,87,0.18); }
+
+        /* NL Preview block */
+        .nl-preview {
+            background: rgba(91,124,255,0.07);
+            border: 1px solid rgba(91,124,255,0.2);
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 14px;
+        }
+        .nl-preview-label { font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
     </style>
 </head>
 <body>
-    <!-- ── Sticky Top Nav ── -->
-    <nav class="top-nav wide">
+    <nav class="top-nav">
         <span class="top-nav-brand">📈 PulseAlerts</span>
         <a href="/dashboard" class="top-nav-link active">📊 Alerts</a>
         <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
@@ -323,80 +277,86 @@ def dashboard():
         <button class="top-nav-logout" onclick="logout()">Sign out</button>
     </nav>
 
-    <div class="main-content">
-        <div style="margin-bottom: 28px;">
-            <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 4px;">Good evening, trader</p>
-            <h1 style="font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">Dashboard</h1>
+    <div class="page-wrapper">
+        <div class="page-header">
+            <div class="page-header-left">
+                <div class="page-eyebrow">Dashboard</div>
+                <h1 class="page-title">Stock Alerts</h1>
+                <p class="page-subtitle">Monitor price targets and moving average crossovers</p>
+            </div>
         </div>
 
-        <div class="grid">
-            <div class="card">
-    <h2>Create New Alert</h2>
-    
-    <!-- NEW: Alert Type Selection -->
-    <div class="alert-type-toggle">
-        <button id="priceTypeBtn" class="toggle-option active" onclick="switchAlertType('price')">Price Alert</button>
-        <button id="maTypeBtn" class="toggle-option" onclick="switchAlertType('ma')">MA Alert</button>
-    </div>
-    
-    <div class="autocomplete-container">
-        <label>Stock / Crypto Ticker</label>
-        <input 
-            type="text" 
-            id="tickerInput" 
-            placeholder="Search ticker (e.g., AAPL, BTC-USD)" 
-            autocomplete="off"
-        />
-        <div id="autocompleteDropdown" class="autocomplete-dropdown"></div>
-    </div>
-    
-    <!-- Price Alert Fields (shown by default) -->
-    <div id="priceAlertFields">
-        <label>Target Price ($)</label>
-        <input type="number" id="targetPrice" placeholder="Enter target price" step="0.01" />
-        
-        <p style="color: #888; font-size: 13px; margin-top: 10px;">
-            Alert will trigger when price crosses the target price (either direction).
-        </p>
-    </div>
-    
-    <!-- NEW: MA Alert Fields (hidden by default) -->
-    <div id="maAlertFields" style="display: none;">
-        <label>Moving Average Period</label>
-        <div class="ma-selector">
-            <div class="ma-option active" onclick="selectMA(20)">
-                <div class="ma-label">MA 20</div>
-                <div class="ma-sublabel">Short</div>
-            </div>
-            <div class="ma-option" onclick="selectMA(50)">
-                <div class="ma-label">MA 50</div>
-                <div class="ma-sublabel">Medium</div>
-            </div>
-            <div class="ma-option" onclick="selectMA(150)">
-                <div class="ma-label">MA 150</div>
-                <div class="ma-sublabel">Long</div>
-            </div>
-        </div>
-        <input type="hidden" id="maPeriod" value="20" />
-    
-        <p style="color: #888; font-size: 13px; margin-top: 10px;">
-            Alert will trigger when price crosses above the selected moving average.
-        </p>
-    </div>
-    
-    <button onclick="createAlert()" id="createBtn">
-        Create Alert
-    </button>
-                
-                <div id="message"></div>
-            </div>
-            <!-- NEW: Natural Language Alert Creator -->
-            <div class="card">
-                <h2>✨ Create Alert from Text</h2>
-                <p style="color: #8B92A8; font-size: 13px; margin-bottom: 12px;">
-                    Try: "Alert me if TSLA breaks 200" or "Tell me when AAPL dumps hard"
-                </p>
-    
+        <div class="dash-layout">
+            <!-- Left column: Create Alert + NL Alert -->
+            <div>
+                <!-- Create Alert Card -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">Create Alert</div>
+                            <div class="card-subtitle">Price target or MA crossover</div>
+                        </div>
+                    </div>
+
+                    <div class="alert-type-toggle">
+                        <button id="priceTypeBtn" class="toggle-option active" onclick="switchAlertType('price')">Price Alert</button>
+                        <button id="maTypeBtn" class="toggle-option" onclick="switchAlertType('ma')">MA Alert</button>
+                    </div>
+
+                    <div class="autocomplete-container">
+                        <label class="form-label">Ticker Symbol</label>
+                        <input type="text" id="tickerInput" placeholder="Search (e.g. AAPL, BTC-USD)" autocomplete="off" />
+                        <div id="autocompleteDropdown" class="autocomplete-dropdown"></div>
+                    </div>
+
+                    <div id="priceAlertFields">
+                        <div class="form-group">
+                            <label class="form-label">Target Price</label>
+                            <input type="number" id="targetPrice" placeholder="0.00" step="0.01" />
+                        </div>
+                        <p class="info-text">Alert triggers when price crosses the target in either direction.</p>
+                    </div>
+
+                    <div id="maAlertFields" style="display:none;">
+                        <div class="form-group">
+                            <label class="form-label">Moving Average Period</label>
+                            <div class="ma-selector">
+                                <div class="ma-option active" onclick="selectMA(20)">
+                                    <div class="ma-label">MA 20</div>
+                                    <div class="ma-sublabel">Short</div>
+                                </div>
+                                <div class="ma-option" onclick="selectMA(50)">
+                                    <div class="ma-label">MA 50</div>
+                                    <div class="ma-sublabel">Medium</div>
+                                </div>
+                                <div class="ma-option" onclick="selectMA(150)">
+                                    <div class="ma-label">MA 150</div>
+                                    <div class="ma-sublabel">Long</div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="maPeriod" value="20" />
+                        </div>
+                        <p class="info-text">Alert triggers when price crosses the moving average.</p>
+                    </div>
+
+                    <button class="btn btn-primary" onclick="createAlert()" id="createBtn" style="margin-top:16px;">
+                        Create Alert
+                    </button>
+                    <div id="message"></div>
+                </div>
+
+                <!-- NL Alert Card -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">✨ Create from Text</div>
+                            <div class="card-subtitle">Describe your alert in plain English</div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="nlAlertInput" placeholder='e.g. "Alert me when TSLA breaks 200"' />
+                    </div>
+
                 <input 
                     type="text" 
                     id="nlAlertInput" 
@@ -407,27 +367,34 @@ def dashboard():
                <button onclick="parseNLAlert()" id="parseBtn">Parse Alert</button>
 
                <!-- Preview Section (hidden initially) -->
-               <div id="nlPreview" style="display: none; margin-top: 16px; padding: 16px; background: rgba(91,124,255,0.1); border-radius: 12px; border: 1px solid rgba(91,124,255,0.2);">
-                   <div style="font-size: 13px; font-weight: 600; color: #5B7CFF; margin-bottom: 8px;">Preview:</div>
-                   <div id="nlSummary" style="margin-bottom: 12px;"></div>
-                   <button onclick="confirmNLAlert()" id="confirmBtn">Confirm & Create</button>
-                   <button onclick="cancelNLAlert()" class="btn-secondary" style="margin-left: 8px;">Cancel</button>
-              </div>
-    
-              <div id="nlMessage"></div>
+                    <button class="btn btn-secondary btn-sm" onclick="parseNLAlert()" id="parseBtn">Parse Alert</button>
+
+                    <div id="nlPreview" style="display:none;" class="nl-preview">
+                        <div class="nl-preview-label">Preview</div>
+                        <div id="nlSummary" style="margin-bottom:14px;font-size:14px;line-height:1.6;"></div>
+                        <div style="display:flex;gap:8px;">
+                            <button class="btn btn-primary btn-sm" onclick="confirmNLAlert()" id="confirmBtn" style="width:auto;flex:1;">Confirm & Create</button>
+                            <button class="btn btn-secondary btn-sm" onclick="cancelNLAlert()">Cancel</button>
+                        </div>
+                    </div>
+                    <div id="nlMessage"></div>
+                </div>
             </div>
-            
-            <div class="card">
-                <h2>Your Active Alerts</h2>
-                <div id="alertsList">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        Loading alerts...
+
+            <!-- Right column: Active Alerts -->
+            <div>
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Active Alerts</div>
+                        <span id="alertCount" class="badge badge-muted" style="display:none;"></span>
+                    </div>
+                    <div id="alertsList">
+                        <div class="loading">Loading alerts...</div>
                     </div>
                 </div>
             </div>
         </div>
-    </div><!-- /.main-content -->
+    </div><!-- /.page-wrapper -->
     
     <script>
         let allTickers = [];
@@ -628,71 +595,62 @@ def dashboard():
             .sort((a, b) => a.ticker.localeCompare(b.ticker, undefined, {sensitivity: 'base'}));
         
         if (active.length === 0) {
-            alertsEl.innerHTML = '<div class="empty">No active alerts. Create one to get started!</div>';
+            alertsEl.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">🎯</div>
+                    <div class="empty-state-title">No Active Alerts</div>
+                    <div class="empty-state-text">Create an alert to get notified when a price target is hit.</div>
+                </div>`;
+            const countBadge = document.getElementById('alertCount');
+            if (countBadge) countBadge.style.display = 'none';
             return;
         }
-        
-        // Generate unique key for each render to force update
-        const renderKey = Math.random().toString(36).substring(7);
-        
+
+        const countBadge = document.getElementById('alertCount');
+        if (countBadge) { countBadge.textContent = active.length; countBadge.style.display = 'inline-flex'; }
+
         alertsEl.innerHTML = active.map(alert => {
         const current = alert.current_price || 0;
         const target = alert.target_price || 0;
         const alertType = alert.alert_type || 'price';
         const maPeriod = alert.ma_period;
-        
-        // Calculate status (above/below)
+
         const isAbove = current >= target;
-        
-        // Calculate percentage difference
         const diff = Math.abs(current - target);
         const pct = target > 0 ? ((diff / target) * 100).toFixed(1) : '0.0';
-        
-        // Determine colors and labels
+
         const accentClass = alertType === 'ma' ? 'ma-alert' : '';
         const badgeLabel = alertType === 'ma' ? `MA ${maPeriod}` : 'PRICE';
         const badgeClass = alertType === 'ma' ? 'ma' : 'price';
         const targetLabel = alertType === 'ma' ? `MA${maPeriod}` : 'Target';
-        
+
         return `
-            <div class="alert-card ${accentClass}" style="background: rgba(255,255,255,0.05); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); position: relative; overflow: hidden;">
-                
-                <!-- Header Row -->
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: #FFFFFF;">${alert.ticker}</span>
-                        <span class="status-badge ${badgeClass}" style="font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px;">${badgeLabel}</span>
+            <div class="alert-card ${accentClass}">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:18px;font-weight:800;letter-spacing:-0.3px;">${alert.ticker}</span>
+                        <span class="status-badge ${badgeClass}">${badgeLabel}</span>
                     </div>
-                    
-                    <div class="status-indicator ${isAbove ? 'above' : 'below'}" style="font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 8px; display: inline-flex; align-items: center; gap: 4px;">
-                        <span class="status-dot" style="width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor;"></span>
+                    <div class="status-indicator ${isAbove ? 'above' : 'below'}">
+                        <span class="status-dot"></span>
                         ${isAbove ? 'Above' : 'Below'}
                     </div>
                 </div>
-                
-                <!-- Prices Grid -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
                     <div>
-                        <div style="font-size: 12px; font-weight: 500; color: #8B92A8; margin-bottom: 4px;">Current Price</div>
-                        <div style="font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.3px; color: #FFFFFF;">$${current.toFixed(2)}</div>
+                        <div class="item-field-label">Current Price</div>
+                        <div class="item-field-value" style="font-size:18px;">$${current.toFixed(2)}</div>
                     </div>
                     <div>
-                        <div style="font-size: 12px; font-weight: 500; color: #8B92A8; margin-bottom: 4px;">${targetLabel}</div>
-                        <div style="font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.3px; color: #FFFFFF;">$${target.toFixed(2)}</div>
+                        <div class="item-field-label">${targetLabel}</div>
+                        <div class="item-field-value accent" style="font-size:18px;">$${target.toFixed(2)}</div>
                     </div>
                 </div>
-                
-                <!-- Distance Info -->
-                <div style="margin-top: 12px; font-size: 13px; color: #8B92A8;">
-                    ${pct}% away from ${targetLabel.toLowerCase()}
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-size:12px;color:var(--text-muted);">${pct}% from ${targetLabel.toLowerCase()}</span>
+                    <button class="delete-btn" onclick="deleteAlert(${alert.id})">Delete</button>
                 </div>
-                
-                <!-- Delete Button -->
-                <button onclick="deleteAlert(${alert.id})" style="width: 100%; margin-top: 16px; padding: 10px; background: rgba(255,107,107,0.15); border: 1px solid rgba(255,107,107,0.25); border-radius: 8px; color: #FF6B6B; font-size: 13px; font-weight: 600;">
-                    Delete Alert
-                </button>
-            </div>
-        `;
+            </div>`;
     }).join('');
         
     } catch (error) {
@@ -1020,425 +978,22 @@ def bitcoin_scanner_page():
     """Bitcoin transaction scanner page"""
     html = """
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
-        <title>Bitcoin Scanner - Stock Alerts</title>
+        <title>Bitcoin Scanner — PulseAlerts</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
-                background: #0A0E1A;
-                background-image: radial-gradient(circle at 50% 0%, #1a1f2e 0%, #0a0e1a 50%);
-                min-height: 100vh;
-                color: #FFFFFF;
-                padding: 20px;
-                -webkit-font-smoothing: antialiased;
-            }
-            .nav {
-                display: flex;
-                gap: 20px;
-                margin-bottom: 30px;
-                padding: 15px;
-                background: rgba(255,255,255,0.05);
-                border-radius: 10px;
-            }
-            .nav a {
-                color: #8B92A8;
-                text-decoration: none;
-                font-weight: 600;
-                font-size: 14px;
-                transition: color 0.3s;
-            }
-            
-            .nav a:hover { color: #5B7CFF; }
-            .container { max-width: 1200px; margin: 0 auto; }
-            .header {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                padding: 30px;
-                border-radius: 15px;
-                margin-bottom: 30px;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-            }
-            .header h1 {
-                font-size: 32px;
-                font-weight: 700;
-                letter-spacing: -0.5px;
-                margin-bottom: 24px;
-            }
-            .card {
-                background: rgba(255,255,255,0.05);
-                backdrop-filter: blur(20px);
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 16px;
-                padding: 25px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-                margin-bottom: 20px;
-            }
-            .form-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr auto;
-                gap: 15px;
-                margin-bottom: 20px;
-            }
-            label {
-                display: block;
-                margin-bottom: 8px;
-                font-weight: 600;
-                color: #8B92A8;
-                font-size: 13px;
-                letter-spacing: 0.2px;
-                text-transform: uppercase;
-            }
-            input, select, textarea {
-                width: 100%;
-                height: 56px;
-                padding: 0 16px;
-                background: rgba(255,255,255,0.05);
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 12px;
-                color: #FFFFFF;
-                font-size: 16px;
-                font-weight: 500;
-                font-family: inherit;
-                transition: all 0.3s ease;
-            }
-            
-            textarea {
-                height: auto;
-                min-height: 80px;
-                padding: 16px;
-            }
-                
-            input:focus, select:focus, textarea:focus {
-                outline: none;
-                border-color: #5B7CFF;
-                background: rgba(91,124,255,0.05);
-                box-shadow: 0 0 0 4px rgba(91,124,255,0.1);
-            }
-            
-            input::placeholder {
-                color: #4A5568;
-            }
-            button {
-                width: 100%;
-                padding: 14px;
-                background: linear-gradient(135deg, #5B7CFF 0%, #7B5CFF 100%);
-                color: white;
-                border: none;
-                border-radius: 12px;
-                font-weight: 700;
-                cursor: pointer;
-                font-size: 15px;
-                transition: all 0.2s ease;
-                margin-top: 10px;
-                box-shadow: 0 4px 24px rgba(91,124,255,0.35), 0 2px 8px rgba(0,0,0,0.2);
-            }
-            
-            button:hover {
-                box-shadow: 0 6px 32px rgba(91,124,255,0.45), 0 2px 8px rgba(0,0,0,0.3);
-            }
-            
-            button:active {
-                transform: scale(0.98);
-            }
-            button:disabled {
-                opacity: 0.5;
-                cursor: not-allowed;
-            }
-            .tx-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 20px;
-            }
-            .tx-table th {
-                background: rgba(100,255,218,0.1);
-                padding: 15px;
-                text-align: left;
-                font-weight: 600;
-                color: #64ffda;
-                border-bottom: 2px solid rgba(100,255,218,0.3);
-            }
-            .tx-table td {
-                padding: 15px;
-                border-bottom: 1px solid rgba(255,255,255,0.05);
-            }
-            .tx-table tr:hover {
-                background: rgba(255,255,255,0.03);
-            }
-            .hash {
-                font-family: monospace;
-                color: #64ffda;
-                font-size: 12px;
-            }
-            .amount {
-                font-weight: 600;
-                color: #f39c12;
-            }
-            .address {
-                font-family: monospace;
-                font-size: 11px;
-                color: #888;
-            }
-            .loading {
-                text-align: center;
-                padding: 40px;
-                color: #64ffda;
-            }
-            .empty {
-                text-align: center;
-                padding: 40px;
-                color: #888;
-            }
-            .stats {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 15px;
-                margin-bottom: 20px;
-            }
-            .stat-card {
-                background: rgba(100,255,218,0.1);
-                padding: 20px;
-                border-radius: 10px;
-                border: 1px solid rgba(100,255,218,0.2);
-            }
-            .stat-value {
-                font-size: 28px;
-                font-weight: 700;
-                color: #64ffda;
-            }
-            .stat-label {
-                font-size: 13px;
-                color: #888;
-                margin-top: 5px;
-            }
-                        /* Alert Type Toggle */
-            .alert-type-toggle {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 8px;
-                margin-bottom: 24px;
-                background: rgba(255,255,255,0.05);
-                border-radius: 12px;
-                padding: 4px;
-            }
-            
-            .toggle-option {
-                height: 44px;
-                border-radius: 10px;
-                background: transparent;
-                border: none;
-                color: #8B92A8;
-                font-size: 14px;
-                font-weight: 600;
-                box-shadow: none;
-                transition: all 0.3s ease;
-                margin: 0;
-                width: auto;
-            }
-            
-            .toggle-option.active {
-                background: #5B7CFF;
-                color: #FFFFFF;
-                box-shadow: 0 2px 12px rgba(91,124,255,0.3);
-            }
-            
-            /* MA Selector */
-            .ma-selector {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 8px;
-            }
-            
-            .ma-option {
-                height: 56px;
-                background: rgba(255,255,255,0.05);
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 12px;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                gap: 2px;
-                cursor: pointer;
-                transition: all 0.3s ease;
-            }
-            
-            .ma-option.active {
-                background: rgba(0,217,255,0.1);
-                border-color: #00D9FF;
-                box-shadow: 0 0 0 4px rgba(0,217,255,0.1);
-            }
-            
-            .ma-label {
-                font-size: 15px;
-                font-weight: 700;
-                color: #FFFFFF;
-            }
-            
-            .ma-sublabel {
-                font-size: 11px;
-                font-weight: 500;
-                color: #8B92A8;
-                text-transform: none;
-            }
-            
-            .ma-option.active .ma-sublabel {
-                color: #00D9FF;
-            }
-            
-            /* Financial Values */
-            .financial-value,
-            .price-value,
-            .summary-value {
-                font-variant-numeric: tabular-nums;
-                letter-spacing: -0.3px;
-            }
-            
-            /* Alert Cards */
-            .alert-card {
-                background: rgba(255,255,255,0.05);
-                backdrop-filter: blur(20px);
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 16px;
-                padding: 20px;
-                margin-bottom: 12px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-                position: relative;
-                overflow: hidden;
-            }
-            
-            .alert-card::before {
-                content: '';
-                position: absolute;
-                top: 0;
-                left: 0;
-                width: 4px;
-                height: 100%;
-                background: linear-gradient(180deg, #5B7CFF 0%, #7B5CFF 100%);
-            }
-            
-            .alert-card.ma-alert::before {
-                background: linear-gradient(180deg, #00D9FF 0%, #0099FF 100%);
-            }
-            
-            /* Status Badges */
-            .status-badge {
-                font-size: 11px;
-                font-weight: 600;
-                padding: 4px 8px;
-                border-radius: 6px;
-                letter-spacing: 0.3px;
-            }
-            
-            .status-badge.price {
-                background: rgba(91,124,255,0.15);
-                color: #5B7CFF;
-                border: 1px solid rgba(91,124,255,0.25);
-            }
-            
-            .status-badge.ma {
-                background: rgba(0,217,255,0.15);
-                color: #00D9FF;
-                border: 1px solid rgba(0,217,255,0.25);
-            }
-            
-            .status-indicator {
-                font-size: 12px;
-                font-weight: 600;
-                padding: 6px 10px;
-                border-radius: 8px;
-                display: inline-flex;
-                align-items: center;
-                gap: 4px;
-            }
-            
-            .status-indicator.above {
-                background: rgba(0,255,163,0.1);
-                color: #00FFA3;
-                border: 1px solid rgba(0,255,163,0.2);
-            }
-            
-            .status-indicator.below {
-                background: rgba(255,107,107,0.1);
-                color: #FF6B6B;
-                border: 1px solid rgba(255,107,107,0.2);
-            }
-            
-            .status-dot {
-                width: 6px;
-                height: 6px;
-                border-radius: 50%;
-                background: currentColor;
-                box-shadow: 0 0 8px currentColor;
-            }
-            
-            /* Price Display */
-            .price-item {
-                margin-bottom: 12px;
-            }
-            
-            .price-label {
-                font-size: 12px;
-                font-weight: 500;
-                color: #8B92A8;
-                margin-bottom: 4px;
-                text-transform: none;
-            }
-            
-            .price-value {
-                font-size: 20px;
-                font-weight: 600;
-                font-variant-numeric: tabular-nums;
-                letter-spacing: -0.3px;
-            }
-            
-            .price-change {
-                font-size: 13px;
-                font-weight: 600;
-                margin-top: 4px;
-            }
-            
-            .price-change.positive {
-                color: #00FFA3;
-            }
-            
-            .price-change.negative {
-                color: #FF6B6B;
-            }
-            
-            /* Autocomplete Dropdown */
-            .autocomplete-dropdown {
-                background: rgba(14,20,32,0.98);
-                backdrop-filter: blur(20px);
-                border: 1px solid rgba(91,124,255,0.3);
-                border-radius: 12px;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.4);
-            }
-            
-            .autocomplete-item:hover {
-                background: rgba(91,124,255,0.1);
-            }
-            
-            .ticker-symbol {
-                font-weight: 700;
-                color: #5B7CFF;
-            }
-            
-            .ticker-name {
-                color: #8B92A8;
-            }
-            
-            .ticker-type {
-                background: rgba(91,124,255,0.15);
-                color: #5B7CFF;
-                font-weight: 600;
-            }
         <link rel="stylesheet" href="/static/css/theme.css">
+        <style>
+            body { padding: 0; }
+            .hash { font-family: monospace; color: var(--accent-cyan); font-size: 12px; text-decoration: none; }
+            .hash:hover { text-decoration: underline; }
+            .col-btc  { font-weight: 700; color: var(--warning); }
+            .col-addr { font-family: monospace; font-size: 11px; color: var(--text-muted); }
+            .scan-note { background: rgba(255,184,0,0.07); border-left: 3px solid var(--warning); border-radius: var(--r-md); padding: 12px 14px; font-size: 13px; color: var(--text-secondary); margin-top: 16px; }
         </style>
     </head>
     <body>
-        <nav class="top-nav wide">
+        <nav class="top-nav">
             <span class="top-nav-brand">📈 PulseAlerts</span>
             <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
             <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
@@ -1450,55 +1005,60 @@ def bitcoin_scanner_page():
             <span class="top-nav-spacer"></span>
             <button class="top-nav-logout" onclick="logout()">Sign out</button>
         </nav>
-        <div class="container" style="max-width:1200px;margin:0 auto;padding:80px 20px 40px">
-            <div style="margin-bottom:24px">
-                <h1 style="font-size: 28px; font-weight: 800; letter-spacing:-0.5px; margin-bottom:4px;">₿ Bitcoin Scanner</h1>
-                <p style="font-size:14px;color:var(--text-secondary)">Blockchain transaction analysis</p>
+        <div class="page-wrapper medium">
+            <div class="page-header">
+                <div class="page-header-left">
+                    <div class="page-eyebrow">Blockchain</div>
+                    <h1 class="page-title">₿ Bitcoin Scanner</h1>
+                    <p class="page-subtitle">Scan blockchain for large transaction activity</p>
+                </div>
             </div>
 
+            <!-- Scan controls -->
             <div class="card">
-                <h2 style="margin-bottom: 20px;">Scan Parameters</h2>
-                <div class="form-grid">
-                    <div>
-                        <label>Minimum Amount (BTC)</label>
+                <div class="card-header">
+                    <div class="card-title">Scan Parameters</div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label class="form-label">Minimum Amount (BTC)</label>
                         <input type="number" id="minAmount" value="10" step="0.1" min="0.1">
                     </div>
-                    <div class="form-group">
-            <label>Time Period</label>
-            <select id="timeRange">
-                <option value="24">Last 24 Hours</option>
-                <option value="168">Last Week</option>
-                <option value="720">Last Month</option>
-                <option value="4320">Last 6 Months</option>
-            </select>
-        </div>
-
-                    <div style="display: flex; align-items: flex-end;">
-                        <button onclick="scanTransactions()" id="scanBtn">Scan Blockchain</button>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label class="form-label">Time Period</label>
+                        <select id="timeRange">
+                            <option value="24">Last 24 Hours</option>
+                            <option value="168">Last 7 Days</option>
+                            <option value="720">Last 30 Days</option>
+                            <option value="4320">Last 6 Months</option>
+                        </select>
                     </div>
                 </div>
-                <div style="background: rgba(255,193,7,0.1); padding: 15px; border-radius: 8px; border-left: 4px solid #ffc107;">
-                    <strong>⚠️ Note:</strong> Uses Blockchain.info free API. Shows recent unconfirmed + latest confirmed transactions.
-                    Full historical scanning requires paid API or running your own Bitcoin node.
+                <button class="btn btn-primary" onclick="scanTransactions()" id="scanBtn" style="margin-top:16px;">
+                    Scan Blockchain
+                </button>
+                <div class="scan-note">
+                    ⚠️ Uses Blockchain.info free API — shows recent unconfirmed and latest confirmed transactions.
+                    Full historical scanning requires a paid API or self-hosted Bitcoin node.
                 </div>
             </div>
 
-            <div class="card">
-                <div class="stats" id="stats" style="display: none;">
+            <!-- Stats + Results -->
+            <div class="card" id="resultsCard" style="display:none;">
+                <div id="statsGrid" class="stat-grid stat-grid-3" style="margin-bottom:20px;display:none;">
                     <div class="stat-card">
-                        <div class="stat-value" id="txCount">-</div>
-                        <div class="stat-label">Transactions Found</div>
+                        <div class="stat-label">Transactions</div>
+                        <div class="stat-value accent" id="txCount">—</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value" id="totalBTC">-</div>
                         <div class="stat-label">Total BTC Volume</div>
+                        <div class="stat-value warning" id="totalBTC">—</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value" id="totalUSD">-</div>
                         <div class="stat-label">Total USD Value</div>
+                        <div class="stat-value" id="totalUSD">—</div>
                     </div>
                 </div>
-
                 <div id="results"></div>
             </div>
         </div>
@@ -1506,29 +1066,34 @@ def bitcoin_scanner_page():
         <script>
             async function scanTransactions() {
                 const minAmount = parseFloat(document.getElementById('minAmount').value);
-                const timeRange = document.getElementById('timeRange').value; // Remove parseInt, keep as string
+                const timeRange = document.getElementById('timeRange').value;
                 const resultsEl = document.getElementById('results');
                 const scanBtn = document.getElementById('scanBtn');
-                
+                const resultsCard = document.getElementById('resultsCard');
+
                 scanBtn.disabled = true;
                 scanBtn.textContent = 'Scanning...';
-                resultsEl.innerHTML = '<div class="loading">🔍 Scanning Bitcoin blockchain...</div>';
-                
+                resultsCard.style.display = 'block';
+                resultsEl.innerHTML = '<div class="loading">Scanning Bitcoin blockchain...</div>';
+                document.getElementById('statsGrid').style.display = 'none';
+
                 try {
                     const res = await fetch('/api/bitcoin/scan', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ min_amount: minAmount, timeframe: timeRange })
                     });
-                    
                     const data = await res.json();
-                    
+
                     if (!data.success) {
-                        resultsEl.innerHTML = `<div class="empty">Scan failed: ${data.error || 'Unknown error'}</div>`;
-                        document.getElementById('stats').style.display = 'none';
+                        resultsEl.innerHTML = \`<div class="empty">Scan failed: \${data.error || 'Unknown error'}</div>\`;
                     } else if (data.transactions.length === 0) {
-                        resultsEl.innerHTML = '<div class="empty">No transactions found matching your criteria.</div>';
-                        document.getElementById('stats').style.display = 'none';
+                        resultsEl.innerHTML = \`
+                            <div class="empty-state">
+                                <div class="empty-state-icon">₿</div>
+                                <div class="empty-state-title">No Transactions Found</div>
+                                <div class="empty-state-text">Try lowering the minimum BTC amount or extending the time range.</div>
+                            </div>\`;
                     } else {
                         displayResults(data.transactions);
                     }
@@ -1539,61 +1104,40 @@ def bitcoin_scanner_page():
                     scanBtn.textContent = 'Scan Blockchain';
                 }
             }
-            
-            function displayResults(transactions) {
-                const statsEl = document.getElementById('stats');
-                const resultsEl = document.getElementById('results');
-                
-                // Calculate stats
-                const totalBTC = transactions.reduce((sum, tx) => sum + tx.amount_btc, 0);
-                const totalUSD = transactions.reduce((sum, tx) => sum + tx.amount_usd, 0);
-                
-                // Update stats
-                document.getElementById('txCount').textContent = transactions.length;
+
+            function displayResults(txs) {
+                const totalBTC = txs.reduce((s, t) => s + t.amount_btc, 0);
+                const totalUSD = txs.reduce((s, t) => s + t.amount_usd, 0);
+                document.getElementById('txCount').textContent = txs.length;
                 document.getElementById('totalBTC').textContent = totalBTC.toFixed(2) + ' BTC';
-                document.getElementById('totalUSD').textContent = '$' + totalUSD.toLocaleString();
-                statsEl.style.display = 'grid';
-                
-                // Build table
-                let html = `
-                    <table class="tx-table">
-                        <thead>
-                            <tr>
-                                <th>Transaction Hash</th>
-                                <th>Time</th>
-                                <th>Amount</th>
-                                <th>From</th>
-                                <th>To</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                `;
-                
-                transactions.forEach(tx => {
-                    const time = new Date(tx.time).toLocaleString();
-                    const fromAddr = tx.from_addresses.slice(0, 2).join('<br>');
-                    const toAddr = tx.to_addresses.slice(0, 2).join('<br>');
-                    
-                    html += `
-                        <tr>
-                            <td><a href="https://blockchain.info/tx/${tx.hash}" target="_blank" class="hash">${tx.hash.substring(0, 16)}...</a></td>
-                            <td>${time}</td>
-                            <td class="amount">${tx.amount_btc.toFixed(4)} BTC<br><span style="font-size:12px;color:#888;">$${tx.amount_usd.toLocaleString()}</span></td>
-                            <td class="address">${fromAddr}${tx.num_inputs > 2 ? '<br>+' + (tx.num_inputs - 2) + ' more' : ''}</td>
-                            <td class="address">${toAddr}${tx.num_outputs > 2 ? '<br>+' + (tx.num_outputs - 2) + ' more' : ''}</td>
-                        </tr>
-                    `;
+                document.getElementById('totalUSD').textContent = '$' + Math.round(totalUSD).toLocaleString();
+                document.getElementById('statsGrid').style.display = 'grid';
+
+                let html = \`<div class="table-wrap"><table class="data-table">
+                    <thead><tr>
+                        <th>Transaction</th><th>Time</th><th>Amount</th><th>Inputs</th><th>Outputs</th>
+                    </tr></thead><tbody>\`;
+
+                txs.forEach(tx => {
+                    const time = new Date(tx.time).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+                    const from = tx.from_addresses.slice(0, 1).join('') || '—';
+                    const to   = tx.to_addresses.slice(0, 1).join('') || '—';
+                    html += \`<tr>
+                        <td><a href="https://blockchain.info/tx/\${tx.hash}" target="_blank" class="hash">\${tx.hash.substring(0,14)}…</a></td>
+                        <td class="col-muted">\${time}</td>
+                        <td><span class="col-btc">\${tx.amount_btc.toFixed(4)} BTC</span><br><span style="font-size:11px;color:var(--text-muted);">$\${Math.round(tx.amount_usd).toLocaleString()}</span></td>
+                        <td class="col-addr">\${from.substring(0,12)}…\${tx.num_inputs > 1 ? ' +' + (tx.num_inputs-1) : ''}</td>
+                        <td class="col-addr">\${to.substring(0,12)}…\${tx.num_outputs > 1 ? ' +' + (tx.num_outputs-1) : ''}</td>
+                    </tr>\`;
                 });
-                
-                html += '</tbody></table>';
-                resultsEl.innerHTML = html;
+                html += '</tbody></table></div>';
+                document.getElementById('results').innerHTML = html;
             }
-            
+
             async function logout() {
                 await fetch('/api/logout');
                 window.location.href = '/login';
             }
-            // Initialize
         </script>
     </body>
     </html>
@@ -1658,93 +1202,59 @@ def portfolio_page():
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <link rel="stylesheet" href="/static/css/theme.css">
     <style>
-        /* Portfolio-specific styles */
-        .main-content { max-width: 1600px; margin: 0 auto; padding: 80px 20px 40px; }
-        .container { max-width: 1600px; margin: 0 auto; }
-        .nav-placeholder { /* replaced by top-nav */
-            display: flex;
-            gap: 20px;
-            margin-bottom: 30px;
-            padding: 15px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 10px;
-            flex-wrap: wrap;
-        }
-        /* ── Portfolio page compact CSS (preserves all JS-used classnames) ── */
-        .card { background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 24px; margin-bottom: 20px; }
-        .card h2 { font-size: 18px; font-weight: 700; margin-bottom: 16px; letter-spacing: -0.3px; }
-        label { display: block; margin-bottom: 6px; font-weight: 600; color: #8B92A8; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase; }
-        input, select, textarea { width: 100%; height: 48px; padding: 0 14px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: #fff; font-size: 14px; font-family: inherit; transition: border-color 0.2s, box-shadow 0.2s; }
-        textarea { height: auto; min-height: 80px; padding: 12px 14px; }
-        input:focus, select:focus, textarea:focus { outline: none; border-color: #5B7CFF; box-shadow: 0 0 0 3px rgba(91,124,255,0.18); background: rgba(91,124,255,0.05); }
-        input:disabled { opacity: 0.45; cursor: not-allowed; }
-        button { padding: 12px 24px; background: linear-gradient(135deg, #5B7CFF 0%, #7B5CFF 100%); color: #fff; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-size: 14px; font-family: inherit; transition: box-shadow 0.2s; }
-        button:hover { box-shadow: 0 6px 24px rgba(91,124,255,0.4); }
-        button:active { transform: scale(0.98); }
-        button:disabled { opacity: 0.45; cursor: not-allowed; }
-        .btn-secondary { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #8B92A8; border-radius: 10px; padding: 10px 18px; font-size: 13px; cursor: pointer; transition: background 0.2s; margin: 0; }
-        .btn-secondary:hover { background: rgba(255,255,255,0.08); color: #fff; }
-        .form-group { margin-bottom: 14px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
-        .calculated-value { height: 48px; padding: 0 14px; background: rgba(0,208,132,0.07); border: 1px solid rgba(0,208,132,0.18); border-radius: 10px; color: #00D084; font-weight: 700; font-size: 14px; display: flex; align-items: center; }
-        .info-text { font-size: 12px; color: #4A5268; margin-top: 4px; }
-        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
-        .summary-item { background: rgba(255,255,255,0.04); padding: 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.07); }
-        .summary-label { font-size: 11px; color: #8B92A8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-        .summary-value { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; color: #5B7CFF; }
-        .summary-value.positive { color: #00D084; }
-        .summary-value.negative { color: #FF4757; }
-        .summary-value.neutral  { color: #FFB800; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
-        .stat-item { background: rgba(255,255,255,0.04); padding: 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.06); text-align: center; }
-        .stat-label { font-size: 11px; color: #8B92A8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
+        /* Portfolio page — minimal overrides on top of theme.css */
+        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sp-4); margin-bottom: var(--sp-5); }
+        .summary-item { background: var(--bg-surface); border: 1px solid var(--border-card); border-radius: var(--r-md); padding: var(--sp-4); }
+        .summary-label { font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .summary-value { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; color: var(--accent); }
+        .summary-value.positive { color: var(--positive); }
+        .summary-value.negative { color: var(--negative); }
+        .summary-value.neutral  { color: var(--warning); }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--sp-3); }
+        .stat-item { background: var(--bg-surface); border: 1px solid var(--border-card); border-radius: var(--r-md); padding: var(--sp-3); text-align: center; }
+        .stat-label { font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
         .stat-value { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
-        .stat-value.positive { color: #00D084; }
-        .stat-value.negative { color: #FF4757; }
-        .table-container { overflow-x: auto; border-radius: 10px; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); white-space: nowrap; }
-        th { background: rgba(91,124,255,0.08); color: #8B92A8; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; position: sticky; top: 0; z-index: 1; }
-        tbody tr { transition: background 0.15s; }
-        tbody tr:hover { background: rgba(255,255,255,0.04); }
-        .ticker-cell { font-weight: 700; color: #5B7CFF; font-size: 14px; }
-        .positive { color: #00D084; font-weight: 600; }
-        .negative { color: #FF4757; font-weight: 600; }
-        .neutral  { color: #FFB800; }
+        .stat-value.positive { color: var(--positive); }
+        .stat-value.negative { color: var(--negative); }
+        .calculated-value { height: 48px; padding: 0 14px; background: rgba(0,208,132,0.07); border: 1px solid rgba(0,208,132,0.18); border-radius: var(--r-md); color: var(--positive); font-weight: 700; font-size: 14px; display: flex; align-items: center; }
+        .info-text { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sp-4); }
+        .ticker-cell { font-weight: 700; color: var(--accent); font-size: 14px; }
+        .positive { color: var(--positive); font-weight: 600; }
+        .negative { color: var(--negative); font-weight: 600; }
+        .neutral  { color: var(--warning); }
         .warning-badge { display: inline-block; padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 700; margin: 2px; text-transform: uppercase; }
-        .warning-badge.error   { background: rgba(255,71,87,0.15);  border: 1px solid rgba(255,71,87,0.3);  color: #FF4757; }
-        .warning-badge.warning { background: rgba(255,184,0,0.15);  border: 1px solid rgba(255,184,0,0.3);  color: #FFB800; }
+        .warning-badge.error   { background: rgba(255,71,87,0.15); border: 1px solid rgba(255,71,87,0.3); color: var(--negative); }
+        .warning-badge.warning { background: rgba(255,184,0,0.15); border: 1px solid rgba(255,184,0,0.3); color: var(--warning); }
         .status-badge { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 11px; font-weight: 700; }
-        .status-badge.open   { background: rgba(0,208,132,0.12); color: #00D084; border: 1px solid rgba(0,208,132,0.25); }
-        .status-badge.closed { background: rgba(139,146,168,0.12); color: #8B92A8; border: 1px solid rgba(139,146,168,0.2); }
-        .message { padding: 12px 16px; border-radius: 10px; margin: 12px 0; font-size: 14px; font-weight: 500; }
-        .success { background: rgba(0,208,132,0.1); border: 1px solid rgba(0,208,132,0.25); color: #00D084; }
-        .error   { background: rgba(255,71,87,0.1); border: 1px solid rgba(255,71,87,0.25); color: #FF4757; }
-        .spinner { border: 3px solid rgba(91,124,255,0.1); border-top: 3px solid #5B7CFF; border-radius: 50%; width: 32px; height: 32px; animation: spin 0.7s linear infinite; margin: 16px auto; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .loading { text-align: center; padding: 32px; color: #8B92A8; }
-        .empty   { text-align: center; padding: 48px; color: #4A5268; }
-        .modal { display: none; position: fixed; z-index: 1000; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(6px); }
-        .modal.active { display: flex; align-items: center; justify-content: center; }
-        .modal-content { background: #0F1420; border: 1px solid rgba(91,124,255,0.2); padding: 28px; border-radius: 16px; max-width: 480px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
-        .modal-header { margin-bottom: 20px; }
-        .modal-header h3 { font-size: 18px; font-weight: 700; color: #5B7CFF; }
-        .tabs { display: flex; gap: 0; border-bottom: 1px solid rgba(255,255,255,0.08); margin-bottom: 20px; }
-        .tab { padding: 10px 20px; background: transparent; border: none; color: #8B92A8; font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 0.15s, border-color 0.15s; font-family: inherit; }
-        .tab.active { color: #5B7CFF; border-bottom-color: #5B7CFF; }
-        .tab:hover:not(.active) { color: #fff; }
+        .status-badge.open   { background: rgba(0,208,132,0.12); color: var(--positive); border: 1px solid rgba(0,208,132,0.25); }
+        .status-badge.closed { background: rgba(139,146,168,0.12); color: var(--text-muted); border: 1px solid rgba(139,146,168,0.2); }
+        .message { padding: 12px 16px; border-radius: var(--r-md); margin: var(--sp-3) 0; font-size: 14px; font-weight: 500; }
+        .success { background: rgba(0,208,132,0.1); border: 1px solid rgba(0,208,132,0.25); color: var(--positive); }
+        .error   { background: rgba(255,71,87,0.1); border: 1px solid rgba(255,71,87,0.25); color: var(--negative); }
+        .spinner { border: 3px solid rgba(91,124,255,0.1); border-top-color: var(--accent); border-radius: 50%; width: 24px; height: 24px; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: middle; margin-right: 8px; }
+        .table-container { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { padding: 10px 12px; text-align: left; background: rgba(91,124,255,0.06); color: var(--text-muted); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+        td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-subtle); white-space: nowrap; }
+        tbody tr:hover { background: rgba(255,255,255,0.035); }
+        .btn-close, .btn-edit, .btn-delete { padding: 4px 10px; border: none; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit; margin-right: 4px; transition: opacity 0.15s; }
+        .btn-close:hover, .btn-edit:hover, .btn-delete:hover { opacity: 0.8; }
+        .btn-close  { background: rgba(0,208,132,0.12); color: var(--positive); }
+        .btn-edit   { background: rgba(91,124,255,0.12); color: var(--accent); }
+        .btn-delete { background: rgba(255,71,87,0.12); color: var(--negative); }
+        .tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: var(--sp-4); }
+        .tab { padding: 10px 20px; background: transparent; border: none; color: var(--text-muted); font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 0.15s, border-color 0.15s; font-family: inherit; }
+        .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+        .tab:hover:not(.active) { color: var(--text-primary); }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
-        .timeframe-selector { display: flex; gap: 8px; margin-bottom: 14px; }
-        .timeframe-btn { flex: 1; padding: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #8B92A8; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit; }
-        .timeframe-btn.active { background: rgba(91,124,255,0.12); border-color: #5B7CFF; color: #5B7CFF; }
-        .timeframe-btn:hover:not(.active) { background: rgba(255,255,255,0.08); color: #fff; }
         @media (max-width: 768px) { .summary-grid { grid-template-columns: 1fr 1fr; } .stats-grid { grid-template-columns: repeat(2, 1fr); } .grid { grid-template-columns: 1fr; } th, td { padding: 8px 6px; } }
     </style>
 </head>
 <body>
     <!-- Sticky Top Nav -->
-    <nav class="top-nav wide">
+    <nav class="top-nav">
         <span class="top-nav-brand">📈 PulseAlerts</span>
         <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
         <a href="/portfolio" class="top-nav-link active">💼 Portfolio</a>
@@ -1757,27 +1267,30 @@ def portfolio_page():
         <button class="top-nav-logout" onclick="logout()">Sign out</button>
     </nav>
 
-    <div class="main-content">
-        <div style="margin-bottom: 28px;">
-            <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 4px;">Your trading performance</p>
-            <h1 style="font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">Portfolio</h1>
+    <div class="page-wrapper">
+        <div class="page-header" style="margin-bottom: var(--sp-6);">
+            <div class="page-eyebrow">Trading</div>
+            <h1 class="page-title">Portfolio</h1>
+            <p class="page-subtitle">Track positions, P&amp;L, and allocation across your portfolio</p>
         </div>
 
         <div id="message"></div>
 
         <!-- Portfolio Cash -->
-        <div class="card">
-            <h2>Portfolio Balance</h2>
-            <div class="form-group">
-                <label>Total Portfolio Cash ($)</label>
-                <input type="number" id="portfolioCash" placeholder="Enter total portfolio value" step="0.01" min="0">
+        <div class="card" style="margin-bottom: var(--sp-4);">
+            <div class="card-header">
+                <div class="card-title">Portfolio Balance</div>
             </div>
-            <button onclick="updatePortfolioCash()">Update Balance</button>
+            <div class="form-group">
+                <label class="form-label">Total Portfolio Cash ($)</label>
+                <input type="number" id="portfolioCash" placeholder="Enter total portfolio value" step="0.01" min="0" class="form-input">
+            </div>
+            <button class="btn btn-primary" onclick="updatePortfolioCash()">Update Balance</button>
         </div>
 
         <!-- Portfolio Summary -->
-        <div class="card" id="summaryCard">
-            <h2>📈 Portfolio Overview</h2>
+        <div class="card" id="summaryCard" style="margin-bottom: var(--sp-4);">
+            <div class="card-header"><div class="card-title">Portfolio Overview</div></div>
             <div class="summary-grid">
                 <div class="summary-item">
                     <div class="summary-label">Portfolio Value</div>
@@ -1807,8 +1320,8 @@ def portfolio_page():
         </div>
 
         <!-- Trading Statistics -->
-        <div class="card" id="statsCard">
-            <h2>📊 Trading Performance</h2>
+        <div class="card" id="statsCard" style="margin-bottom: var(--sp-4);">
+            <div class="card-header"><div class="card-title">Trading Performance</div></div>
             <div class="stats-grid">
                 <div class="stat-item">
                     <div class="stat-label">Win Rate</div>
@@ -1838,73 +1351,77 @@ def portfolio_page():
         </div>
 
         <!-- Allocation Pie Chart -->
-        <div class="card" id="allocationCard">
-            <h2>🥧 Allocation by Category</h2>
-            <div style="display:flex;align-items:center;gap:32px;flex-wrap:wrap;">
-                <div style="position:relative;width:240px;height:240px;flex-shrink:0;">
-                    <canvas id="allocPieCanvas" width="240" height="240"></canvas>
+        <div class="card" id="allocationCard" style="margin-bottom: var(--sp-4);">
+            <div class="card-header"><div class="card-title">Allocation by Category</div></div>
+            <div style="display:flex;align-items:center;gap:40px;flex-wrap:wrap;">
+                <div style="position:relative;width:220px;height:220px;flex-shrink:0;">
+                    <canvas id="allocPieCanvas" width="220" height="220"></canvas>
                 </div>
-                <div id="allocLegend" style="display:flex;flex-direction:column;gap:8px;font-size:13px;"></div>
+                <div id="allocLegend" style="display:flex;flex-direction:column;gap:10px;font-size:13px;flex:1;min-width:200px;"></div>
             </div>
         </div>
 
         <!-- Add/Edit Trade Form -->
-        <div class="card">
-            <h2 id="formTitle">➕ Add New Trade</h2>
+        <div class="card" style="margin-bottom: var(--sp-4);">
+            <div class="card-header">
+                <div class="card-title" id="formTitle">Add New Trade</div>
+            </div>
             <div class="grid">
                 <div class="form-group">
-                    <label>Ticker *</label>
-                    <input type="text" id="ticker" placeholder="e.g., AAPL" maxlength="10">
+                    <label class="form-label">Ticker *</label>
+                    <input type="text" id="ticker" placeholder="e.g., AAPL" maxlength="10" class="form-input">
                 </div>
                 <div class="form-group">
-                    <label>Buy Price ($) *</label>
-                    <input type="number" id="buyPrice" step="0.01" min="0" oninput="calculateValues()">
+                    <label class="form-label">Buy Price ($) *</label>
+                    <input type="number" id="buyPrice" step="0.01" min="0" oninput="calculateValues()" class="form-input">
                 </div>
                 <div class="form-group">
-                    <label>Quantity *</label>
-                    <input type="number" id="quantity" step="0.0001" min="0" oninput="calculateValues()">
+                    <label class="form-label">Quantity *</label>
+                    <input type="number" id="quantity" step="0.0001" min="0" oninput="calculateValues()" class="form-input">
                 </div>
                 <div class="form-group">
-                    <label>Stop Loss ($)</label>
-                    <input type="number" id="stopLoss" step="0.01" min="0" placeholder="Optional" oninput="calculateValues()">
+                    <label class="form-label">Stop Loss ($)</label>
+                    <input type="number" id="stopLoss" step="0.01" min="0" placeholder="Optional" oninput="calculateValues()" class="form-input">
                 </div>
                 <div class="form-group">
-                    <label>Position Size ($) - Auto Calculated</label>
+                    <label class="form-label">Position Size ($) — Auto</label>
                     <div class="calculated-value" id="positionSizeDisplay">$0.00</div>
                     <div class="info-text">= Buy Price × Quantity</div>
                 </div>
                 <div class="form-group">
-                    <label>Risk Amount ($) - Auto Calculated</label>
+                    <label class="form-label">Risk Amount ($) — Auto</label>
                     <div class="calculated-value" id="riskAmountDisplay">$0.00</div>
-                    <div class="info-text">= |Buy Price - Stop Loss| × Quantity</div>
+                    <div class="info-text">= |Buy Price − Stop Loss| × Quantity</div>
                 </div>
                 <div class="form-group">
-                    <label>Take Profit ($)</label>
-                    <input type="number" id="takeProfit" step="0.01" min="0" placeholder="Optional">
+                    <label class="form-label">Take Profit ($)</label>
+                    <input type="number" id="takeProfit" step="0.01" min="0" placeholder="Optional" class="form-input">
                 </div>
                 <div class="form-group">
-                    <label>Timeframe *</label>
-                    <select id="timeframe">
+                    <label class="form-label">Timeframe *</label>
+                    <select id="timeframe" class="form-input">
                         <option value="Long">Long</option>
                         <option value="Swing">Swing</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>Trade Date *</label>
-                    <input type="date" id="tradeDate">
+                    <label class="form-label">Trade Date *</label>
+                    <input type="date" id="tradeDate" class="form-input">
                 </div>
             </div>
             <div class="form-group">
-                <label>Notes</label>
-                <textarea id="notes" placeholder="Optional trade notes..."></textarea>
+                <label class="form-label">Notes</label>
+                <textarea id="notes" placeholder="Optional trade notes..." class="form-input" style="height:auto;min-height:80px;padding:12px 14px;"></textarea>
             </div>
-            <button id="saveTradeBtn" onclick="saveTrade()">Add Trade</button>
-            <button class="btn-secondary" onclick="clearForm()" style="display:none;" id="cancelBtn">Cancel</button>
+            <div style="display:flex;gap:var(--sp-3);align-items:center;">
+                <button id="saveTradeBtn" class="btn btn-primary" onclick="saveTrade()">Add Trade</button>
+                <button class="btn btn-ghost" onclick="clearForm()" style="display:none;" id="cancelBtn">Cancel</button>
+            </div>
         </div>
 
         <!-- Trades Table -->
-        <div class="card">
-            <h2>📋 Trade Journal</h2>
+        <div class="card" style="margin-bottom: var(--sp-4);">
+            <div class="card-header"><div class="card-title">Trade Journal</div></div>
             
             <!-- Tabs -->
             <div class="tabs">
@@ -1998,18 +1515,21 @@ def portfolio_page():
     <div id="closeModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Close Trade</h3>
+                <h3 class="card-title">Close Trade</h3>
+                <p class="card-subtitle" style="margin-top:4px;">Enter the price and date at which you closed this position</p>
             </div>
             <div class="form-group">
-                <label>Close Price ($)</label>
-                <input type="number" id="closePrice" step="0.01" min="0">
+                <label class="form-label">Close Price ($)</label>
+                <input type="number" id="closePrice" step="0.01" min="0" class="form-input">
             </div>
             <div class="form-group">
-                <label>Close Date</label>
-                <input type="date" id="closeDate">
+                <label class="form-label">Close Date</label>
+                <input type="date" id="closeDate" class="form-input">
             </div>
-            <button onclick="confirmCloseTrade()">Close Trade</button>
-            <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+            <div style="display:flex;gap:var(--sp-3);margin-top:var(--sp-4);">
+                <button class="btn btn-primary" onclick="confirmCloseTrade()">Close Trade</button>
+                <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+            </div>
         </div>
     </div>
 
@@ -3181,19 +2701,15 @@ def alert_history_page():
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Alert History — Stock Alerts</title>
+    <title>Alert History — PulseAlerts</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/css/theme.css">
     <style>
-        .main-content { max-width: 1200px; margin: 0 auto; padding: 80px 20px 40px; }
-        .history-card { background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 20px; margin-bottom: 14px; }
-        .explanation { background: rgba(91,124,255,0.08); border-left: 3px solid #5B7CFF; padding: 12px; margin-top: 12px; border-radius: 8px; font-size: 14px; line-height: 1.6; color: #C5C8D4; }
-        .loading { text-align: center; padding: 40px; color: #8B92A8; }
-        .empty   { text-align: center; padding: 60px; color: #4A5268; }
+        body { padding: 0; }
     </style>
 </head>
 <body>
-    <nav class="top-nav wide">
+    <nav class="top-nav">
         <span class="top-nav-brand">📈 PulseAlerts</span>
         <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
         <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
@@ -3205,62 +2721,74 @@ def alert_history_page():
         <span class="top-nav-spacer"></span>
         <button class="top-nav-logout" onclick="logout()">Sign out</button>
     </nav>
-    <div class="main-content">
-        <div style="margin-bottom: 28px;">
-            <h1 style="font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">Triggered Alerts</h1>
+    <div class="page-wrapper medium">
+        <div class="page-header">
+            <div class="page-header-left">
+                <div class="page-eyebrow">History</div>
+                <h1 class="page-title">Triggered Alerts</h1>
+                <p class="page-subtitle">All alerts that have fired, with AI market insights</p>
+            </div>
         </div>
         <div id="historyList">
             <div class="loading">Loading history...</div>
         </div>
     </div>
-    
+
     <script>
         async function loadHistory() {
             const container = document.getElementById('historyList');
-            
             try {
                 const res = await fetch('/api/alerts/history');
                 const data = await res.json();
-                
+
                 if (!data.success || data.history.length === 0) {
-                    container.innerHTML = '<div class="empty">No triggered alerts yet</div>';
+                    container.innerHTML = \`
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📜</div>
+                            <div class="empty-state-title">No History Yet</div>
+                            <div class="empty-state-text">Triggered alerts will appear here once your price targets are hit.</div>
+                        </div>\`;
                     return;
                 }
-                
+
                 container.innerHTML = data.history.map(record => {
-                    const date = new Date(record.triggered_at).toLocaleString();
-                    
-                    return `
+                    const date = new Date(record.triggered_at).toLocaleString('en-US', {
+                        month: 'short', day: 'numeric', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit'
+                    });
+                    const price = record.price_at_trigger?.toFixed(2) || 'N/A';
+
+                    return \`
                         <div class="history-card">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                                <span style="font-size: 20px; font-weight: 700;">${record.ticker}</span>
-                                <span style="font-size: 13px; color: #8B92A8;">${date}</span>
+                            <div class="history-card-header">
+                                <div>
+                                    <div class="history-card-ticker">\${record.ticker}</div>
+                                    <div class="history-card-price">Triggered at <span style="color:var(--accent);">$\${price}</span></div>
+                                </div>
+                                <div style="text-align:right;">
+                                    <div class="history-card-time">\${date}</div>
+                                    <span class="badge badge-positive" style="margin-top:6px;">Fired</span>
+                                </div>
                             </div>
-                            
-                            <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px;">
-                                Triggered at: $${record.price_at_trigger?.toFixed(2) || 'N/A'}
-                            </div>
-                            
-                            ${record.explanation ? `
-                            <div class="explanation">
-                                <strong>🤖 AI Insight:</strong> ${record.explanation}
-                            </div>
-                            ` : ''}
-                        </div>
-                    `;
+                            \${record.explanation ? \`
+                            <div class="ai-insight">
+                                <div class="ai-insight-label">🤖 AI Insight</div>
+                                \${record.explanation}
+                            </div>\` : ''}
+                        </div>\`;
                 }).join('');
-                
+
             } catch (error) {
                 console.error('Error loading history:', error);
                 container.innerHTML = '<div class="empty">Failed to load history</div>';
             }
         }
-        
+
         async function logout() {
             await fetch('/api/logout');
             window.location.href = '/login';
         }
-        
+
         loadHistory();
     </script>
 </body>
@@ -3274,60 +2802,35 @@ def radar_page():
     """Market anomaly radar page"""
     html = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Market Radar</title>
+    <title>Market Radar — PulseAlerts</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
-            background: #0A0E1A;
-            background-image: radial-gradient(circle at 50% 0%, #1a1f2e 0%, #0a0e1a 50%);
-            color: #FFFFFF;
-            padding: 20px;
-        }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .nav {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 30px;
-            padding: 15px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 12px;
-        }
-        .nav a {
-            color: #8B92A8;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 14px;
-        }
-        .nav a:hover { color: #5B7CFF; }
-        .anomaly-card {
-            background: rgba(255,255,255,0.05);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 16px;
-            padding: 20px;
-            margin-bottom: 12px;
-            position: relative;
-        }
-        .anomaly-card.high::before {
-            content: '';
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 4px;
-            height: 100%;
-            background: #FF6B6B;
-        }
-        .loading { text-align: center; padding: 40px; color: #8B92A8; }
-        .empty { text-align: center; padding: 60px; color: #8B92A8; }
     <link rel="stylesheet" href="/static/css/theme.css">
+    <style>
+        body { padding: 0; }
+        .anomaly-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: var(--r-lg);
+            padding: 20px 20px 20px 23px;
+            margin-bottom: 10px;
+            position: relative; overflow: hidden;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .anomaly-card::before {
+            content: ''; position: absolute; top: 0; left: 0;
+            width: 3px; height: 100%;
+            background: var(--accent);
+        }
+        .anomaly-card.high::before   { background: var(--negative); }
+        .anomaly-card.medium::before { background: var(--warning); }
+        .anomaly-card.low::before    { background: var(--positive); }
+        .anomaly-card:hover { border-color: var(--border); box-shadow: var(--shadow-sm); }
     </style>
 </head>
 <body>
-    <nav class="top-nav wide">
+    <nav class="top-nav">
         <span class="top-nav-brand">📈 PulseAlerts</span>
         <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
         <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
@@ -3339,63 +2842,73 @@ def radar_page():
         <span class="top-nav-spacer"></span>
         <button class="top-nav-logout" onclick="logout()">Sign out</button>
     </nav>
-    <div class="main-content" style="max-width:1200px;margin:0 auto;padding:80px 20px 40px">
-        <div style="margin-bottom:24px">
-            <h1 style="font-size: 28px; font-weight: 800; letter-spacing:-0.5px;">Market Radar</h1>
-            <p style="color: #8B92A8; font-size: 14px; margin-top:4px;">Real-time anomaly detection</p>
+    <div class="page-wrapper medium">
+        <div class="page-header">
+            <div class="page-header-left">
+                <div class="page-eyebrow">Surveillance</div>
+                <h1 class="page-title">Market Radar</h1>
+                <p class="page-subtitle">Real-time anomaly detection across your watchlist</p>
+            </div>
         </div>
-
         <div id="radarList">
             <div class="loading">Scanning for anomalies...</div>
         </div>
     </div>
-    
+
     <script>
         async function loadRadar() {
             const container = document.getElementById('radarList');
-            
             try {
                 const res = await fetch('/api/radar');
                 const data = await res.json();
-                
+
                 if (!data.success || data.anomalies.length === 0) {
-                    container.innerHTML = '<div class="empty">No anomalies detected</div>';
+                    container.innerHTML = \`
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🔍</div>
+                            <div class="empty-state-title">All Clear</div>
+                            <div class="empty-state-text">No unusual market activity detected right now.</div>
+                        </div>\`;
                     return;
                 }
-                
+
                 container.innerHTML = data.anomalies.map(anomaly => {
                     const metrics = anomaly.metrics || {};
-                    const date = new Date(anomaly.detected_at).toLocaleString();
-                    
-                    return `
-                        <div class="anomaly-card ${anomaly.severity}">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                                <span style="font-size: 20px; font-weight: 700;">${anomaly.ticker}</span>
-                                <span style="font-size: 13px; color: #8B92A8;">${date}</span>
+                    const date = new Date(anomaly.detected_at).toLocaleString('en-US', {
+                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                    });
+                    const sevBadge = anomaly.severity === 'high' ? 'badge-negative'
+                                   : anomaly.severity === 'medium' ? 'badge-warning' : 'badge-positive';
+
+                    return \`
+                        <div class="anomaly-card \${anomaly.severity || ''}">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
+                                <div>
+                                    <span style="font-size:19px;font-weight:800;letter-spacing:-0.3px;">\${anomaly.ticker}</span>
+                                    <span class="badge \${sevBadge}" style="margin-left:8px;">\${anomaly.severity || 'signal'}</span>
+                                </div>
+                                <span style="font-size:12px;color:var(--text-secondary);">\${date}</span>
                             </div>
-                            
-                            ${anomaly.anomaly_type === 'BIG_MOVE' ? `
-                            <div style="font-size: 14px; color: #8B92A8;">
-                                Price moved <strong style="color: ${metrics.direction === 'up' ? '#00FFA3' : '#FF6B6B'};">
-                                ${metrics.pct_change > 0 ? '+' : ''}${metrics.pct_change?.toFixed(2)}%
-                                </strong> to $${metrics.current_price?.toFixed(2)}
-                            </div>
-                            ` : ''}
-                        </div>
-                    `;
+                            \${anomaly.anomaly_type === 'BIG_MOVE' ? \`
+                            <div style="font-size:14px;color:var(--text-secondary);">
+                                Price moved <strong style="color:\${metrics.direction === 'up' ? 'var(--positive)' : 'var(--negative)'};">
+                                \${metrics.pct_change > 0 ? '+' : ''}\${metrics.pct_change?.toFixed(2)}%
+                                </strong> to <strong>$\${metrics.current_price?.toFixed(2)}</strong>
+                            </div>\` : \`<div style="font-size:13px;color:var(--text-secondary);">\${anomaly.anomaly_type}</div>\`}
+                        </div>\`;
                 }).join('');
-                
+
             } catch (error) {
                 console.error('Error loading radar:', error);
-                container.innerHTML = '<div class="empty">Failed to load radar</div>';
+                container.innerHTML = '<div class="empty">Failed to load radar data</div>';
             }
         }
-        
+
         async function logout() {
             await fetch('/api/logout');
             window.location.href = '/login';
         }
-        
+
         loadRadar();
         setInterval(loadRadar, 60000);
     </script>
@@ -3429,87 +2942,27 @@ def session_break_page():
     <script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js"></script>
     <link rel="stylesheet" href="/static/css/theme.css">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
-            background: #0A0E1A;
-            background-image: radial-gradient(circle at 50% 0%, #1a1f2e 0%, #0a0e1a 50%);
-            color: #FFFFFF;
-            padding: 20px;
-        }
-        .section {
-            background: rgba(255,255,255,0.05);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 16px;
-            padding: 24px;
-            margin-bottom: 20px;
-        }
-        .alert-card {
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 16px;
-        }
-        .alert-card.up   { border-left: 4px solid #00FFA3; }
-        .alert-card.down { border-left: 4px solid #FF6B6B; }
-        .session-badge {
-            display: inline-block;
-            padding: 3px 10px;
-            border-radius: 10px;
-            font-size: 11px;
-            font-weight: 700;
-            background: rgba(91,124,255,0.2);
-            color: #5B7CFF;
-        }
-        input {
-            padding: 12px;
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 8px;
-            background: rgba(255,255,255,0.05);
-            color: white;
-            font-size: 14px;
-        }
-        button {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 8px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        button:hover { opacity: 0.9; }
-        .tf-btn { padding: 8px 18px; font-size: 13px; }
-        .tf-btn.active { background: linear-gradient(135deg, #00FFA3, #00B37A); }
-        select.chart-select {
-            padding: 8px 12px;
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 8px;
-            background: rgba(255,255,255,0.05);
-            color: white;
-            font-size: 14px;
-            cursor: pointer;
-        }
-        #sb-chart { border-radius: 8px; overflow: hidden; position: relative; }
-        #chart-error { color: #FF6B6B; font-size: 13px; margin-top: 8px; display: none; }
-        .mode-btn {
-            padding: 6px 14px; font-size: 12px; font-weight: 600;
-            border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
-            background: rgba(255,255,255,0.06); color: #8B92A8; cursor: pointer;
-            transition: background 0.15s, color 0.15s;
-        }
-        .mode-btn.active {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #fff; border-color: transparent;
-        }
-        .mode-btn:hover:not(.active) { background: rgba(255,255,255,0.12); color: #fff; }
-        .setup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; color: #8B92A8; }
+        /* Forex Sessions page — minimal page-specific styles */
+        .section { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: var(--r-lg); padding: var(--sp-5); margin-bottom: var(--sp-4); }
+        .section-title { font-size: 16px; font-weight: 700; margin-bottom: var(--sp-4); letter-spacing: -0.2px; }
+        .alert-card { background: var(--bg-surface); border: 1px solid var(--border-card); border-radius: var(--r-md); padding: var(--sp-4); margin-bottom: var(--sp-3); }
+        .alert-card.up   { border-left: 3px solid var(--positive); }
+        .alert-card.down { border-left: 3px solid var(--negative); }
+        .session-badge { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 11px; font-weight: 700; background: rgba(91,124,255,0.15); color: var(--accent); }
+        select.chart-select { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-surface); color: var(--text-primary); font-size: 13px; cursor: pointer; font-family: inherit; }
+        #sb-chart { border-radius: var(--r-md); overflow: hidden; position: relative; }
+        #chart-error { color: var(--negative); font-size: 13px; margin-top: 8px; display: none; }
+        .mode-btn { padding: 6px 14px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); color: var(--text-muted); cursor: pointer; transition: background 0.15s, color 0.15s; font-family: inherit; }
+        .mode-btn.active { background: var(--accent); color: #fff; border-color: transparent; }
+        .mode-btn:hover:not(.active) { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+        .setup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; color: var(--text-muted); font-size: 13px; line-height: 1.7; }
+        .watchlist-tag { display: inline-flex; align-items: center; gap: 8px; margin: 4px; padding: 6px 14px; background: var(--bg-surface); border: 1px solid var(--border-card); border-radius: var(--r-sm); font-size: 13px; font-weight: 600; }
+        .watchlist-tag-remove { padding: 2px 7px; font-size: 11px; background: rgba(255,71,87,0.15); color: var(--negative); border: none; border-radius: 4px; cursor: pointer; font-family: inherit; }
+        .chart-legend { margin-top: 10px; font-size: 12px; color: var(--text-muted); line-height: 2; }
     </style>
 </head>
 <body>
-    <nav class="top-nav wide">
+    <nav class="top-nav">
         <span class="top-nav-brand">📈 PulseAlerts</span>
         <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
         <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
@@ -3521,35 +2974,33 @@ def session_break_page():
         <span class="top-nav-spacer"></span>
         <button class="top-nav-logout" onclick="logout()">Sign out</button>
     </nav>
-    <div style="max-width:1400px;margin:0 auto;padding:80px 20px 40px">
-        <div style="margin-bottom:24px">
-            <h1 style="font-size:28px;font-weight:800;letter-spacing:-0.5px;">🌐 Session Break Alerts</h1>
-            <p style="color:#8B92A8;font-size:14px;margin-top:4px;">
-                Asia (00:00–09:00 UTC) &amp; London (08:00–17:00 UTC) session break confirmation alerts.
-                Wick-only break detection on 5M candles.
-            </p>
+    <div class="page-wrapper">
+        <div class="page-header" style="margin-bottom: var(--sp-6);">
+            <div class="page-eyebrow">Forex</div>
+            <h1 class="page-title">Session Break Alerts</h1>
+            <p class="page-subtitle">Asia (00:00–09:00 UTC) &amp; London (08:00–17:00 UTC) — wick-only break detection on 5M candles</p>
         </div>
 
         <div class="section">
-            <h2 style="margin-bottom:16px;">Watchlist</h2>
-            <div style="display:flex;gap:12px;margin-bottom:16px;">
-                <input type="text" id="symbolInput" placeholder="Add symbol (e.g., EURUSD or XAU/USD)" style="flex:1;">
-                <button onclick="addSymbol()">Add to Watchlist</button>
+            <div class="section-title">Watchlist</div>
+            <div style="display:flex;gap:var(--sp-3);margin-bottom:var(--sp-4);">
+                <input type="text" id="symbolInput" placeholder="Add symbol (e.g., EURUSD or XAU/USD)" class="form-input" style="flex:1;">
+                <button class="btn btn-primary" onclick="addSymbol()">Add Symbol</button>
             </div>
             <div id="watchlistContainer"></div>
         </div>
 
         <div class="section">
-            <h2 style="margin-bottom:16px;">Session Break Alerts</h2>
+            <div class="section-title">Session Break Alerts</div>
             <div id="alertsContainer">
-                <div style="text-align:center;padding:40px;color:#8B92A8;">Loading...</div>
+                <div class="loading">Loading alerts...</div>
             </div>
         </div>
 
         <div class="section" id="chart-section">
             <!-- ── Mode selector row ── -->
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
-                <h2 style="margin:0;">Chart (5M)</h2>
+            <div style="display:flex;align-items:center;gap:var(--sp-3);margin-bottom:var(--sp-4);flex-wrap:wrap;">
+                <div class="section-title" style="margin:0;">Chart (5M)</div>
                 <select id="chartSymbolSelect" class="chart-select" onchange="onSymbolChange()">
                     <option value="">-- Select symbol --</option>
                 </select>
@@ -3569,19 +3020,19 @@ def session_break_page():
                         <option value="asia">Asia</option>
                         <option value="london">London</option>
                     </select>
-                    <button onclick="loadOverlays()"
+                    <button class="btn btn-primary" onclick="loadOverlays()"
                             style="padding:6px 14px;font-size:13px;">Load</button>
                 </div>
             </div>
             <!-- ── Chart canvas ── -->
-            <div id="sb-chart" style="height:420px;width:100%;"></div>
+            <div id="sb-chart" style="height:440px;width:100%;"></div>
             <div id="chart-error"></div>
             <!-- ── Setup Card ── -->
-            <div id="setup-card" style="display:none;margin-top:14px;padding:16px;
-                 background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);
-                 border-radius:10px;font-size:13px;"></div>
+            <div id="setup-card" style="display:none;margin-top:var(--sp-4);padding:var(--sp-4);
+                 background:var(--bg-surface);border:1px solid var(--border-card);
+                 border-radius:var(--r-md);font-size:13px;"></div>
             <!-- ── Legend ── -->
-            <div style="margin-top:10px;font-size:12px;color:#555;line-height:1.8;">
+            <div class="chart-legend">
                 <span style="color:#FFB800;">&#9472;&#9472;</span> Sess H &nbsp;
                 <span style="color:#5B7CFF;">&#9472;&#9472;</span> Sess L &nbsp;
                 <span style="color:#00D4AA;">&#9472;&#9472;</span> Sweep Level &nbsp;
@@ -3602,12 +3053,9 @@ def session_break_page():
                 container.innerHTML = '<p style="color:#8B92A8;">No symbols in watchlist. Add some above.</p>';
             } else {
                 container.innerHTML = data.symbols.map(s => `
-                    <span style="display:inline-flex;align-items:center;gap:8px;margin:4px;padding:8px 16px;
-                                 background:rgba(255,255,255,0.1);border-radius:8px;">
+                    <span class="watchlist-tag">
                         ${s}
-                        <button onclick="removeSymbol('${s}')"
-                                style="padding:2px 8px;font-size:12px;background:rgba(255,107,107,0.3);
-                                       border-radius:4px;cursor:pointer;" title="Remove">&#x2715;</button>
+                        <button class="watchlist-tag-remove" onclick="removeSymbol('${s}')" title="Remove">&#x2715;</button>
                     </span>
                 `).join('');
             }
@@ -4301,7 +3749,7 @@ def session_break_debug_page():
   </style>
 </head>
 <body>
-  <nav class="top-nav wide">
+  <nav class="top-nav">
     <span class="top-nav-brand">📈 PulseAlerts</span>
     <a href="/dashboard" class="top-nav-link">📊 Alerts</a>
     <a href="/portfolio" class="top-nav-link">💼 Portfolio</a>
