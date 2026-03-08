@@ -1276,6 +1276,308 @@ def portfolio_page():
             .stats-grid   { grid-template-columns: repeat(2, 1fr); }
             .summary-value { font-size: 18px; }
         }
+
+        /* ── Chart Modal ─────────────────────────────────────────────────────── */
+        .ticker-link {
+            font-weight: 700;
+            color: var(--accent);
+            font-size: 14px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: color 0.15s, opacity 0.15s;
+            border-bottom: 1px dashed rgba(91,124,255,0.4);
+            padding-bottom: 1px;
+        }
+        .ticker-link:hover {
+            color: #fff;
+            border-bottom-color: rgba(255,255,255,0.5);
+        }
+        .ticker-link::after {
+            content: '↗';
+            font-size: 10px;
+            opacity: 0.6;
+        }
+
+        /* Slide-over panel overlay */
+        #chartModal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            background: rgba(0,0,0,0.72);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+        #chartModal.active { display: flex; align-items: stretch; justify-content: flex-end; }
+
+        /* Slide-over panel */
+        #chartPanel {
+            width: min(92vw, 1060px);
+            height: 100vh;
+            background: var(--bg-elevated, #141520);
+            border-left: 1px solid rgba(91,124,255,0.18);
+            display: flex;
+            flex-direction: column;
+            transform: translateX(100%);
+            transition: transform 0.32s cubic-bezier(0.22,1,0.36,1);
+            overflow: hidden;
+        }
+        #chartModal.active #chartPanel { transform: translateX(0); }
+
+        /* Panel header */
+        #chartPanelHeader {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-4);
+            padding: 18px 24px;
+            border-bottom: 1px solid rgba(91,124,255,0.12);
+            background: rgba(91,124,255,0.04);
+            flex-shrink: 0;
+        }
+        .chart-header-ticker {
+            font-size: 22px;
+            font-weight: 900;
+            color: #fff;
+            letter-spacing: -0.5px;
+        }
+        .chart-side-badge {
+            padding: 4px 12px;
+            border-radius: 99px;
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+        .chart-side-badge.long  { background: rgba(0,208,132,0.18); color: var(--positive); border: 1px solid rgba(0,208,132,0.35); }
+        .chart-side-badge.short { background: rgba(255,71,87,0.18);  color: var(--negative); border: 1px solid rgba(255,71,87,0.35); }
+        .chart-status-badge {
+            padding: 3px 10px;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .chart-status-badge.open   { background: rgba(0,208,132,0.12); color: var(--positive); border: 1px solid rgba(0,208,132,0.25); }
+        .chart-status-badge.closed { background: rgba(139,146,168,0.12); color: var(--text-muted); border: 1px solid rgba(139,146,168,0.2); }
+        .chart-close-btn {
+            margin-left: auto;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: #aaa;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s, color 0.15s;
+            flex-shrink: 0;
+        }
+        .chart-close-btn:hover { background: rgba(255,71,87,0.18); color: var(--negative); border-color: rgba(255,71,87,0.35); }
+
+        /* Panel body: levels strip + chart area */
+        #chartPanelBody {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Trade summary strip */
+        #tradeSummaryStrip {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid rgba(91,124,255,0.1);
+            flex-shrink: 0;
+            overflow-x: auto;
+        }
+        .strip-item {
+            padding: 14px 20px;
+            border-right: 1px solid rgba(91,124,255,0.08);
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            min-width: 90px;
+        }
+        .strip-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-muted, #8B92A8);
+        }
+        .strip-value {
+            font-size: 14px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            color: #fff;
+        }
+        .strip-value.pos { color: var(--positive, #00D084); }
+        .strip-value.neg { color: var(--negative, #FF4757); }
+        .strip-value.warn { color: var(--warning, #FFB800); }
+
+        /* Chart + levels visualizer row */
+        #chartAndLevels {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* TradingView iframe area */
+        #tvChartWrap {
+            flex: 1;
+            position: relative;
+            background: #0d0f1a;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        #tvChartWrap iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }
+        #tvChartLoading {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #0d0f1a;
+            gap: 12px;
+            z-index: 1;
+        }
+        #tvChartLoading .spinner { width: 32px; height: 32px; border-width: 3px; }
+        #tvChartLoadingText { font-size: 13px; color: var(--text-muted, #8B92A8); }
+        #tvChartError {
+            display: none;
+            position: absolute;
+            inset: 0;
+            background: #0d0f1a;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 8px;
+            padding: 24px;
+            text-align: center;
+        }
+        #tvChartError .err-icon { font-size: 40px; }
+        #tvChartError .err-title { font-size: 16px; font-weight: 700; color: #fff; }
+        #tvChartError .err-sub { font-size: 13px; color: #8B92A8; }
+
+        /* Price levels sidebar */
+        #levelsBar {
+            width: 180px;
+            flex-shrink: 0;
+            background: rgba(0,0,0,0.25);
+            border-left: 1px solid rgba(91,124,255,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .levels-title {
+            padding: 12px 14px 8px;
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--text-muted, #8B92A8);
+            border-bottom: 1px solid rgba(91,124,255,0.1);
+        }
+        #levelsList {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-around;
+            padding: 12px 0;
+        }
+        .level-row {
+            padding: 10px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .level-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .level-price {
+            font-size: 15px;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -0.3px;
+        }
+        .level-pct {
+            font-size: 10px;
+            font-weight: 600;
+            opacity: 0.7;
+        }
+        /* Colour coding */
+        .level-row.entry  .level-label { color: var(--accent, #5B7CFF); }
+        .level-row.entry  .level-price { color: var(--accent, #5B7CFF); }
+        .level-row.tp     .level-label { color: var(--positive, #00D084); }
+        .level-row.tp     .level-price { color: var(--positive, #00D084); }
+        .level-row.sl     .level-label { color: var(--negative, #FF4757); }
+        .level-row.sl     .level-price { color: var(--negative, #FF4757); }
+        .level-row.current .level-label { color: #fff; }
+        .level-row.current .level-price { color: #fff; }
+
+        /* Visual price scale */
+        #priceScale {
+            margin: 0 14px 12px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid rgba(91,124,255,0.12);
+        }
+        .scale-zone {
+            padding: 6px 8px;
+            font-size: 10px;
+            font-weight: 600;
+            text-align: center;
+            letter-spacing: 0.3px;
+        }
+        .scale-zone.profit-zone { background: rgba(0,208,132,0.12); color: var(--positive); }
+        .scale-zone.entry-zone  { background: rgba(91,124,255,0.14); color: var(--accent); font-weight: 800; }
+        .scale-zone.risk-zone   { background: rgba(255,71,87,0.12);  color: var(--negative); }
+        .scale-zone.divider     { background: rgba(255,255,255,0.03); color: #555; font-size: 9px; }
+
+        /* Responsive: on mobile, levels bar moves below chart */
+        @media (max-width: 640px) {
+            #chartPanel { width: 100vw; }
+            #chartAndLevels { flex-direction: column; }
+            #levelsBar {
+                width: 100%;
+                border-left: none;
+                border-top: 1px solid rgba(91,124,255,0.1);
+                flex-direction: row;
+                overflow-x: auto;
+                height: auto;
+                max-height: 130px;
+            }
+            .levels-title { display: none; }
+            #levelsList {
+                flex-direction: row;
+                padding: 0;
+                justify-content: flex-start;
+            }
+            .level-row { border-right: 1px solid rgba(91,124,255,0.08); min-width: 90px; }
+            #priceScale { display: none; }
+            #tradeSummaryStrip .strip-item { min-width: 80px; padding: 10px 14px; }
+            #tvChartWrap { min-height: 320px; }
+        }
+        @media (max-width: 480px) {
+            #chartPanelHeader { padding: 14px 16px; }
+            .chart-header-ticker { font-size: 18px; }
+        }
     </style>
 </head>
 <body>
@@ -1537,6 +1839,90 @@ def portfolio_page():
         </div>
     </div>
 
+    <!-- ── Chart Viewer Panel ─────────────────────────────────────────────── -->
+    <div id="chartModal" onclick="handleChartModalBackdrop(event)">
+        <div id="chartPanel">
+
+            <!-- Header -->
+            <div id="chartPanelHeader">
+                <span class="chart-header-ticker" id="cpTicker">—</span>
+                <span class="chart-side-badge long" id="cpSideBadge">LONG</span>
+                <span class="chart-status-badge open" id="cpStatusBadge">OPEN</span>
+                <button class="chart-close-btn" onclick="closeChartModal()" title="Close">&#x2715;</button>
+            </div>
+
+            <!-- Summary strip -->
+            <div id="tradeSummaryStrip">
+                <div class="strip-item">
+                    <span class="strip-label">Entry</span>
+                    <span class="strip-value" id="cpEntry">—</span>
+                </div>
+                <div class="strip-item">
+                    <span class="strip-label">Stop Loss</span>
+                    <span class="strip-value neg" id="cpSL">—</span>
+                </div>
+                <div class="strip-item">
+                    <span class="strip-label">Take Profit</span>
+                    <span class="strip-value pos" id="cpTP">—</span>
+                </div>
+                <div class="strip-item">
+                    <span class="strip-label">Current</span>
+                    <span class="strip-value" id="cpCurrent">—</span>
+                </div>
+                <div class="strip-item">
+                    <span class="strip-label">P&L</span>
+                    <span class="strip-value" id="cpPnl">—</span>
+                </div>
+                <div class="strip-item">
+                    <span class="strip-label">P&L %</span>
+                    <span class="strip-value" id="cpPnlPct">—</span>
+                </div>
+                <div class="strip-item">
+                    <span class="strip-label">R:R Ratio</span>
+                    <span class="strip-value" id="cpRR">—</span>
+                </div>
+                <div class="strip-item">
+                    <span class="strip-label">Timeframe</span>
+                    <span class="strip-value" id="cpTimeframe">—</span>
+                </div>
+                <div class="strip-item">
+                    <span class="strip-label">Trade Date</span>
+                    <span class="strip-value" id="cpDate">—</span>
+                </div>
+            </div>
+
+            <!-- Chart + Levels -->
+            <div id="chartAndLevels">
+
+                <!-- TradingView chart -->
+                <div id="tvChartWrap">
+                    <div id="tvChartLoading">
+                        <div class="spinner"></div>
+                        <span id="tvChartLoadingText">Loading chart…</span>
+                    </div>
+                    <div id="tvChartError">
+                        <span class="err-icon">📊</span>
+                        <span class="err-title">Chart unavailable</span>
+                        <span class="err-sub" id="tvChartErrorMsg">Could not load chart for this symbol.</span>
+                    </div>
+                    <!-- iframe injected by JS -->
+                </div>
+
+                <!-- Price levels sidebar -->
+                <div id="levelsBar">
+                    <div class="levels-title">Price Levels</div>
+                    <div id="levelsList">
+                        <!-- Populated by JS in price order -->
+                    </div>
+                    <div id="priceScale">
+                        <!-- Zone bars populated by JS -->
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
     <!-- Close Trade Modal -->
     <div id="closeModal" class="modal">
         <div class="modal-content">
@@ -1770,7 +2156,7 @@ def portfolio_page():
                 return `
                     <tr>
                         <td><span class="status-badge ${status}">${status.toUpperCase()}</span></td>
-                        <td class="ticker-cell">${trade.ticker}</td>
+                        <td class="ticker-cell"><a class="ticker-link" onclick="openChartModal(${trade.id})">${trade.ticker}</a></td>
                         <td>${trade.trade_date}</td>
                         <td>$${parseFloat(trade.buy_price).toFixed(2)}</td>
                         <td>${parseFloat(trade.quantity).toFixed(4)}</td>
@@ -1808,7 +2194,7 @@ def portfolio_page():
                 
                 return `
                     <tr>
-                        <td class="ticker-cell">${trade.ticker}</td>
+                        <td class="ticker-cell"><a class="ticker-link" onclick="openChartModal(${trade.id})">${trade.ticker}</a></td>
                         <td>${trade.trade_date}</td>
                         <td>$${parseFloat(trade.buy_price).toFixed(2)}</td>
                         <td>${parseFloat(trade.quantity).toFixed(4)}</td>
@@ -1842,7 +2228,7 @@ def portfolio_page():
             tbody.innerHTML = closedTrades.map(trade => {
                 return `
                     <tr>
-                        <td class="ticker-cell">${trade.ticker}</td>
+                        <td class="ticker-cell"><a class="ticker-link" onclick="openChartModal(${trade.id})">${trade.ticker}</a></td>
                         <td>${trade.trade_date}</td>
                         <td>${trade.close_date || 'N/A'}</td>
                         <td>$${parseFloat(trade.buy_price).toFixed(2)}</td>
@@ -2159,6 +2545,298 @@ def portfolio_page():
             await fetch('/api/logout');
             window.location.href = '/login';
         }
+
+        // ── Chart Modal ───────────────────────────────────────────────────────
+
+        /**
+         * Map a portfolio ticker to a TradingView symbol.
+         * TradingView accepts "EXCHANGE:SYMBOL" or bare "SYMBOL".
+         * For crypto, strip the -USD / -USDT suffix and prepend COINBASE:.
+         * For common stocks, default to NASDAQ: and fall back to NYSE: silently.
+         */
+        const CRYPTO_TICKERS = new Set([
+            'BTC','ETH','SOL','XRP','ADA','DOGE','AVAX','DOT','LINK','MATIC',
+            'LTC','BCH','UNI','ATOM','FTM','NEAR','ALGO','VET','HBAR','ICP',
+            'SHIB','PEPE','APT','ARB','OP','SUI','INJ','TIA','PYTH'
+        ]);
+        const NYSE_TICKERS = new Set([
+            'JPM','BAC','GS','MS','V','MA','BLK','C','WFC','AXP',
+            'XOM','CVX','COP','SLB','HAL','OKE','ET','EPD','MPC','PSX','VLO',
+            'JNJ','PFE','MRK','ABBV','UNH','CVS','AMGN','GILD','BMY','LLY',
+            'BRK','WMT','TGT','HD','NKE','DIS','GE','BA','CAT','MMM','HON',
+            'F','GM','T','VZ','NEE','SO','DUK','D'
+        ]);
+
+        function mapToTVSymbol(rawTicker) {
+            // Strip common crypto quote suffixes: BTC-USD → BTC, ETH-USDT → ETH
+            const base = rawTicker.toUpperCase().replace(/[-.](USD|USDT|BTC|ETH|BUSD|USDC)$/,'');
+
+            if (CRYPTO_TICKERS.has(base)) {
+                // Try COINBASE first; TradingView falls back gracefully
+                return 'COINBASE:' + base + 'USD';
+            }
+
+            if (NYSE_TICKERS.has(base)) {
+                return 'NYSE:' + base;
+            }
+
+            // Default: NASDAQ (covers AAPL, MSFT, GOOGL, NVDA, TSLA, etc.)
+            return 'NASDAQ:' + base;
+        }
+
+        function buildTVEmbedURL(tvSymbol) {
+            const params = new URLSearchParams({
+                symbol:           tvSymbol,
+                interval:         'D',
+                theme:            'dark',
+                style:            '1',       // candlestick
+                locale:           'en',
+                toolbar_bg:       '%230d0f1a',
+                hide_top_toolbar: '0',
+                hide_legend:      '0',
+                save_image:       '0',
+                allow_symbol_change: '1',
+            });
+            return 'https://www.tradingview.com/widgetsnippet/chart/?' + params.toString();
+        }
+
+        /** Format a price with $ and 2 decimals (or more for sub-$1 assets) */
+        function fmtPrice(p) {
+            if (p == null) return '—';
+            const n = parseFloat(p);
+            if (isNaN(n)) return '—';
+            if (n < 1)    return '$' + n.toFixed(4);
+            if (n < 100)  return '$' + n.toFixed(3);
+            return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+
+        function fmtPct(p) {
+            if (p == null) return '—';
+            const n = parseFloat(p);
+            if (isNaN(n)) return '—';
+            return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+        }
+
+        function pctFromEntry(price, entry) {
+            if (!price || !entry) return null;
+            return ((parseFloat(price) - parseFloat(entry)) / parseFloat(entry)) * 100;
+        }
+
+        /** Determine trade direction from stop_loss vs buy_price.
+         *  If stop_loss < buy_price → LONG (classic stop below entry).
+         *  If stop_loss > buy_price → SHORT.
+         *  If no stop_loss, assume LONG. */
+        function tradeDirection(trade) {
+            if (!trade.stop_loss) return 'LONG';
+            return parseFloat(trade.stop_loss) < parseFloat(trade.buy_price) ? 'LONG' : 'SHORT';
+        }
+
+        function openChartModal(tradeId) {
+            const trade = allTrades.find(t => t.id === tradeId);
+            if (!trade) return;
+
+            const direction = tradeDirection(trade);
+            const isLong    = direction === 'LONG';
+            const isClosed  = !!trade.is_closed;
+
+            // ── Header ──────────────────────────────────────────────────────
+            document.getElementById('cpTicker').textContent = trade.ticker;
+
+            const sideBadge = document.getElementById('cpSideBadge');
+            sideBadge.textContent  = direction;
+            sideBadge.className    = 'chart-side-badge ' + direction.toLowerCase();
+
+            const statusBadge = document.getElementById('cpStatusBadge');
+            statusBadge.textContent = isClosed ? 'CLOSED' : 'OPEN';
+            statusBadge.className   = 'chart-status-badge ' + (isClosed ? 'closed' : 'open');
+
+            // ── Summary strip ────────────────────────────────────────────────
+            const entry       = parseFloat(trade.buy_price)   || null;
+            const sl          = trade.stop_loss  ? parseFloat(trade.stop_loss)  : null;
+            const tp          = trade.take_profit ? parseFloat(trade.take_profit) : null;
+            const currentP    = trade.current_price  ? parseFloat(trade.current_price)  : null;
+            const closedAtP   = trade.close_price    ? parseFloat(trade.close_price)    : null;
+            const displayPrice = isClosed ? closedAtP : currentP;
+
+            document.getElementById('cpEntry').textContent     = fmtPrice(entry);
+            document.getElementById('cpSL').textContent        = sl   ? fmtPrice(sl)  : 'None';
+            document.getElementById('cpTP').textContent        = tp   ? fmtPrice(tp)  : 'None';
+            document.getElementById('cpCurrent').textContent   = displayPrice ? fmtPrice(displayPrice) : '…';
+            document.getElementById('cpTimeframe').textContent = trade.timeframe || '—';
+            document.getElementById('cpDate').textContent      = trade.trade_date || '—';
+
+            // P&L
+            const pnl    = isClosed ? trade.realized_pnl    : trade.unrealized_pnl;
+            const pnlPct = isClosed ? trade.realized_pnl_pct : trade.unrealized_pnl_pct;
+            const pnlEl    = document.getElementById('cpPnl');
+            const pnlPctEl = document.getElementById('cpPnlPct');
+            if (pnl != null) {
+                pnlEl.textContent  = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+                pnlEl.className    = 'strip-value ' + (pnl >= 0 ? 'pos' : 'neg');
+                pnlPctEl.textContent = fmtPct(pnlPct);
+                pnlPctEl.className   = 'strip-value ' + ((pnlPct||0) >= 0 ? 'pos' : 'neg');
+            } else {
+                pnlEl.textContent    = '—';
+                pnlEl.className      = 'strip-value';
+                pnlPctEl.textContent = '—';
+                pnlPctEl.className   = 'strip-value';
+            }
+
+            // R:R
+            const rrEl = document.getElementById('cpRR');
+            if (trade.rr_ratio != null) {
+                rrEl.textContent = parseFloat(trade.rr_ratio).toFixed(2) + 'x';
+                rrEl.className   = 'strip-value ' + (parseFloat(trade.rr_ratio) >= 1.5 ? 'pos' : 'warn');
+            } else {
+                rrEl.textContent = '—';
+                rrEl.className   = 'strip-value';
+            }
+
+            // ── Price Levels sidebar ─────────────────────────────────────────
+            renderLevels(entry, sl, tp, displayPrice, isLong);
+
+            // ── TradingView chart ────────────────────────────────────────────
+            const tvSymbol = mapToTVSymbol(trade.ticker);
+            loadTVChart(tvSymbol);
+
+            // Show modal with animation
+            document.getElementById('chartModal').classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function renderLevels(entry, sl, tp, current, isLong) {
+            const list = document.getElementById('levelsList');
+
+            // Build items with relative distance from entry
+            const items = [];
+
+            if (tp != null) {
+                const diff = pctFromEntry(tp, entry);
+                items.push({ cls: 'tp', label: 'Take Profit', price: tp, pct: diff });
+            }
+            if (entry != null) {
+                items.push({ cls: 'entry', label: 'Entry', price: entry, pct: 0 });
+            }
+            if (current != null) {
+                const diff = pctFromEntry(current, entry);
+                items.push({ cls: 'current', label: 'Current', price: current, pct: diff });
+            }
+            if (sl != null) {
+                const diff = pctFromEntry(sl, entry);
+                items.push({ cls: 'sl', label: 'Stop Loss', price: sl, pct: diff });
+            }
+
+            // Sort by price descending (highest price at top of sidebar)
+            items.sort((a, b) => b.price - a.price);
+
+            list.innerHTML = items.map(item => {
+                const pctStr = item.pct != null ? fmtPct(item.pct) : '';
+                return \`
+                    <div class="level-row \${item.cls}">
+                        <span class="level-label">\${item.label}</span>
+                        <span class="level-price">\${fmtPrice(item.price)}</span>
+                        \${item.pct !== 0 ? \`<span class="level-pct">\${pctStr} from entry</span>\` : ''}
+                    </div>
+                \`;
+            }).join('');
+
+            // ── Colour-zone scale (profit / entry / risk) ────────────────────
+            const scaleEl = document.getElementById('priceScale');
+            if (isLong) {
+                // LONG: profit above entry, risk below
+                scaleEl.innerHTML =
+                    (tp ? \`<div class="scale-zone profit-zone">▲ Profit Zone\${tp ? '<br>' + fmtPrice(tp) : ''}</div>\` : '') +
+                    (tp && entry ? \`<div class="scale-zone divider">— — —</div>\` : '') +
+                    \`<div class="scale-zone entry-zone">● Entry \${fmtPrice(entry)}</div>\` +
+                    (sl && entry ? \`<div class="scale-zone divider">— — —</div>\` : '') +
+                    (sl ? \`<div class="scale-zone risk-zone">▼ Risk Zone<br>\${fmtPrice(sl)}</div>\` : '');
+            } else {
+                // SHORT: profit below entry, risk above
+                scaleEl.innerHTML =
+                    (sl ? \`<div class="scale-zone risk-zone">▲ Risk Zone<br>\${fmtPrice(sl)}</div>\` : '') +
+                    (sl && entry ? \`<div class="scale-zone divider">— — —</div>\` : '') +
+                    \`<div class="scale-zone entry-zone">● Entry \${fmtPrice(entry)}</div>\` +
+                    (tp && entry ? \`<div class="scale-zone divider">— — —</div>\` : '') +
+                    (tp ? \`<div class="scale-zone profit-zone">▼ Profit Zone<br>\${fmtPrice(tp)}</div>\` : '');
+            }
+        }
+
+        function loadTVChart(tvSymbol) {
+            const wrap    = document.getElementById('tvChartWrap');
+            const loading = document.getElementById('tvChartLoading');
+            const errDiv  = document.getElementById('tvChartError');
+            const errMsg  = document.getElementById('tvChartErrorMsg');
+
+            // Remove any previous iframe
+            const prev = wrap.querySelector('iframe');
+            if (prev) prev.remove();
+
+            loading.style.display = 'flex';
+            errDiv.style.display  = 'none';
+            document.getElementById('tvChartLoadingText').textContent = 'Loading chart for ' + tvSymbol + '…';
+
+            // Build iframe
+            const iframe = document.createElement('iframe');
+            iframe.style.cssText = 'width:100%;height:100%;border:none;display:none;';
+            iframe.setAttribute('allowtransparency', 'true');
+            iframe.setAttribute('allowfullscreen', '');
+
+            // TradingView Advanced Chart widget URL
+            const src = 'https://www.tradingview.com/widgetsnippet/chart/?symbol=' + encodeURIComponent(tvSymbol)
+                + '&interval=D&theme=dark&style=1&locale=en'
+                + '&toolbar_bg=%230d0f1a'
+                + '&hide_top_toolbar=0'
+                + '&hide_legend=0'
+                + '&allow_symbol_change=1'
+                + '&save_image=0';
+
+            iframe.src = src;
+
+            iframe.onload = function() {
+                loading.style.display = 'none';
+                iframe.style.display  = 'block';
+            };
+
+            // If the iframe fails to communicate (cross-origin), hide loading after 8s
+            let fallbackTimer = setTimeout(() => {
+                if (loading.style.display !== 'none') {
+                    loading.style.display = 'none';
+                    iframe.style.display  = 'block';
+                }
+            }, 8000);
+
+            iframe.onerror = function() {
+                clearTimeout(fallbackTimer);
+                loading.style.display = 'none';
+                errDiv.style.display  = 'flex';
+                errMsg.textContent    = 'Symbol "' + tvSymbol + '" could not be loaded. Try editing the ticker.';
+            };
+
+            wrap.appendChild(iframe);
+        }
+
+        function closeChartModal() {
+            document.getElementById('chartModal').classList.remove('active');
+            document.body.style.overflow = '';
+            // Remove iframe to stop media/network activity
+            setTimeout(() => {
+                const iframe = document.getElementById('tvChartWrap').querySelector('iframe');
+                if (iframe) iframe.remove();
+            }, 350);
+        }
+
+        function handleChartModalBackdrop(event) {
+            if (event.target === document.getElementById('chartModal')) {
+                closeChartModal();
+            }
+        }
+
+        // Close with Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && document.getElementById('chartModal').classList.contains('active')) {
+                closeChartModal();
+            }
+        });
     </script>
     <script src="/static/js/nav-mobile.js"></script>
 </body>
@@ -2269,7 +2947,11 @@ def get_enriched_trades():
             enriched = portfolio_calculator.enrich_trade_with_calculations(
                 dict(trade), portfolio_cash, current_price
             )
-            
+
+            # Include current_price so the frontend chart modal can use it
+            if current_price is not None:
+                enriched['current_price'] = float(current_price)
+
             # Convert dates to strings
             if enriched.get('trade_date'):
                 enriched['trade_date'] = enriched['trade_date'].isoformat() if hasattr(enriched['trade_date'], 'isoformat') else str(enriched['trade_date'])
