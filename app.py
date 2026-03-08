@@ -2695,9 +2695,8 @@ def portfolio_page():
             // ── Price Levels sidebar ─────────────────────────────────────────
             renderLevels(entry, sl, tp, displayPrice, isLong);
 
-            // ── TradingView chart ────────────────────────────────────────────
-            const tvSymbol = mapToTVSymbol(trade.ticker);
-            loadTVChart(tvSymbol);
+            // ── Lightweight Chart ─────────────────────────────────────────────
+            loadLWChart(trade.ticker, trade);
 
             // Show modal with animation
             document.getElementById('chartModal').classList.add('active');
@@ -2761,90 +2760,182 @@ def portfolio_page():
             }
         }
 
-        function loadTVChart(tvSymbol) {
+        // Map ticker to Yahoo Finance symbol (crypto needs -USD suffix)
+        function mapToYFTicker(raw) {
+            const upper = raw.toUpperCase().replace(/[-.](USD|USDT|BUSD|USDC)$/, '');
+            return CRYPTO_TICKERS.has(upper) ? upper + '-USD' : raw;
+        }
+
+        let _lwChartInstance = null;   // keep reference for cleanup
+
+        async function loadLWChart(rawTicker, trade) {
             const wrap    = document.getElementById('tvChartWrap');
             const loading = document.getElementById('tvChartLoading');
             const errDiv  = document.getElementById('tvChartError');
             const errMsg  = document.getElementById('tvChartErrorMsg');
 
-            // Remove any previous widget container
-            const prev = wrap.querySelector('.tv-widget-container');
-            if (prev) prev.remove();
+            // Tear down any previous chart
+            if (_lwChartInstance) { try { _lwChartInstance.remove(); } catch(e){} _lwChartInstance = null; }
+            const prevCont = wrap.querySelector('.lw-chart-container');
+            if (prevCont) prevCont.remove();
 
             loading.style.display = 'flex';
             errDiv.style.display  = 'none';
-            document.getElementById('tvChartLoadingText').textContent = 'Loading chart for ' + tvSymbol + '…';
+            document.getElementById('tvChartLoadingText').textContent = 'Loading chart for ' + rawTicker + '…';
 
-            // Each widget needs a unique container id
-            const containerId = 'tv_chart_' + Date.now();
-            const container = document.createElement('div');
-            container.className = 'tv-widget-container';
-            container.style.cssText = 'width:100%;height:100%;display:none;';
-
-            const chartDiv = document.createElement('div');
-            chartDiv.id = containerId;
-            chartDiv.style.cssText = 'width:100%;height:100%;';
-            container.appendChild(chartDiv);
-            wrap.appendChild(container);
-
-            function initWidget() {
+            // 1. Load LightweightCharts library (once, cached)
+            if (typeof LightweightCharts === 'undefined') {
                 try {
-                    new TradingView.widget({
-                        container_id:       containerId,
-                        symbol:             tvSymbol,
-                        interval:           'D',
-                        timezone:           'Etc/UTC',
-                        theme:              'dark',
-                        style:              '1',
-                        locale:             'en',
-                        toolbar_bg:         '#141520',
-                        enable_publishing:  false,
-                        allow_symbol_change: true,
-                        autosize:           true,
-                        hide_side_toolbar:  false,
-                        hide_top_toolbar:   false,
-                        withdateranges:     true,
-                        save_image:         false,
+                    await new Promise((resolve, reject) => {
+                        if (document.getElementById('lw-charts-lib')) { resolve(); return; }
+                        const s   = document.createElement('script');
+                        s.id      = 'lw-charts-lib';
+                        s.src     = 'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
+                        s.onload  = resolve;
+                        s.onerror = reject;
+                        document.head.appendChild(s);
                     });
-                    loading.style.display  = 'none';
-                    container.style.display = 'block';
-                } catch (e) {
+                } catch (_) {
                     loading.style.display = 'none';
                     errDiv.style.display  = 'flex';
-                    errMsg.textContent    = 'Could not initialise chart for "' + tvSymbol + '"';
-                }
-            }
-
-            if (typeof TradingView !== 'undefined' && TradingView.widget) {
-                initWidget();
-            } else {
-                // Load TradingView library once; re-use on subsequent opens
-                const existing = document.getElementById('tv-js-lib');
-                if (existing) {
-                    // Script tag exists but TradingView not ready yet — wait
-                    existing.addEventListener('load', initWidget);
+                    errMsg.textContent    = 'Could not load chart library. Check your internet connection.';
                     return;
                 }
-                const script   = document.createElement('script');
-                script.id      = 'tv-js-lib';
-                script.src     = 'https://s3.tradingview.com/tv.js';
-                script.async   = true;
-                script.onload  = initWidget;
-                script.onerror = function () {
-                    loading.style.display = 'none';
-                    errDiv.style.display  = 'flex';
-                    errMsg.textContent    = 'Could not load TradingView library. Check your internet connection.';
-                };
-                document.head.appendChild(script);
             }
+
+            // 2. Fetch OHLCV from backend
+            const yfTicker = mapToYFTicker(rawTicker);
+            let candles;
+            try {
+                const res  = await fetch('/api/chart-data/' + encodeURIComponent(yfTicker));
+                const data = await res.json();
+                if (!data.success || !data.candles || data.candles.length === 0) {
+                    throw new Error(data.error || 'No price data available');
+                }
+                candles = data.candles;
+            } catch (e) {
+                loading.style.display = 'none';
+                errDiv.style.display  = 'flex';
+                errMsg.textContent    = 'Could not load price data for "' + rawTicker + '". ' + e.message;
+                return;
+            }
+
+            // 3. Build chart container
+            const container = document.createElement('div');
+            container.className = 'lw-chart-container';
+            container.style.cssText = 'width:100%;height:100%;';
+            wrap.appendChild(container);
+
+            // 4. Create chart
+            const chart = LightweightCharts.createChart(container, {
+                autoSize: true,
+                layout: {
+                    background: { type: 'solid', color: '#0d0f1a' },
+                    textColor:  '#9BA5B7',
+                    fontSize:   12,
+                },
+                grid: {
+                    vertLines: { color: 'rgba(91,124,255,0.07)' },
+                    horzLines: { color: 'rgba(91,124,255,0.07)' },
+                },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+                rightPriceScale: {
+                    borderColor: 'rgba(91,124,255,0.15)',
+                    scaleMargins: { top: 0.08, bottom: 0.08 },
+                },
+                timeScale: {
+                    borderColor:  'rgba(91,124,255,0.15)',
+                    timeVisible:  false,
+                    fixLeftEdge:  true,
+                    fixRightEdge: true,
+                },
+            });
+            _lwChartInstance = chart;
+
+            // 5. Candlestick series
+            const candleSeries = chart.addCandlestickSeries({
+                upColor:       '#00D084',
+                downColor:     '#FF4757',
+                borderVisible: false,
+                wickUpColor:   '#00D084',
+                wickDownColor: '#FF4757',
+            });
+            candleSeries.setData(candles);
+
+            // 6. Trade-level helpers
+            const entryPrice = trade.buy_price   ? parseFloat(trade.buy_price)   : null;
+            const slPrice    = trade.stop_loss   ? parseFloat(trade.stop_loss)   : null;
+            const tpPrice    = trade.take_profit ? parseFloat(trade.take_profit) : null;
+            const isLong     = tradeDirection(trade) === 'LONG';
+            const LS         = LightweightCharts.LineStyle;
+
+            // 7. Entry price line
+            if (entryPrice != null) {
+                candleSeries.createPriceLine({
+                    price:            entryPrice,
+                    color:            '#5B7CFF',
+                    lineWidth:        2,
+                    lineStyle:        LS.Solid,
+                    axisLabelVisible: true,
+                    title:            'Entry',
+                });
+            }
+
+            // 8. Stop-loss line
+            if (slPrice != null) {
+                candleSeries.createPriceLine({
+                    price:            slPrice,
+                    color:            '#FF4757',
+                    lineWidth:        1,
+                    lineStyle:        LS.Dashed,
+                    axisLabelVisible: true,
+                    title:            'Stop Loss',
+                });
+            }
+
+            // 9. Take-profit line
+            if (tpPrice != null) {
+                candleSeries.createPriceLine({
+                    price:            tpPrice,
+                    color:            '#00D084',
+                    lineWidth:        1,
+                    lineStyle:        LS.Dashed,
+                    axisLabelVisible: true,
+                    title:            'Take Profit',
+                });
+            }
+
+            // 10. Entry marker on the correct candle
+            if (entryPrice != null && trade.trade_date) {
+                // trade_date is 'YYYY-MM-DD'; convert to Unix seconds (UTC noon)
+                const entryMs = new Date(trade.trade_date + 'T12:00:00Z').getTime();
+                const entryTs = Math.floor(entryMs / 1000);
+                // Find the candle at or after the entry date
+                const target = candles.find(c => c.time >= entryTs) || candles[candles.length - 1];
+                if (target) {
+                    candleSeries.setMarkers([{
+                        time:     target.time,
+                        position: isLong ? 'belowBar' : 'aboveBar',
+                        color:    '#5B7CFF',
+                        shape:    isLong ? 'arrowUp' : 'arrowDown',
+                        text:     (isLong ? 'Long' : 'Short') + ' $' + parseFloat(entryPrice).toFixed(2),
+                        size:     1.5,
+                    }]);
+                }
+            }
+
+            // 11. Fit all data, then nudge the view to show the entry area
+            chart.timeScale().fitContent();
+
+            loading.style.display = 'none';
         }
 
         function closeChartModal() {
             document.getElementById('chartModal').classList.remove('active');
             document.body.style.overflow = '';
-            // Remove the widget container so the next open starts fresh
             setTimeout(() => {
-                const prev = document.getElementById('tvChartWrap').querySelector('.tv-widget-container');
+                if (_lwChartInstance) { try { _lwChartInstance.remove(); } catch(e){} _lwChartInstance = null; }
+                const prev = document.getElementById('tvChartWrap').querySelector('.lw-chart-container');
                 if (prev) prev.remove();
             }, 350);
         }
@@ -3164,6 +3255,50 @@ def get_trade_current_price(trade_id):
         return jsonify({'success': True, 'price': current_price})
     except Exception as e:
         logger.error(f"Error fetching current price for trade {trade_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/chart-data/<ticker>', methods=['GET'])
+@login_required
+def get_chart_data(ticker):
+    """Return 1-year of daily OHLCV candles from Yahoo Finance for the chart viewer."""
+    import requests as _req
+    try:
+        url = f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}'
+        params  = {'interval': '1d', 'range': '1y'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        r = _req.get(url, params=params, headers=headers, timeout=15)
+        r.raise_for_status()
+        data   = r.json()
+        result = data.get('chart', {}).get('result', [{}])[0]
+        if not result:
+            return jsonify({'success': False, 'error': 'No data returned from Yahoo Finance'}), 404
+
+        timestamps = result.get('timestamp', [])
+        quote = result.get('indicators', {}).get('quote', [{}])[0]
+        opens  = quote.get('open',  [])
+        highs  = quote.get('high',  [])
+        lows   = quote.get('low',   [])
+        closes = quote.get('close', [])
+
+        candles = []
+        for i, ts in enumerate(timestamps):
+            o = opens[i]  if i < len(opens)  else None
+            h = highs[i]  if i < len(highs)  else None
+            l = lows[i]   if i < len(lows)   else None
+            c = closes[i] if i < len(closes) else None
+            if None in (o, h, l, c):
+                continue
+            candles.append({
+                'time':  int(ts),
+                'open':  round(float(o), 6),
+                'high':  round(float(h), 6),
+                'low':   round(float(l), 6),
+                'close': round(float(c), 6),
+            })
+
+        return jsonify({'success': True, 'candles': candles})
+    except Exception as e:
+        logger.error(f'Chart data error for {ticker}: {e}')
         return jsonify({'success': False, 'error': str(e)}), 500
         
 # Initialize database schema in background
