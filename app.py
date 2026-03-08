@@ -590,8 +590,7 @@ def dashboard():
                     msgEl.innerHTML = '<div class="message success">✓ Alert created successfully!</div>';
                     tickerInput.value = '';
                     document.getElementById('targetPrice').value = '';
-                    document.getElementById('alertType').value = 'price';
-                    toggleAlertFields();  // Reset to price view
+                    switchAlertType('price');  // Reset to price view
                     selectedTicker = null;
                     loadAlerts();
                 } else {
@@ -723,7 +722,7 @@ def dashboard():
         console.log('starting initialize')
         loadAlerts();
         loadTickers();
-        setInterval(loadAlerts, 10000); // Refresh every 30 seconds
+        setInterval(loadAlerts, 10000); // Refresh every 10 seconds
         // Premium UI Functions
         function switchAlertType(type) {
         document.querySelectorAll('.toggle-option').forEach(btn => {
@@ -1524,11 +1523,14 @@ def bitcoin_scanner_page():
                     
                     const data = await res.json();
                     
-                    if (data.success && data.transactions.length > 0) {
-                        displayResults(data.transactions);
-                    } else {
+                    if (!data.success) {
+                        resultsEl.innerHTML = `<div class="empty">Scan failed: ${data.error || 'Unknown error'}</div>`;
+                        document.getElementById('stats').style.display = 'none';
+                    } else if (data.transactions.length === 0) {
                         resultsEl.innerHTML = '<div class="empty">No transactions found matching your criteria.</div>';
                         document.getElementById('stats').style.display = 'none';
+                    } else {
+                        displayResults(data.transactions);
                     }
                 } catch (error) {
                     resultsEl.innerHTML = '<div class="empty">Error scanning blockchain. Please try again.</div>';
@@ -1592,9 +1594,6 @@ def bitcoin_scanner_page():
                 window.location.href = '/login';
             }
             // Initialize
-            // loadTickers();
-            // loadAlerts();
-            setInterval(loadAlerts, 30000); // Refresh every 30 seconds
         </script>
     </body>
     </html>
@@ -2550,11 +2549,16 @@ def portfolio_page():
 
         let _allocChart = null;
 
+        function normalizeTicker(ticker) {
+            // Strip crypto suffixes like -USD, -USDT, -BTC so BTC-USD matches BTC
+            return ticker.toUpperCase().replace(/-(USD|USDT|BTC|ETH)$/, '');
+        }
+
         function renderAllocationChart() {
             const openTrades = allTrades.filter(t => !t.is_closed);
             const buckets = {};
             openTrades.forEach(t => {
-                const cat = TICKER_CATEGORY[t.ticker.toUpperCase()] || 'Other';
+                const cat = TICKER_CATEGORY[normalizeTicker(t.ticker)] || 'Other';
                 buckets[cat] = (buckets[cat] || 0) + parseFloat(t.position_size || 0);
             });
             // Add uninvested cash
@@ -4253,21 +4257,6 @@ def session_break_overlay():
             LIMIT 10
             """,
             (current_user.id, symbol),
-            fetchone=False,
-        )
-        # rows is None when fetchone=False and no fetchall – call with fetchall
-        rows = db.execute(
-            """
-            SELECT session_type, session_date, state, direction,
-                   session_high, session_low,
-                   first_break_ts, first_break_level,
-                   confirm_break_ts, triggered_at
-            FROM session_break_state
-            WHERE user_id = %s AND symbol = %s
-            ORDER BY session_date DESC, session_type
-            LIMIT 10
-            """,
-            (current_user.id, symbol),
             fetchall=True,
         )
         sessions = []
@@ -4319,7 +4308,7 @@ def session_break_debug_page():
     <a href="/forex-sessions" class="top-nav-link active">🌐 Forex</a>
     <a href="/fundamentals" class="top-nav-link">📋 Fundamentals</a>
     <span class="top-nav-spacer"></span>
-    <button class="top-nav-logout" onclick="window.location='/logout'">Sign out</button>
+    <button class="top-nav-logout" onclick="logout()">Sign out</button>
   </nav>
   <div class="debug-content">
     <div style="margin-bottom:20px;display:flex;align-items:center;gap:16px;">
@@ -4420,6 +4409,11 @@ function stateColor(s) {
 
 load();
 setInterval(load, 30000);
+
+async function logout() {
+  await fetch('/api/logout');
+  window.location.href = '/login';
+}
 </script>
 </body>
 </html>"""

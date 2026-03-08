@@ -162,7 +162,7 @@ _TAB_HTML = """
   <a href="/alerts/history" class="top-nav-link">📜 History</a>
   <a href="/radar" class="top-nav-link">🚨 Radar</a>
   <a href="/bitcoin-scanner" class="top-nav-link">₿ Bitcoin</a>
-  <a href="/forex-amd" class="top-nav-link">🌐 Forex</a>
+  <a href="/forex-sessions" class="top-nav-link">🌐 Forex</a>
   <a href="/fundamentals" class="top-nav-link active">📋 Fundamentals</a>
   <span class="top-nav-spacer"></span>
   <button class="top-nav-logout" onclick="logout()">Sign out</button>

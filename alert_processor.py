@@ -249,18 +249,6 @@ class AlertProcessor:
                     Alert.delete_by_id(alert['id'])
                     logger.info(f"🗑️ Alert #{alert['id']} deleted after trigger")
                     
-                    # Mark MA alert as crossed to prevent re-triggering
-                    if alert_type == 'ma':
-                        try:
-                            db.execute("""
-                                UPDATE alerts 
-                                SET crossed = TRUE 
-                                WHERE id = %s
-                            """, (alert['id'],))
-                            logger.info(f"✓ Marked MA alert #{alert['id']} as crossed")
-                        except Exception as e:
-                            logger.error(f"❌ Failed to mark alert as crossed: {e}")
-                    
                 except Exception as e:
                     logger.error(f"❌ Error processing triggered alert {alert['id']}: {e}")
         

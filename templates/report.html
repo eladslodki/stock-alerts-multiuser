@@ -1002,15 +1002,17 @@
   {% if report.cover.kpis %}
   <div class="kpi-row">
     {% for kpi in report.cover.kpis %}
+    {% if kpi.value is not none and kpi.value != 'None' and kpi.value != '' %}
     <div class="kpi-card">
       <span class="kpi-label">{{ kpi.label }}</span>
       <span class="kpi-value">{{ kpi.value }}</span>
-      {% if kpi.change %}
+      {% if kpi.change and kpi.change != 'None' %}
       <span class="kpi-change {{ 'pos' if kpi.positive else 'neg' }}">
         {{ kpi.change }}
       </span>
       {% endif %}
     </div>
+    {% endif %}
     {% endfor %}
   </div>
   {% endif %}
@@ -1044,6 +1046,60 @@
   {# --- MAIN CONTENT --- #}
   <main class="report-main">
     {% for section in report.sections %}
+    {#
+      Skip sections that have no renderable content.
+      A section is considered empty if:
+        - overview: no narrative
+        - metrics_table: no rows with non-None current values
+        - segment_bars: no segments
+        - profitability_cards: no cards with non-None values and no donut
+        - cash_flow_timeline: no items with non-None values
+        - balance_sheet_cards: no assets, liabilities, or equity
+        - guidance: no narrative and no items
+        - risk_factors: no risks
+        - management_quotes: no quotes
+        - analyst_takeaways: no rating and no cards
+        For any other type, always show.
+    #}
+    {% set _skip = false %}
+    {% if section.type == 'overview' and not section.narrative and not section.insights %}
+      {% set _skip = true %}
+    {% elif section.type == 'metrics_table' %}
+      {% set _has_row = false %}
+      {% for row in (section.rows or []) if row.current is not none and row.current != 'None' and row.current != '' %}
+        {% set _has_row = true %}
+      {% endfor %}
+      {% if not _has_row and not section.insights %}{% set _skip = true %}{% endif %}
+    {% elif section.type == 'segment_bars' and not section.segments and not section.insights %}
+      {% set _skip = true %}
+    {% elif section.type == 'profitability_cards' %}
+      {% set _has_card = false %}
+      {% for card in (section.cards or []) if card.value is not none and card.value != 'None' and card.value != '' %}
+        {% set _has_card = true %}
+      {% endfor %}
+      {% if not _has_card and not section.donut and not section.insights %}{% set _skip = true %}{% endif %}
+    {% elif section.type == 'cash_flow_timeline' %}
+      {% set _has_item = false %}
+      {% for item in (section.get('items', []) if section.get else (section['items'] or [])) if item.value is not none and item.value != 'None' and item.value != '' %}
+        {% set _has_item = true %}
+      {% endfor %}
+      {% if not _has_item and not section.insights %}{% set _skip = true %}{% endif %}
+    {% elif section.type == 'balance_sheet_cards' %}
+      {% set _has_bs = false %}
+      {% for row in (section.assets or []) if row.value is not none and row.value != 'None' and row.value != '' %}{% set _has_bs = true %}{% endfor %}
+      {% for row in (section.liabilities or []) if row.value is not none and row.value != 'None' and row.value != '' %}{% set _has_bs = true %}{% endfor %}
+      {% if section.equity and section.equity != 'None' and section.equity != '' %}{% set _has_bs = true %}{% endif %}
+      {% if not _has_bs and not section.insights %}{% set _skip = true %}{% endif %}
+    {% elif section.type == 'guidance' and not section.narrative and not section.get('items', []) and not section.insights %}
+      {% set _skip = true %}
+    {% elif section.type == 'risk_factors' and not section.risks and not section.insights %}
+      {% set _skip = true %}
+    {% elif section.type == 'management_quotes' and not section.quotes and not section.insights %}
+      {% set _skip = true %}
+    {% elif section.type == 'analyst_takeaways' and not section.rating and not section.ratingHebrew and not section.cards and not section.insights %}
+      {% set _skip = true %}
+    {% endif %}
+    {% if not _skip %}
     <section id="{{ section.id }}" class="report-section">
 
       {# Section header #}
@@ -1066,7 +1122,11 @@
            s2 — METRICS TABLE
            ============================================================ #}
         {% elif section.type == 'metrics_table' %}
-          {% if section.rows %}
+          {% set visible_rows = [] %}
+          {% for row in section.rows if row.current is not none and row.current != 'None' and row.current != '' %}
+            {% set _ = visible_rows.append(row) %}
+          {% endfor %}
+          {% if visible_rows %}
           <table class="metrics-table">
             <thead>
               <tr>
@@ -1077,13 +1137,13 @@
               </tr>
             </thead>
             <tbody>
-              {% for row in section.rows %}
+              {% for row in visible_rows %}
               <tr>
                 <td>{{ row.metric }}</td>
                 <td>{{ row.current }}</td>
-                <td>{{ row.prior if row.prior else '—' }}</td>
+                <td>{{ row.prior if row.prior and row.prior != 'None' else '—' }}</td>
                 <td>
-                  {% if row.change %}
+                  {% if row.change and row.change != 'None' %}
                   <span class="change-pill {{ 'pos' if row.positive else 'neg' }}">
                     {{ row.change }}
                   </span>
@@ -1142,11 +1202,11 @@
             {# Metric cards #}
             {% if section.cards %}
             <div class="prof-cards">
-              {% for card in section.cards %}
+              {% for card in section.cards if card.value is not none and card.value != 'None' and card.value != '' %}
               <div class="prof-card">
                 <div class="prof-card-left">
                   <span class="prof-card-label">{{ card.label }}</span>
-                  {% if card.subtext %}
+                  {% if card.subtext and card.subtext != 'None' %}
                   <span class="prof-card-subtext">{{ card.subtext }}</span>
                   {% endif %}
                 </div>
@@ -1197,7 +1257,7 @@
         {% elif section.type == 'cash_flow_timeline' %}
           {% if section['items'] %}
           <div class="cf-list">
-            {% for item in section['items'] %}
+            {% for item in section['items'] if item.value is not none and item.value != 'None' and item.value != '' %}
             {% if item.positive is not none %}
               {% if item.positive == true %}{% set cf_class = 'pos' %}
               {% elif item.positive == false %}{% set cf_class = 'neg' %}
@@ -1225,7 +1285,7 @@
             {% if section.assets %}
             <div class="bs-panel">
               <div class="bs-panel-header assets">נכסים</div>
-              {% for row in section.assets %}
+              {% for row in section.assets if row.value is not none and row.value != 'None' and row.value != '' %}
               <div class="bs-row">
                 <span class="bs-row-label">{{ row.label }}</span>
                 <span class="bs-row-value">{{ row.value }}</span>
@@ -1238,7 +1298,7 @@
             {% if section.liabilities %}
             <div class="bs-panel">
               <div class="bs-panel-header liabilities">התחייבויות</div>
-              {% for row in section.liabilities %}
+              {% for row in section.liabilities if row.value is not none and row.value != 'None' and row.value != '' %}
               <div class="bs-row">
                 <span class="bs-row-label">{{ row.label }}</span>
                 <span class="bs-row-value">{{ row.value }}</span>
@@ -1248,7 +1308,7 @@
             {% endif %}
 
             {# Equity bar spans full width #}
-            {% if section.equity %}
+            {% if section.equity and section.equity != 'None' and section.equity != '' %}
             <div class="bs-equity-bar">
               <span class="bs-equity-label">הון עצמי כולל</span>
               <span class="bs-equity-value">{{ section.equity }}</span>
@@ -1382,6 +1442,7 @@
 
       </div>{# /section-body #}
     </section>
+    {% endif %}{# /if not _skip #}
     {% endfor %}
 
     {# ================================================================
