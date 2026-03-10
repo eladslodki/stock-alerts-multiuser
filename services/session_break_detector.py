@@ -7,8 +7,12 @@ Detects ICT-style "Session Liquidity Sweep" setups:
   3. Additional candles continue to extend the sweep extreme (first_sweep_level
      = the HIGHEST wick for UP, LOWEST wick for DOWN across the *entire* sweep
      move – not just the first breakout candle).
-  4. Sweep ends (re-entry) when a later candle wicks back inside the session
-     level: low <= session_high (UP) or high >= session_low (DOWN).
+  4. Sweep ends (re-entry) when a LATER candle that is NOT extending the sweep
+     extreme wicks back inside the session level.
+     - UP:   candle has high <= current sweep_extreme AND low  <= session_high
+     - DOWN: candle has low  >= current sweep_extreme AND high >= session_low
+     A candle that simultaneously pushes the sweep to a new extreme and crosses
+     back is still part of the sweep move – it does NOT count as re-entry.
   5. Confirmation: a strictly-later candle breaks the locked first_sweep_level.
 
 Data source : TradingView PEPPERSTONE – M5 candles (OHLC, UTC open time)
@@ -198,15 +202,25 @@ def _compute_one_direction(
     if sweep_start_ts is None:
         return {"no_break": True}
 
-    # STATE 3: Aggregate the extreme across the entire sweep until re-entry
+    # STATE 3: Aggregate the extreme across the entire sweep until re-entry.
+    # KEY: re-entry is only allowed once the sweep has PEAKED – i.e. the
+    # candle that crosses back must NOT be extending the sweep extreme.
+    # A candle that pushes to a new high (UP) / new low (DOWN) while also
+    # touching the session level is still part of the sweep move.
     sweep_end_ts: Optional[datetime] = None
     if direction == "UP":
         sweep_extreme: float = -float("inf")
         for c in post_candles:
             if c["timestamp"] < sweep_start_ts:
                 continue
+            is_new_extreme = c["high"] > sweep_extreme
             sweep_extreme = max(sweep_extreme, c["high"])
-            if c["timestamp"] > sweep_start_ts and c["low"] <= session_level:
+            # Re-entry requires: strictly later than sweep start, sweep has
+            # peaked (no new extreme on this candle), and price is back below
+            # session_high.
+            if (c["timestamp"] > sweep_start_ts
+                    and not is_new_extreme
+                    and c["low"] <= session_level):
                 sweep_end_ts = c["timestamp"]
                 break
     else:  # DOWN
@@ -214,8 +228,14 @@ def _compute_one_direction(
         for c in post_candles:
             if c["timestamp"] < sweep_start_ts:
                 continue
+            is_new_extreme = c["low"] < sweep_extreme
             sweep_extreme = min(sweep_extreme, c["low"])
-            if c["timestamp"] > sweep_start_ts and c["high"] >= session_level:
+            # Re-entry requires: strictly later than sweep start, sweep has
+            # bottomed (no new extreme on this candle), and price is back above
+            # session_low.
+            if (c["timestamp"] > sweep_start_ts
+                    and not is_new_extreme
+                    and c["high"] >= session_level):
                 sweep_end_ts = c["timestamp"]
                 break
 
@@ -379,10 +399,12 @@ def compute_sweep_result(
         sweep_start_ts = first_down_ts
 
     # ── STATE 3: IN_SWEEP – aggregate the extreme across the whole sweep ─────
-    # KEY FIX: first_sweep_level = MAX(high) for UP, MIN(low) for DOWN,
-    # computed across ALL candles from sweep_start until re-entry.
-    # Re-entry: a LATER candle (ts > sweep_start_ts) whose low <= session_high (UP)
-    #           or high >= session_low (DOWN).
+    # first_sweep_level = MAX(high) for UP, MIN(low) for DOWN across ALL
+    # candles from sweep_start until re-entry.
+    # Re-entry requires a candle that is STRICTLY LATER than sweep_start and
+    # does NOT push the sweep to a new extreme AND crosses back inside the
+    # session level.  A candle that simultaneously extends the extreme and
+    # crosses the session level is still part of the sweep – not a re-entry.
     sweep_end_ts: Optional[datetime] = None
 
     if direction == "UP":
@@ -390,9 +412,13 @@ def compute_sweep_result(
         for c in post_candles:
             if c["timestamp"] < sweep_start_ts:
                 continue                        # strictly before sweep – skip
+            is_new_extreme = c["high"] > sweep_high
             sweep_high = max(sweep_high, c["high"])
-            # Re-entry check: strictly after sweep_start_ts
-            if c["timestamp"] > sweep_start_ts and c["low"] <= session_high:
+            # Re-entry: strictly after start, sweep has peaked (no new extreme),
+            # price crosses back below session_high.
+            if (c["timestamp"] > sweep_start_ts
+                    and not is_new_extreme
+                    and c["low"] <= session_high):
                 sweep_end_ts = c["timestamp"]
                 break
         first_sweep_level = sweep_high          # locked extreme of entire sweep
@@ -444,9 +470,13 @@ def compute_sweep_result(
         for c in post_candles:
             if c["timestamp"] < sweep_start_ts:
                 continue
+            is_new_extreme = c["low"] < sweep_low
             sweep_low = min(sweep_low, c["low"])
-            # Re-entry check: strictly after sweep_start_ts
-            if c["timestamp"] > sweep_start_ts and c["high"] >= session_low:
+            # Re-entry: strictly after start, sweep has bottomed (no new extreme),
+            # price crosses back above session_low.
+            if (c["timestamp"] > sweep_start_ts
+                    and not is_new_extreme
+                    and c["high"] >= session_low):
                 sweep_end_ts = c["timestamp"]
                 break
         first_sweep_level = sweep_low           # locked extreme of entire sweep
