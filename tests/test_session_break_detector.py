@@ -348,26 +348,35 @@ class TestFirstSweepLevelIsExtreme(unittest.TestCase):
         self.assertTrue(result.get("confirmed"))
         self.assertAlmostEqual(result["confirm_break_level"], 1.0855)
 
-    def test_reentry_candle_high_included_in_up_sweep_extreme(self):
+    def test_new_extreme_candle_crossing_back_does_not_trigger_reentry(self):
         """
-        If the re-entry candle (low <= session_high) itself has the highest
-        wick of the sweep, first_sweep_level must include that candle's high.
+        A candle that simultaneously pushes to a new sweep high AND has its low
+        cross back below session_high is still part of the sweep move.
+        Re-entry must NOT be marked on such a candle; only after the sweep has
+        truly peaked should the first non-extreme candle that crosses back count.
         """
         ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
         post = [
             make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.1010, low=1.1002),
             make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1018, low=1.1005),
-            # Re-entry candle: low=1.0995 <= 1.1000, but high=1.1040 is the real extreme
+            # Spike candle: new extreme (1.1040 > 1.1018) AND crosses back (low=1.0995)
+            # → still IN_SWEEP, must NOT be a re-entry
             make_candle(ASIA_END_UTC + timedelta(minutes=15), high=1.1040, low=1.0995),
-            # Confirm
-            make_candle(ASIA_END_UTC + timedelta(minutes=20), high=1.1045, low=1.1010),
+            # This candle does NOT make a new extreme (1.1035 < 1.1040) and
+            # crosses back → valid RE-ENTRY here, first_sweep_level=1.1040
+            make_candle(ASIA_END_UTC + timedelta(minutes=20), high=1.1035, low=1.0990),
+            # Confirm: high > first_sweep_level=1.1040
+            make_candle(ASIA_END_UTC + timedelta(minutes=25), high=1.1045, low=1.1010),
         ]
         result = compute_sweep_result(ses, post)
 
-        # The re-entry candle (t+15) contributes its high=1.1040 to sweep_high
+        # Re-entry must be at t+20, not t+15
+        self.assertEqual(result["sweep_end_ts"], ASIA_END_UTC + timedelta(minutes=20),
+                         "Re-entry must not fire on the spike candle that made a new extreme")
+        # first_sweep_level is the peak across the entire sweep = 1.1040
         self.assertAlmostEqual(result["first_sweep_level"], 1.1040)
-        self.assertEqual(result["sweep_end_ts"], ASIA_END_UTC + timedelta(minutes=15))
         self.assertTrue(result.get("confirmed"))
+        self.assertAlmostEqual(result["confirm_break_level"], 1.1045)
 
     def test_single_candle_sweep_and_reentry_with_later_confirm(self):
         """
@@ -395,6 +404,95 @@ class TestFirstSweepLevelIsExtreme(unittest.TestCase):
         self.assertAlmostEqual(result["first_sweep_level"], 1.1050)
         self.assertTrue(result.get("confirmed"))
         self.assertEqual(result["confirm_break_ts"], t_sweep + timedelta(minutes=10))
+
+
+# ---------------------------------------------------------------------------
+# D3. Premature re-entry fix: candle extending sweep + crossing back ≠ re-entry
+# ---------------------------------------------------------------------------
+
+class TestPrematurReentryFix(unittest.TestCase):
+    """
+    Regression tests for the re-entry logic fix.
+
+    Rule: a candle that simultaneously pushes the sweep extreme to a new level
+    AND crosses back through the session level is still IN the sweep move.
+    Re-entry is only valid when a candle does NOT extend the extreme.
+    """
+
+    def test_up_spike_candle_not_reentry(self):
+        """
+        Single spike candle: new extreme + crosses back in one bar.
+        Must stay IN_SWEEP, not be counted as re-entry.
+        """
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        post = [
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.1015, low=1.1002),
+            # Spike: high=1.1050 (new extreme), low=1.0980 (crosses back) – still IN_SWEEP
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1050, low=1.0980),
+        ]
+        result = compute_sweep_result(ses, post)
+        self.assertFalse(result.get("reentered"),
+                         "Spike candle making new extreme must not trigger re-entry")
+        self.assertAlmostEqual(result["first_sweep_level"], 1.1050)
+
+    def test_down_spike_candle_not_reentry(self):
+        """
+        DOWN version: single spike candle – new extreme + crosses back in one bar.
+        """
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        post = [
+            make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.0895, low=1.0880),
+            # Spike: low=1.0840 (new extreme), high=1.0920 (crosses back) – still IN_SWEEP
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.0920, low=1.0840),
+        ]
+        result = compute_sweep_result(ses, post)
+        self.assertFalse(result.get("reentered"),
+                         "Spike candle making new extreme must not trigger re-entry")
+        self.assertAlmostEqual(result["first_sweep_level"], 1.0840)
+
+    def test_up_reentry_only_after_peak(self):
+        """
+        Multiple candles extend the sweep.  Re-entry must only fire on the
+        first candle that does NOT make a new extreme but crosses back.
+        """
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        t = ASIA_END_UTC
+        post = [
+            make_candle(t + timedelta(minutes=5),  high=1.1010, low=1.1002),   # sweep start
+            make_candle(t + timedelta(minutes=10), high=1.1020, low=1.0995),   # new extreme; low<session – still in sweep
+            make_candle(t + timedelta(minutes=15), high=1.1030, low=1.0990),   # new extreme; low<session – still in sweep
+            # Now sweep has peaked; this candle is NOT a new extreme and crosses back
+            make_candle(t + timedelta(minutes=20), high=1.1025, low=1.0985),   # valid RE-ENTRY
+            make_candle(t + timedelta(minutes=25), high=1.1035, low=1.1005),   # confirm
+        ]
+        result = compute_sweep_result(ses, post)
+        self.assertTrue(result.get("reentered"))
+        self.assertEqual(result["sweep_end_ts"], t + timedelta(minutes=20),
+                         "Re-entry must only fire after the sweep has peaked")
+        self.assertAlmostEqual(result["first_sweep_level"], 1.1030)
+        self.assertTrue(result.get("confirmed"))
+        self.assertAlmostEqual(result["confirm_break_level"], 1.1035)
+
+    def test_down_reentry_only_after_bottom(self):
+        """
+        DOWN version: multiple new lows before re-entry.
+        """
+        ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
+        t = ASIA_END_UTC
+        post = [
+            make_candle(t + timedelta(minutes=5),  high=1.0895, low=1.0880),   # sweep start
+            make_candle(t + timedelta(minutes=10), high=1.0920, low=1.0865),   # new extreme; high>session – still in sweep
+            make_candle(t + timedelta(minutes=15), high=1.0910, low=1.0850),   # new extreme; high>session – still in sweep
+            # Sweep has bottomed; not a new extreme, crosses back → valid RE-ENTRY
+            make_candle(t + timedelta(minutes=20), high=1.0905, low=1.0860),   # valid RE-ENTRY
+            make_candle(t + timedelta(minutes=25), high=1.0900, low=1.0845),   # confirm
+        ]
+        result = compute_sweep_result(ses, post)
+        self.assertTrue(result.get("reentered"))
+        self.assertEqual(result["sweep_end_ts"], t + timedelta(minutes=20))
+        self.assertAlmostEqual(result["first_sweep_level"], 1.0850)
+        self.assertTrue(result.get("confirmed"))
+        self.assertAlmostEqual(result["confirm_break_level"], 1.0845)
 
 
 # ---------------------------------------------------------------------------
@@ -468,16 +566,19 @@ class TestConfirmRequiresStrictlyLaterCandle(unittest.TestCase):
 
     def test_candle_at_sweep_end_ts_does_not_confirm(self):
         """
-        If a candle has the same timestamp as sweep_end_ts, it cannot be the
-        confirm candle even if its high > first_sweep_level.
+        The re-entry candle (sweep_end_ts) cannot also be the confirm candle.
+        Confirmation requires a STRICTLY LATER candle.
+
+        Scenario: sweep peaks at 1.1025, then a non-extreme candle crosses back
+        (re-entry at t+15).  No strictly-later candle exists → not confirmed.
         """
         ses = asia_session_candles(session_high=1.1000, session_low=1.0900)
         t_sweep_end = ASIA_END_UTC + timedelta(minutes=15)
         post = [
             make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.1010, low=1.1002),
-            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1020, low=1.1005),
-            # Re-entry AND high > sweep_level – but this is sweep_end candle, not confirm
-            make_candle(t_sweep_end, high=1.1025, low=1.0995),
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1025, low=1.1003),
+            # Re-entry: high=1.1020 < 1.1025 (no new extreme), low=1.0995<=1.1000
+            make_candle(t_sweep_end, high=1.1020, low=1.0995),
         ]
         result = compute_sweep_result(ses, post)
 
@@ -493,10 +594,11 @@ class TestConfirmRequiresStrictlyLaterCandle(unittest.TestCase):
         t_confirm  = ASIA_END_UTC + timedelta(minutes=20)
         post = [
             make_candle(ASIA_END_UTC + timedelta(minutes=5),  high=1.1010, low=1.1002),
-            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1020, low=1.1005),
-            # Re-entry
-            make_candle(t_reentry, high=1.1025, low=1.0995),
-            # Confirm – strictly later
+            # Sweep peaks here at 1.1025
+            make_candle(ASIA_END_UTC + timedelta(minutes=10), high=1.1025, low=1.1003),
+            # Re-entry: high=1.1020 < 1.1025 (no new extreme), low=1.0995<=1.1000
+            make_candle(t_reentry, high=1.1020, low=1.0995),
+            # Confirm – strictly later: high=1.1030 > first_sweep_level=1.1025
             make_candle(t_confirm, high=1.1030, low=1.0998),
         ]
         result = compute_sweep_result(ses, post)
