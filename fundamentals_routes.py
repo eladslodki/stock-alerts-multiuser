@@ -95,7 +95,9 @@ _TAB_HTML = """
   <style>
     /* Fundamentals page — minimal page-specific styles using theme vars */
     .page-wrap { max-width: 900px; margin: 0 auto; padding: calc(var(--nav-h) + 32px) 24px 48px; }
-    .search-row { display: flex; gap: var(--sp-3); margin-bottom: var(--sp-6); }
+    .search-row { display: flex; gap: var(--sp-3); margin-bottom: var(--sp-6); align-items: center; }
+    .search-row .form-input { flex: 1; min-width: 0; width: auto; }
+    .search-row .btn { flex-shrink: 0; width: auto; }
     .filings-section { display: none; }
     .filings-header { font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: var(--sp-3); }
     .filing-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; background: var(--bg-card); border: 1px solid var(--border-card); border-radius: var(--r-md); margin-bottom: var(--sp-2); transition: border-color .2s; }
