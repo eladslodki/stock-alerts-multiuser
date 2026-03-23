@@ -239,6 +239,7 @@ def replay_sweep(
                 continue
 
             prev_extreme  = sweep_extreme
+            is_new_extreme = c["high"] > sweep_extreme
             sweep_extreme = max(sweep_extreme, c["high"])
             changed       = sweep_extreme != prev_extreme
 
@@ -252,8 +253,12 @@ def replay_sweep(
                     "extreme_changed": changed,
                 })
 
-            # Re-entry: strictly after sweep_start_ts, low <= session_high
-            if c["timestamp"] > sweep_start_ts and c["low"] <= session_high:
+            # Re-entry: strictly after sweep_start_ts, sweep has peaked
+            # (candle did NOT set a new extreme), and low crosses back below
+            # session_high.  A candle extending the extreme is still IN_SWEEP.
+            if (c["timestamp"] > sweep_start_ts
+                    and not is_new_extreme
+                    and c["low"] <= session_high):
                 first_sweep_level = sweep_extreme
                 sweep_end_ts      = c["timestamp"]
                 events.append({
@@ -274,6 +279,7 @@ def replay_sweep(
                 continue
 
             prev_extreme  = sweep_extreme
+            is_new_extreme = c["low"] < sweep_extreme
             sweep_extreme = min(sweep_extreme, c["low"])
             changed       = sweep_extreme != prev_extreme
 
@@ -287,8 +293,12 @@ def replay_sweep(
                     "extreme_changed": changed,
                 })
 
-            # Re-entry: strictly after sweep_start_ts, high >= session_low
-            if c["timestamp"] > sweep_start_ts and c["high"] >= session_low:
+            # Re-entry: strictly after sweep_start_ts, sweep has bottomed
+            # (candle did NOT set a new extreme), and high crosses back above
+            # session_low.  A candle extending the extreme is still IN_SWEEP.
+            if (c["timestamp"] > sweep_start_ts
+                    and not is_new_extreme
+                    and c["high"] >= session_low):
                 first_sweep_level = sweep_extreme
                 sweep_end_ts      = c["timestamp"]
                 events.append({
